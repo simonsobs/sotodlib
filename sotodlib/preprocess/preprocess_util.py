@@ -1019,7 +1019,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
     return dbexist
 
 
-def cleanup_archive(configs, logger=None):
+def cleanup_archive(configs, logger=None, make_temp_h5=False):
     """This function finds the final preprocess archive file and deletes any
     datasets that are not found in the preprocess database.  This helps avoid
     cases where the database writing was interrupted in a previous run.
@@ -1030,6 +1030,9 @@ def cleanup_archive(configs, logger=None):
         Filepath or dictionary containing the preprocess configuration file.
     logger : PythonLogger
         Optional. Logger object or None will generate a new one.
+    make_temp_h5 : bool
+        Optional.  Copy h5 archives to temporary files to prevent corruption from metadata sync.
+        For use on site-computing.
     """
 
     if type(configs) == str:
@@ -1056,7 +1059,7 @@ def cleanup_archive(configs, logger=None):
                               key=lambda t: t[0])[1]
 
             db_datasets = [d['dataset'] for d in db.inspect()]
-            with H5ContextManager(latest_file, mode="r+") as f:
+            with H5ContextManager(latest_file, mode="r+", make_temp_h5=make_temp_h5) as f:
                 keys = list(f.keys())
                 for key in keys:
                     if key not in db_datasets:
@@ -1126,7 +1129,7 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
 
 
 def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
-                           logger=None, remove=False):
+                           logger=None, remove=False, make_temp_h5=False):
     """This function checks if any temporary files exist from a preprocessing
      run and will either add them to the config policy file and create an entry
      in the manifest db by calling ``cleanup_mandb``.  If the file exists but
@@ -1150,6 +1153,9 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     remove : bool
         Optional. Default is False. Whether to remove a file if found.
         Used when ``overwrite`` is True in driving functions.
+    make_temp_h5 : bool
+        Optional.  Copy h5 archives to temporary files to prevent corruption from metadata sync.
+        For use on site-computing.
 
     Returns
     -------
@@ -1184,7 +1190,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             try:
                 if not remove:
                     cleanup_mandb(outputs_grp, (obs_id, g),
-                                  (None, None, None), configs, logger)
+                                  (None, None, None), configs, logger, make_temp_h5=make_temp_h5)
                 else:
                     # if we're overwriting, remove file so it will re-run
                     os.remove(outputs_grp['temp_file'])
@@ -1208,7 +1214,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
 
 def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
-                subdir='temp', remove=False):
+                subdir='temp', remove=False, make_temp_h5=False):
     """For a given obs id, this function will search the policy_dir directory
     if it exists for any files with that obsnum in their filename. If any are
     found, it will run save_group_and_cleanup for that obs id.
@@ -1230,6 +1236,9 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
     remove : bool
         Optional. Default is False. Whether to remove a file if found.
         Used when ``overwrite`` is True in driving functions.
+    make_temp_h5 : bool
+        Optional.  Copy h5 archives to temporary files to prevent corruption from metadata sync.
+        For use on site-computing.
     """
 
     if os.path.exists(policy_dir):
@@ -1241,7 +1250,8 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
         if found:
             errors = save_group_and_cleanup(obs_id, configs, context,
-                                           subdir=subdir, remove=remove)
+                                           subdir=subdir, remove=remove,
+                                           make_temp_h5=make_temp_h5)
 
             if errors[0] is not None:
                 with open(errlog, 'a') as f:
@@ -1252,7 +1262,8 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False,
                          save_proc_aman=True, compress=False,
-                         skip_missing=False, ignore_cfg_check=False):
+                         skip_missing=False, ignore_cfg_check=False,
+                         make_temp_h5=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -1302,6 +1313,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as the config
         used to create the existing init db when running ``multilayer_load_and_preprocess``.
+    make_temp_h5 : bool
+        Optional.  Copy h5 archives to temporary files to prevent corruption from metadata sync.
+        For use on site-computing.
 
     Returns
     -------
@@ -1470,7 +1484,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             if save_archive:
                 logger.info(f"Adding result to init db for {obs_id}: {group}")
                 cleanup_mandb(out_dict_init, (obs_id, group), (None, None, None),
-                              configs_init, logger=logger, overwrite=overwrite)
+                              configs_init, logger=logger, overwrite=overwrite,
+                              make_temp_h5=make_temp_h5)
         # Make init plots
         if make_lmsi_init:
             new_plots = os.path.join(configs_init["plot_dir"],
@@ -1539,7 +1554,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             if save_archive:
                 logger.info(f"Adding result to proc db for {obs_id}: {group}")
                 cleanup_mandb(out_dict_proc, (obs_id, group), (None, None, None),
-                              configs_proc, logger=logger, overwrite=overwrite)
+                              configs_proc, logger=logger, overwrite=overwrite,
+                              make_temp_h5=make_temp_h5)
         if 'valid_data' in aman.preprocess:
             aman.preprocess.move('valid_data', None)
         aman.preprocess.merge(proc_aman)
@@ -1562,7 +1578,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     return aman, out_dict_init, out_dict_proc, (None, None, None)
 
 
-def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False, db_manager=None):
+def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False,
+                  db_manager=None, make_temp_h5=False):
     """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
@@ -1601,6 +1618,9 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     db_manager : DbBatchManager, optional
         External database batch manager for optimized operations.
         If provided, uses the manager instead of creating individual connections.
+    make_temp_h5 : bool
+        Optional.  Copy h5 archives to temporary files to prevent corruption from metadata sync.
+        For use on site-computing.
     """
 
     if logger is None:
@@ -1628,8 +1648,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
 
         src_file = out_dict['temp_file']
 
-        with H5ContextManager(dest_file, mode='a') as f_dest:
-            with H5ContextManager(src_file, mode='r') as f_src:
+        with H5ContextManager(dest_file, mode='a', make_temp_h5=make_temp_h5) as f_dest:
+            with H5ContextManager(src_file, mode='r', make_temp_h5=make_temp_h5) as f_src:
                 for dts in f_src.keys():
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:
