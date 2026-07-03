@@ -568,7 +568,7 @@ def get_parser(parser=None):
         default=None
     )
     parser.add_argument(
-        '--make-temp',
+        '--use-h5-ctx',
         help="Use h5 context manager to prevent file corruption (for site-computing).",
         type=bool,
         default=True
