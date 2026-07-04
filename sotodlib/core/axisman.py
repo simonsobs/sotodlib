@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from collections import OrderedDict as odict
 
@@ -11,6 +12,8 @@ except ImportError:
 import so3g
 
 from .util import get_coindices
+
+logger = logging.getLogger(__name__)
 
 
 class AxisInterface:
@@ -635,7 +638,7 @@ class AxisManager:
     # Add and remove data while maintaining internal consistency.
 
     def wrap(self, name, data, axis_map=None,
-             overwrite=False, restrict_in_place=False):
+             overwrite=False, restrict_in_place=False, on_mismatch='warn'):
         """Add data into the AxisManager.
 
         Arguments:
@@ -661,6 +664,12 @@ class AxisManager:
             AxisManager may be modified and added, without a copy
             first.  This can be much faster, if there's no need to
             preserve the wrapped item.
+
+          on_mismatch (str): Policy when an axis of the new data
+            has the same name as, but different coverage than, an
+            existing axis: 'intersect', 'warn' (intersect, but log a
+            warning; default) or 'error' (raise ValueError, before
+            modifying anything).
 
         """
         if overwrite and (name in self._fields):
@@ -704,7 +713,8 @@ class AxisManager:
                 assign[index] = axis.name
         helper._fields[name] = data
         helper._assignments[name] = assign
-        return self.merge(helper, restrict_in_place=restrict_in_place)
+        return self.merge(helper, restrict_in_place=restrict_in_place,
+                          on_mismatch=on_mismatch)
 
     def wrap_new(self, name, shape=None, cls=None, **kwargs):
         """Create a new object and wrap it, with axes mapped.  The shape can
@@ -1042,9 +1052,12 @@ class AxisManager:
                         ax, False)
         return axes_out
 
-    def merge(self, *amans, restrict_in_place=False):
+    def merge(self, *amans, restrict_in_place=False, on_mismatch='warn'):
         """Merge the data from other AxisMangers into this one.  Axes with the
-        same name will be intersected.
+        same name will be intersected. The on_mismatch argument sets the policy
+        for axes that must be truncated (intersected) because amans share an
+        axis name but not its coverage: 'intersect', 'warn' (log a warning)
+        or 'error' (raise ValueError before modifying anything).
 
         If restrict_in_place=True, then the amans may be modified as
         they are added to the output objcet.  When that arg is False,
@@ -1064,6 +1077,28 @@ class AxisManager:
 
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
+
+        # Apply the axis-mismatch policy before modifying anything.
+        assert on_mismatch in ('intersect', 'warn', 'error')
+        if on_mismatch != 'intersect':
+            report = []
+            for src, aman in [('self', self)] + [
+                    ('merged[%i]' % i, a) for i, a in enumerate(amans)]:
+                for ax in aman._axes.values():
+                    if ax.count is None or ax.name not in axes_out:
+                        continue
+                    new_ax = axes_out[ax.name]
+                    if new_ax.count != ax.count:
+                        report.append(
+                            "axis '%s' of %s changes %s -> %s." % (
+                                ax.name, src, repr(ax), repr(new_ax)))
+            if report:
+                msg = ('Axis mismatch on merge/wrap causes truncation: '
+                       + '; '.join(report))
+                if on_mismatch == 'error':
+                    raise ValueError(msg)
+                logger.warning(msg)
+
         # Reduce the data in self, update our axes.
         self.restrict_axes(axes_out)
         # Import the other ones.
