@@ -16,6 +16,7 @@ from sotodlib.coords import pointing_model
 from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
+from sotodlib.tod_ops import downsample
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
@@ -471,6 +472,90 @@ def swap_archive(config, fpath):
     return tc
 
 
+def parse_downsample_cfg(cfg):
+    """Parse and validate the downsample config block
+    Returns
+    -------
+    factor : int
+        downsample factor
+    method : str
+        down sample method
+    """
+    if not isinstance(cfg, dict) or 'factor' not in cfg:
+        raise ValueError(f"downsample config must be a dict with a 'factor' "
+                         f"key, got {cfg!r}")
+    unknown = set(cfg) - {'factor', 'method'}
+    if unknown:
+        raise ValueError(f"downsample config has unknown keys {sorted(unknown)}")
+    factor = int(cfg['factor'])
+    if factor < 2:
+        raise ValueError(f"downsample factor must be >= 2, got {factor}")
+    return factor, cfg.get('method', 'slice')
+
+
+def apply_boundary_downsample(aman, cfg, logger=None):
+    """Apply the layer-boundary downsample described by config block cfg.
+    Returns new downsampled AxisManager.
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+    factor, method = parse_downsample_cfg(cfg)
+    logger.info(f"Downsampling samps by {factor} (method={method}): "
+                f"{aman.samps.count} -> {len(_downsample_indices(aman.samps.count, aman.samps.offset, factor))} samples")
+    return downsample.down_sample_aman(aman, factor, method=method)
+
+
+def downsample_cfg_aman(cfg):
+    """Build the small AxisManager recorded in the proc archive to document
+    how it was downsampled."""
+    factor, method = parse_downsample_cfg(cfg)
+    out = core.AxisManager()
+    out.wrap('factor', factor)
+    out.wrap('method', method)
+    out.wrap('phase', 'absolute')  # bump if the grid convention changes
+    return out
+
+
+def check_saved_downsample(preproc_aman, cfg, samps=None, logger=None):
+    """Validate the ``downsample`` config block against a loaded proc-layer
+    archive.  Raises ValueError on mismatch.
+
+    Two checks are performed:
+
+    1. The ``downsample_cfg`` record (factor / method / phase convention)
+       of proc archive must match ``cfg``.
+    2. If ``samps`` is given (the samps axis of the freshly downsampled
+       aman), the archive's samps axis must describe the same absolute
+       grid range: equal offset and count.  This catches phase-convention
+       drift and full-rate archives read with a downsample config, which
+       the config record alone cannot.
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+    factor, method = parse_downsample_cfg(cfg)
+    if 'downsample_cfg' not in preproc_aman:
+        logger.warning(
+            "Proc archive has no 'downsample_cfg' record; it may predate "
+            "the downsample feature. Skipping validation.")
+        return
+    saved = preproc_aman['downsample_cfg']
+    for key, val in [('factor', factor), ('method', method),
+                     ('phase', 'absolute')]:
+        if saved[key] != val:
+            raise ValueError(
+                f"downsample config mismatch with proc archive: "
+                f"{key} = {val!r} in config, {saved[key]!r} in archive")
+    if samps is not None and 'samps' in preproc_aman._axes:
+        arch = preproc_aman._axes['samps']
+        arch_offset = getattr(arch, 'offset', 0)
+        if arch_offset != samps.offset or arch.count != samps.count:
+            raise ValueError(
+                "downsampled samps axis mismatch with proc archive: "
+                f"local OffsetAxis({samps.count}@{samps.offset}) vs "
+                f"archive OffsetAxis({arch.count}@{arch_offset}). "
+                "The archive may use a different grid phase or factor.")
+
+
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None, logger=None):
     """Loads the metadata information for the Observation and runs through any
@@ -739,7 +824,23 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
             if stop_for_sims:
                 aman = out_amans_init[(len(pipe_init), 'last')]
+
+            # Layer boundary: the proc-layer archive is stored in the
+            # downsampled sampling, so aman (incl. aman.preprocess) must be
+            # downsampled before loading/merging the proc-layer metadata.
+            ds_cfg = configs_proc.get('downsample')
+            if ds_cfg is not None:
+                if stop_for_sims:
+                    raise NotImplementedError(
+                        'downsample is not supported with stop_for_sims yet')
+                aman = apply_boundary_downsample(
+                    aman, ds_cfg, logger=logger)
+
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
+            if ds_cfg is not None:
+                check_saved_downsample(
+                    proc_aman.preprocess, ds_cfg, samps=aman.samps,
+                    logger=logger)
 
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
@@ -958,7 +1059,18 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                 return aman
 
             logger.info("Running dependent pipeline")
+
+            # Layer boundary (see multilayer_load_and_preprocess).
+            ds_cfg = configs_proc.get('downsample')
+            if ds_cfg is not None:
+                aman = apply_boundary_downsample(
+                    aman, ds_cfg, logger=logger)
+
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
+            if ds_cfg is not None:
+                check_saved_downsample(
+                    proc_aman.preprocess, ds_cfg, samps=aman.samps,
+                    logger=logger)
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
@@ -1506,6 +1618,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                                        dets=dets,
                                                        subdir=proc_temp_subdir)
 
+            ds_cfg = configs_proc.get('downsample')
+            if ds_cfg is not None:
+                aman = apply_boundary_downsample(
+                    aman, ds_cfg, logger=logger)
+                proc_aman = apply_boundary_downsample(
+                    proc_aman, ds_cfg, logger=logger)
+
             pipe_proc = Pipeline(configs_proc["process_pipe"],
                                  plot_dir=configs_proc["plot_dir"], logger=logger)
             proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
@@ -1513,6 +1632,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                  plot_dir=configs_init["plot_dir"],
                                  logger=logger)
             proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
+            if ds_cfg is not None:
+                proc_aman.wrap('downsample_cfg',
+                               downsample_cfg_aman(ds_cfg))
 
             for init_field in init_fields:
                 if init_field in proc_aman:
