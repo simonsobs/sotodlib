@@ -16,7 +16,7 @@ from sotodlib.coords import pointing_model
 from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
-from sotodlib.tod_ops import downsample
+from sotodlib.tod_ops.downsample import downsample_aman
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
@@ -493,18 +493,6 @@ def parse_downsample_cfg(cfg):
     return factor, cfg.get('method', 'slice')
 
 
-def apply_boundary_downsample(aman, cfg, logger=None):
-    """Apply the layer-boundary downsample described by config block cfg.
-    Returns new downsampled AxisManager.
-    """
-    if logger is None:
-        logger = init_logger("preprocess")
-    factor, method = parse_downsample_cfg(cfg)
-    logger.info(f"Downsampling samps by {factor} (method={method}): "
-                f"{aman.samps.count} -> {len(_downsample_indices(aman.samps.count, aman.samps.offset, factor))} samples")
-    return downsample.down_sample_aman(aman, factor, method=method)
-
-
 def downsample_cfg_aman(cfg):
     """Build the small AxisManager recorded in the proc archive to document
     how it was downsampled."""
@@ -833,8 +821,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                 if stop_for_sims:
                     raise NotImplementedError(
                         'downsample is not supported with stop_for_sims yet')
-                aman = apply_boundary_downsample(
-                    aman, ds_cfg, logger=logger)
+                aman = downsample_aman(aman, **ds_cfg)
 
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
             if ds_cfg is not None:
@@ -1063,8 +1050,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             # Layer boundary (see multilayer_load_and_preprocess).
             ds_cfg = configs_proc.get('downsample')
             if ds_cfg is not None:
-                aman = apply_boundary_downsample(
-                    aman, ds_cfg, logger=logger)
+                aman = downsample_aman(aman, **ds_cfg)
 
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
             if ds_cfg is not None:
@@ -1620,10 +1606,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
             ds_cfg = configs_proc.get('downsample')
             if ds_cfg is not None:
-                aman = apply_boundary_downsample(
-                    aman, ds_cfg, logger=logger)
-                proc_aman = apply_boundary_downsample(
-                    proc_aman, ds_cfg, logger=logger)
+                aman = downsample_aman(aman, **ds_cfg)
+                proc_aman = downsample_aman(proc_aman, **ds_cfg)
 
             pipe_proc = Pipeline(configs_proc["process_pipe"],
                                  plot_dir=configs_proc["plot_dir"], logger=logger)

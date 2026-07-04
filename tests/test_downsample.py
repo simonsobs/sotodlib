@@ -1,9 +1,4 @@
 """Tests of samps-axis downsampling (sotodlib.preprocess.downsample).
-
-Only the core ``down_sample_aman`` function and its config helpers are
-tested here; the preprocess layer-boundary integration is separate.
-
-Intended location: tests/test_downsample.py
 """
 import unittest
 import numpy as np
@@ -17,7 +12,7 @@ except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 
 from sotodlib import core
-from sotodlib.tod_ops.downsample import down_sample_aman 
+from sotodlib.tod_ops.downsample import downsample_aman
 from sotodlib.preprocess.preprocess_util import (
     parse_downsample_cfg, downsample_cfg_aman,
     check_saved_downsample)
@@ -50,7 +45,7 @@ class TestDownsample(unittest.TestCase):
     # Axis math and the absolute-grid convention.
 
     def test_100_axis(self):
-        out = down_sample_aman(make_tod(), FACTOR)
+        out = downsample_aman(make_tod(), FACTOR)
         self.assertEqual(out.samps.count, len(IDX))
         # output offset is ceil(OFFSET / FACTOR) on the downsampled grid
         self.assertEqual(out.samps.offset, -(-OFFSET // FACTOR))
@@ -71,7 +66,7 @@ class TestDownsample(unittest.TestCase):
         tod.wrap('per_det', np.ones(len(DETS)), [(0, 'dets')])
         tod.wrap('scalar', 42)
 
-        out = down_sample_aman(tod, FACTOR)
+        out = downsample_aman(tod, FACTOR)
         np.testing.assert_array_equal(out.signal, tod.signal[:, IDX])
         np.testing.assert_array_equal(out.cube, tod.cube[:, :, IDX])
         np.testing.assert_array_equal(out.per_det, tod.per_det)
@@ -90,17 +85,17 @@ class TestDownsample(unittest.TestCase):
         child.wrap('x', np.arange(OFFSET, OFFSET + NSAMP, dtype=float),
                    [(0, 'samps')])
         tod.wrap('preprocess', child)
-        out = down_sample_aman(tod, FACTOR)
+        out = downsample_aman(tod, FACTOR)
         self.assertEqual(out.preprocess.samps.count, len(IDX))
         np.testing.assert_array_equal(out.preprocess.x, out.timestamps)
 
     def test_130_grid_consistency(self):
         # The kept samples do not depend on how the data was trimmed:
         # downsampling a restricted aman lands on the same absolute grid.
-        full = down_sample_aman(make_tod(), FACTOR)
+        full = downsample_aman(make_tod(), FACTOR)
         trimmed = make_tod()
         trimmed.restrict('samps', (OFFSET + 17, OFFSET + NSAMP - 23))
-        tds = down_sample_aman(trimmed, FACTOR)
+        tds = downsample_aman(trimmed, FACTOR)
         common = np.intersect1d(full.timestamps, tds.timestamps)
         self.assertEqual(len(common), tds.samps.count)
         i0 = np.searchsorted(full.timestamps, tds.timestamps[0])
@@ -120,7 +115,7 @@ class TestDownsample(unittest.TestCase):
                 for d in DETS]
         tod.wrap('glitches', RangesMatrix(rows),
                  [(0, 'dets'), (1, 'samps')])
-        out = down_sample_aman(tod, FACTOR)
+        out = downsample_aman(tod, FACTOR)
         self.assertTrue(out.turnaround.mask()[3])
         self.assertEqual(out.turnaround.mask().sum(), 1)
         self.assertTrue(out.glitches[1].mask()[3])
@@ -131,7 +126,7 @@ class TestDownsample(unittest.TestCase):
         flags = np.zeros((len(DETS), NSAMP), bool)
         flags[1, START + 4 * FACTOR + 2] = True   # dropped sample, block 4
         tod.wrap('flags', flags, [(0, 'dets'), (1, 'samps')])
-        out = down_sample_aman(tod, FACTOR)
+        out = downsample_aman(tod, FACTOR)
         self.assertTrue(out.flags[1, 4])
         self.assertEqual(out.flags.sum(), 1)
         self.assertEqual(out.flags.dtype, np.dtype(bool))
@@ -148,7 +143,7 @@ class TestDownsample(unittest.TestCase):
         bmat[1, START + 4 * FACTOR + 2] = True
         tod.wrap('sparse_flags', csr_array(bmat), [(0, 'dets'), (1, 'samps')])
 
-        out = down_sample_aman(tod, FACTOR)
+        out = downsample_aman(tod, FACTOR)
         blocks = np.append(IDX, NSAMP)
         expect = np.array([[row[a:b].max()
                             for a, b in zip(blocks[:-1], blocks[1:])]
@@ -165,7 +160,7 @@ class TestDownsample(unittest.TestCase):
 
     def test_300_mean(self):
         tod = make_tod()
-        out = down_sample_aman(tod, FACTOR, method='mean')
+        out = downsample_aman(tod, FACTOR, method='mean')
         blocks = np.append(IDX, NSAMP)
         expect_ts = np.array([tod.timestamps[a:b].mean()
                               for a, b in zip(blocks[:-1], blocks[1:])])
@@ -177,7 +172,7 @@ class TestDownsample(unittest.TestCase):
 
     def test_310_bad_method(self):
         with self.assertRaises(ValueError):
-            down_sample_aman(make_tod(), FACTOR, method='fft')
+            downsample_aman(make_tod(), FACTOR, method='fft')
 
     # Config helpers and archive validation.
 
@@ -201,7 +196,7 @@ class TestDownsample(unittest.TestCase):
 
     def test_410_cfg_samps(self):
         # the samps-axis consistency check catches grid mismatches
-        tds = down_sample_aman(make_tod(), FACTOR)
+        tds = downsample_aman(make_tod(), FACTOR)
         rec = downsample_cfg_aman({'factor': FACTOR})
         good = core.AxisManager(core.OffsetAxis(
             'samps', tds.samps.count, tds.samps.offset))
@@ -219,13 +214,13 @@ class TestDownsample(unittest.TestCase):
     def test_500_other_axes(self):
         am = core.AxisManager(core.IndexAxis('samps', 100))
         am.wrap('y', np.arange(100.), [(0, 'samps')])
-        out = down_sample_aman(am, FACTOR)
+        out = downsample_aman(am, FACTOR)
         self.assertEqual(out.samps.count, 10)
         np.testing.assert_array_equal(out.y, np.arange(0., 100, FACTOR))
 
         am = core.AxisManager(core.LabelAxis('dets', DETS))
         am.wrap('z', np.ones(len(DETS)), [(0, 'dets')])
-        out = down_sample_aman(am, FACTOR)
+        out = downsample_aman(am, FACTOR)
         np.testing.assert_array_equal(out.z, am.z)
 
 

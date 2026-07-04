@@ -109,7 +109,7 @@ def _downsample_flags(flags, idx):
     return Ranges.from_mask(_pool_bool(flags.mask(), idx, 0))
 
 
-def down_sample_aman(aman, factor, method='slice', axis='samps'):
+def downsample_aman(aman, factor, method='slice', axis='samps'):
     """Return a new AxisManager with ``axis`` downsampled by ``factor`` on
     the absolute grid (see module docstring).  All fields assigned to
     ``axis`` are downsampled; wrapped AxisManagers are processed
@@ -143,6 +143,9 @@ def down_sample_aman(aman, factor, method='slice', axis='samps'):
 
     idx = _downsample_indices(old_ax.count, offset, factor)
 
+    logger.info(f"Downsampling samps by {factor} (method={method}): "
+                f"{old_ax.count} -> {len(idx)} samples")
+
     new_axes = []
     for k, v in aman._axes.items():
         if k != axis:
@@ -164,7 +167,7 @@ def down_sample_aman(aman, factor, method='slice', axis='samps'):
         v = aman._fields[k]
         axis_map = [(i, a) for i, a in enumerate(assign) if a is not None]
         if isinstance(v, core.AxisManager):
-            dest.wrap(k, down_sample_aman(v, factor, method=method, axis=axis))
+            dest.wrap(k, downsample_aman(v, factor, method=method, axis=axis))
         elif axis not in assign:
             if np.isscalar(v) or v is None:
                 dest.wrap(k, v)
