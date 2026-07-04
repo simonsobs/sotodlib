@@ -1016,7 +1016,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
 
-            aman = context_init.get_obs(meta_proc, no_signal=True)
+            aman = context_init.get_obs(meta_init, no_signal=True)
 
             # One needs to correct pointing, HWP model and gamma
             # before loading in the simulated map
