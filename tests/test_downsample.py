@@ -12,10 +12,9 @@ except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 
 from sotodlib import core
-from sotodlib.tod_ops.downsample import downsample_aman
-from sotodlib.preprocess.preprocess_util import (
-    parse_downsample_cfg, downsample_cfg_aman,
-    check_saved_downsample)
+from sotodlib.tod_ops.downsample import (
+    downsample_aman, downsample_cfg_aman, check_saved_downsample)
+from sotodlib.preprocess.preprocess_util import parse_downsample_cfg
 
 
 NSAMP = 1000

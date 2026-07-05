@@ -16,7 +16,9 @@ from sotodlib.coords import pointing_model
 from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
-from sotodlib.tod_ops.downsample import downsample_aman
+from sotodlib.tod_ops.downsample import (
+    downsample_aman, downsample_cfg_aman, check_saved_downsample
+)
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
@@ -493,57 +495,6 @@ def parse_downsample_cfg(cfg):
     return factor, cfg.get('method', 'slice')
 
 
-def downsample_cfg_aman(cfg):
-    """Build the small AxisManager recorded in the proc archive to document
-    how it was downsampled."""
-    factor, method = parse_downsample_cfg(cfg)
-    out = core.AxisManager()
-    out.wrap('factor', factor)
-    out.wrap('method', method)
-    out.wrap('phase', 'absolute')  # bump if the grid convention changes
-    return out
-
-
-def check_saved_downsample(preproc_aman, cfg, samps=None, logger=None):
-    """Validate the ``downsample`` config block against a loaded proc-layer
-    archive.  Raises ValueError on mismatch.
-
-    Two checks are performed:
-
-    1. The ``downsample_cfg`` record (factor / method / phase convention)
-       of proc archive must match ``cfg``.
-    2. If ``samps`` is given (the samps axis of the freshly downsampled
-       aman), the archive's samps axis must describe the same absolute
-       grid range: equal offset and count.  This catches phase-convention
-       drift and full-rate archives read with a downsample config, which
-       the config record alone cannot.
-    """
-    if logger is None:
-        logger = init_logger("preprocess")
-    factor, method = parse_downsample_cfg(cfg)
-    if 'downsample_cfg' not in preproc_aman:
-        logger.warning(
-            "Proc archive has no 'downsample_cfg' record; it may predate "
-            "the downsample feature. Skipping validation.")
-        return
-    saved = preproc_aman['downsample_cfg']
-    for key, val in [('factor', factor), ('method', method),
-                     ('phase', 'absolute')]:
-        if saved[key] != val:
-            raise ValueError(
-                f"downsample config mismatch with proc archive: "
-                f"{key} = {val!r} in config, {saved[key]!r} in archive")
-    if samps is not None and 'samps' in preproc_aman._axes:
-        arch = preproc_aman._axes['samps']
-        arch_offset = getattr(arch, 'offset', 0)
-        if arch_offset != samps.offset or arch.count != samps.count:
-            raise ValueError(
-                "downsampled samps axis mismatch with proc archive: "
-                f"local OffsetAxis({samps.count}@{samps.offset}) vs "
-                f"archive OffsetAxis({arch.count}@{arch_offset}). "
-                "The archive may use a different grid phase or factor.")
-
-
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None, logger=None):
     """Loads the metadata information for the Observation and runs through any
@@ -676,6 +627,20 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
     Assumes preprocess_tod and multilayer_preprocess_tod have already been run
     on the requested observation.
+
+    archive.  The convention (and the factor) is recorded in the proc archive
+    as ``downsample_cfg`` and validated at load time.
+
+    If downsample is configured in the configs of dependent pipeline, down
+    sample at the beginning of dependent pipeline. The conventions of
+    downsampling are recorded in the proc archive as ``downsample_cfg``
+    and validated at load time. See ``tod_ops.downsample``.
+
+    Example downsample configuration in the dependent pipeline:
+        downsample:
+          factor: 50        # required, int >= 2
+          method: slice     # optional: 'slice' (default) or 'mean'
+
 
     Arguments
     ----------
@@ -910,6 +875,16 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
     Assumes preprocess_tod and multilayer_preprocess_tod have already been run
     on the requested observation.
+
+    If downsample is configured in the configs of dependent pipeline, down
+    sample at the beginning of dependent pipeline. The conventions of
+    downsampling are recorded in the proc archive as ``downsample_cfg``
+    and validated at load time. See ``tod_ops.downsample``.
+
+    Example downsample configuration in the dependent pipeline:
+        downsample:
+          factor: 50        # required, int >= 2
+          method: slice     # optional: 'slice' (default) or 'mean'
 
     Arguments
     ----------
@@ -1367,6 +1342,17 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     (or setting save_archive to True) which consumes all of the outputs
     (except the processed tod), writes to the database, and moves the multiple h5
     files into fewer h5 files (each <= 10 GB).
+
+    If downsample is configured in the configs of dependent pipeline, down
+    sample at the beginning of dependent pipeline. The conventions of
+    downsampling are recorded in the proc archive as ``downsample_cfg``.
+    Consistency of downsampling conventions are validated at load time of
+    ``multilayer_load_and_preprocess`` function. See ``tod_ops.downsample``.
+
+    Example downsample configuration in the dependent pipeline:
+        downsample:
+          factor: 50        # required, int >= 2
+          method: slice     # optional: 'slice' (default) or 'mean'
 
     Arguments
     ---------

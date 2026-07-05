@@ -8,6 +8,7 @@ from . import jumps
 from . import pca
 from .apodize import apodize_cosine
 from .binning import bin_signal
+from .downsample import downsample_aman
 from .sub_polyf import subscan_polyfilter
 from .azss import get_azss
 from .t2pleakage import get_t2p_coeffs, subtract_t2p

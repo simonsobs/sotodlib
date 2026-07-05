@@ -3,23 +3,13 @@
 
 Absolute-grid convention
 ------------------------
-Kept samples are those whose *absolute* index (OffsetAxis offset + local
+Kept samples are those whose absolute index (OffsetAxis offset + local
 index) is a multiple of ``factor``.  The output axis is
 ``OffsetAxis(samps, n_kept, ceil(offset / factor), origin_tag)``, i.e. the
 downsampled data lives on a global grid independent of how the observation
-was trimmed.  This is what makes the saved proc archive reproducible: the
-same observation downsampled after different sample cuts lands on the same
-grid, and the load path reproduces exactly the sampling stored in the
-archive.  The convention (and the factor) is recorded in the proc archive
-as ``downsample_cfg`` and validated at load time.
-
-Config
-------
-Top-level key in the proc-layer config::
-
-    downsample:
-      factor: 50        # required, int >= 2
-      method: slice     # optional: 'slice' (default) or 'mean'
+was trimmed. This makes the saved axis-manager reproducible.
+See ``downsample_cfg_aman`` and ``check_saved_downsample``, which
+preprocess pipeline uses for its archives.
 
 'slice' takes every factor-th sample.  It does not anti-alias; it is
 intended for post-demodulation (low-pass-filtered) timestreams.  'mean'
@@ -197,3 +187,54 @@ def downsample_aman(aman, factor, method='slice', axis='samps'):
             raise ValueError(f"Field '{k}': type {type(v)} assigned to "
                              f"'{axis}' is not supported by downsample")
     return dest
+
+
+def downsample_cfg_aman(cfg):
+    """Build the small AxisManager recorded in the archive to document
+    how it was downsampled."""
+    factor, method = parse_downsample_cfg(cfg)
+    out = core.AxisManager()
+    out.wrap('factor', factor)
+    out.wrap('method', method)
+    out.wrap('phase', 'absolute')  # bump if the grid convention changes
+    return out
+
+
+def check_saved_downsample(aman, cfg, samps=None, logger=None):
+    """Validate the ``downsample`` config block against an AxisManager
+    archive.  Raises ValueError on mismatch.
+
+    Two checks are performed:
+
+    1. The ``downsample_cfg`` record (factor / method / phase convention)
+       of archive must match ``cfg``.
+    2. If ``samps`` is given (the samps axis of the freshly downsampled
+       aman), the archive's samps axis must describe the same absolute
+       grid range: equal offset and count.  This catches phase-convention
+       drift and full-rate archives read with a downsample config, which
+       the config record alone cannot.
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+    factor, method = parse_downsample_cfg(cfg)
+    if 'downsample_cfg' not in aman:
+        logger.warning(
+            "Proc archive has no 'downsample_cfg' record; it may predate "
+            "the downsample feature. Skipping validation.")
+        return
+    saved = preproc_aman['downsample_cfg']
+    for key, val in [('factor', factor), ('method', method),
+                     ('phase', 'absolute')]:
+        if saved[key] != val:
+            raise ValueError(
+                f"downsample config mismatch with proc archive: "
+                f"{key} = {val!r} in config, {saved[key]!r} in archive")
+    if samps is not None and 'samps' in preproc_aman._axes:
+        arch = preproc_aman._axes['samps']
+        arch_offset = getattr(arch, 'offset', 0)
+        if arch_offset != samps.offset or arch.count != samps.count:
+            raise ValueError(
+                "downsampled samps axis mismatch with proc archive: "
+                f"local OffsetAxis({samps.count}@{samps.offset}) vs "
+                f"archive OffsetAxis({arch.count}@{arch_offset}). "
+                "The archive may use a different grid phase or factor.")
