@@ -677,9 +677,6 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     Assumes preprocess_tod and multilayer_preprocess_tod have already been run
     on the requested observation.
 
-    archive.  The convention (and the factor) is recorded in the proc archive
-    as ``downsample_cfg`` and validated at load time.
-
     If downsample is configured in the configs of dependent pipeline, down
     sample at the beginning of dependent pipeline. The conventions of
     downsampling are recorded in the proc archive as ``downsample_cfg``
