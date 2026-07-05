@@ -16,9 +16,7 @@ from sotodlib.coords import pointing_model
 from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
-from sotodlib.tod_ops.downsample import (
-    downsample_aman, downsample_cfg_aman, check_saved_downsample
-)
+from sotodlib.tod_ops.downsample import downsample_aman
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
@@ -493,6 +491,57 @@ def parse_downsample_cfg(cfg):
     if factor < 2:
         raise ValueError(f"downsample factor must be >= 2, got {factor}")
     return factor, cfg.get('method', 'slice')
+
+
+def downsample_cfg_aman(cfg):
+    """Build the small AxisManager recorded in the archive to document
+    how it was downsampled."""
+    factor, method = parse_downsample_cfg(cfg)
+    out = core.AxisManager()
+    out.wrap('factor', factor)
+    out.wrap('method', method)
+    out.wrap('phase', 'absolute')  # bump if the grid convention changes
+    return out
+
+
+def check_saved_downsample(proc_aman, cfg, samps=None, logger=None):
+    """Validate the ``downsample`` config block against a loaded proc_aman
+    archive.  Raises ValueError on mismatch.
+
+    Two checks are performed:
+
+    1. The ``downsample_cfg`` record (factor / method / phase convention)
+       of archive must match ``cfg``.
+    2. If ``samps`` is given (the samps axis of the freshly downsampled
+       aman), the archive's samps axis must describe the same absolute
+       grid range: equal offset and count.  This catches phase-convention
+       drift and full-rate archives read with a downsample config, which
+       the config record alone cannot.
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+    factor, method = parse_downsample_cfg(cfg)
+    if 'downsample_cfg' not in proc_aman:
+        logger.warning(
+            "Proc archive has no 'downsample_cfg' record; it may predate "
+            "the downsample feature. Skipping validation.")
+        return
+    saved = proc_aman['downsample_cfg']
+    for key, val in [('factor', factor), ('method', method),
+                     ('phase', 'absolute')]:
+        if saved[key] != val:
+            raise ValueError(
+                f"downsample config mismatch with proc archive: "
+                f"{key} = {val!r} in config, {saved[key]!r} in archive")
+    if samps is not None and 'samps' in proc_aman._axes:
+        arch = proc_aman._axes['samps']
+        arch_offset = getattr(arch, 'offset', 0)
+        if arch_offset != samps.offset or arch.count != samps.count:
+            raise ValueError(
+                "downsampled samps axis mismatch with proc archive: "
+                f"local OffsetAxis({samps.count}@{samps.offset}) vs "
+                f"archive OffsetAxis({arch.count}@{arch_offset}). "
+                "The archive may use a different grid phase or factor.")
 
 
 def load_preprocess_det_select(obs_id, configs, context=None,
