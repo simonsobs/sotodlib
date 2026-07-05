@@ -1,32 +1,27 @@
-"""Downsampling of the axis manager
+"""Downsample axis manager
 
 
-Absolute-grid convention
-------------------------
 Kept samples are those whose absolute index (OffsetAxis offset + local
 index) is a multiple of ``factor``.  The output axis is
 ``OffsetAxis(samps, n_kept, ceil(offset / factor), origin_tag)``, i.e. the
 downsampled data lives on a global grid independent of how the observation
-was trimmed. This makes the saved axis-manager reproducible.
+was trimmed. This makes the axis manager reproducible.
 See ``downsample_cfg_aman`` and ``check_saved_downsample``, which
 preprocess pipeline uses for its archives.
 
 The downsample method is 'slice' or 'mean'.
 'slice' takes every factor-th sample.  It does not anti-alias; it is
 intended for post-demodulation (low-pass-filtered) timestreams.  'mean'
-block-averages float arrays (including timestamps, keeping them aligned).
+block-averages float arrays including timestamps, keeping them aligned.
 Flag types (Ranges / RangesMatrix / bool arrays) are always pooled with
-"any sample in the block is flagged", so cuts never get lost, regardless
-of method.
+"any sample in the block is flagged", regardless of method.
 
 Sparse arrays (csr, samps on the last axis) are treated as flag-like,
-which is how they are used in proc_aman: each nonzero column is remapped
-to the output block containing it (searchsorted), and nonzeros that merge
-into the same output column are reduced with *max*.  For a boolean csr
-this is exactly the 'any within block' rule used for Ranges; for a
-numeric csr the largest value in the block is kept.  Either way, a flag
-sitting on a dropped sample never gets lost.  'mean' is never applied to
-sparse data.
+each nonzero column is remapped to the output block containing it
+(searchsorted), and nonzeros that merge into the same output column are
+reduced with max. For a boolean csr this is exactly the 'any within block'
+rule used for Ranges; for a numeric csr the largest value in the block is
+kept. 'mean' is never applied to sparse data.
 """
 import logging
 
@@ -76,7 +71,7 @@ def _pool_csr(v, idx):
     nonzeros merging into the same output column are reduced with max.
     For boolean data this is 'any within block'.  Dtype is preserved."""
     coo = v.tocoo()
-    keep = coo.col >= idx[0]          # columns before the grid are dropped
+    keep = coo.col >= idx[0]  # columns before the grid are dropped
     rows = coo.row[keep]
     cols = np.searchsorted(idx, coo.col[keep], side='right') - 1
     data = coo.data[keep]
@@ -91,9 +86,8 @@ def _pool_csr(v, idx):
 
 
 def _downsample_flags(flags, idx):
-    """Downsample a Ranges, or a (possibly nested) RangesMatrix, by 'any
-    within block' pooling of its mask.  The samps axis must be the last
-    dimension."""
+    """Downsample a Ranges, or a RangesMatrix, by 'any within block'
+    pooling of its mask.  The samps axis must be the last dimension."""
     if isinstance(flags, RangesMatrix):
         return RangesMatrix([_downsample_flags(row, idx)
                              for row in flags.ranges])
@@ -121,7 +115,7 @@ def downsample_aman(aman, factor, method='slice', axis='samps'):
     """
     methods = ('slice', 'mean')
     if method not in methods:
-        raise ValueError(f"method must be one of {methods}, got {method!r}")
+        raise ValueError(f"method must be one of {methods}, got {method}")
     old_ax = aman._axes.get(axis)
     if old_ax is None:
         return aman.copy()
