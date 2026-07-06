@@ -57,12 +57,15 @@ def core(
     
     ## make sure we don't have a gap between currently finalized time and when we're 
     ## starting updates now
-    current_time = SMURF.last_update
-    if min_ctime > current_time:
-        raise ValueError(
-            f"min_ctime {min_ctime} is higher than current database coverage"
-            f" {current_time}"
-        )
+    if not from_scratch:
+        current_time = SMURF.last_update
+        if min_ctime > current_time:
+            raise ValueError(
+                f"min_ctime {min_ctime} is higher than current database coverage"
+                f" {current_time}"
+            )
+    else:
+        current_time = None
     logger.info(
         f"G3tSmurf is updated through {current_time}. Beginning updates"
         f" from {min_ctime} to {max_ctime}"
