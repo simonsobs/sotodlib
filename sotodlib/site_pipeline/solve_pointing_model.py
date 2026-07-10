@@ -793,8 +793,7 @@ def main(config_path: str):
             plotter = ModelFitsPlotter(solver_aman=full_aman,
                                        config=config,
                                        save_dir=save_dir,
-                                       t0=t0,
-                                       tf=tf,
+                                       fpt_timestamp = fpt_timestamp,
                                        iteration_tag=f"_{epoch["name"]}",
                                        save_figure=True,
                                        plotlims=plotlims)
