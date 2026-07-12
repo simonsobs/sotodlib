@@ -398,6 +398,10 @@ class BadTimeSamples(BookError):
 class NonMonotonicAncillaryTimes(BookError):
     fields_to_fix = {
         "acu.acu_status.Azimuth_mode": 5,
+        "acu.acu_udp_stream.Corrected_Azimuth": 5,
+        "acu.acu_udp_stream.Corrected_Elevation": 5,
+        "acu.acu_udp_stream.Corrected_Boresight": 5,
+        "acu.acu_status.Corotator_current_position": 5, 
     }
     n_samps = None
     field_dropped = None

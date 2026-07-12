@@ -50,7 +50,7 @@ classifiers = [
 
 [project.optional-dependencies]
 site_pipeline = [
-  "influxdb",
+  "influxdb-client",
   "venn",
   "sodetlib",
   "let-me-scroll-it",
