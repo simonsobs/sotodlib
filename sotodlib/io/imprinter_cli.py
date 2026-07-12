@@ -20,7 +20,10 @@ import datetime as dt
 from typing import Optional
 
 import sotodlib.io.bookbinder as bbinder
-from sotodlib.io.imprinter import Imprinter, Books, FAILED
+from sotodlib.io.imprinter import (
+    Imprinter, Books, 
+    FAILED, BOUND
+)
 import sotodlib.io.imprinter_utils as utils
 
 def fix_single_book(imprint:Imprinter, book:Books):
