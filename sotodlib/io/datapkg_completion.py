@@ -111,18 +111,19 @@ class DataPackaging:
             return []
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
+        htc = os.path.join(self.HK.hkarchive_path, str(timecode))
         flist = []
 
         if not os.path.exists(stc) and not os.path.exists(ttc):
             return flist
-        if os.path.exists(ttc) and 'suprsync' in os.listdir(ttc):
-            for root, _, files in os.walk(os.path.join(ttc, 'suprsync')):
-                for name in files:
-                    flist.append(os.path.join(ttc, root, name))
-        if os.path.exists(stc) and 'suprsync' in os.listdir(stc):
-            for root, _, files in os.walk(os.path.join(stc, 'suprsync')):
-                for name in files:
-                    flist.append(os.path.join(stc, root, name))
+        for tc_root in [stc, ttc, htc]:
+            if os.path.exists(tc_root) and 'suprsync' in os.listdir(tc_root):
+                for root, _, files in os.walk(
+                    os.path.join(tc_root, 'suprsync')
+                ):
+                    for name in files:
+                        flist.append(os.path.join(tc_root, root, name))
+
         return flist
 
     def check_hk_registered(self, timecode, complete):
