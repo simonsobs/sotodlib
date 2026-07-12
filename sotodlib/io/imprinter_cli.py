@@ -347,7 +347,9 @@ class BadTimeSamples(BookError):
         if np.all([x<=self.max_drops_to_fix for x in self.dropped.values()]):
             utils.set_book_rebind(self.imprint, self.book)        
             self.imprint.bind_book(self.book, allow_bad_timing=True,)
-        
+            if self.book.status == BOUND:
+                return ## simple fix complete
+
         ## if any observations are over the limit, double check it's not a 
         ## SMURF database error 
         dropped_oids = [k for k,x in self.dropped.items() 
@@ -384,7 +386,7 @@ class BadTimeSamples(BookError):
             for oid in remove_oid:
                 self.book = utils.remove_level2_obs_from_book(
                     self.imprint, self.book, oid
-                )
+                )        
                 
     def report_error(self):
         msg = f"{self.book.bid} has dropped time samples\n"
