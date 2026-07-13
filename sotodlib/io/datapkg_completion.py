@@ -114,8 +114,6 @@ class DataPackaging:
         htc = os.path.join(self.HK.hkarchive_path, str(timecode))
         flist = []
 
-        if not os.path.exists(stc) and not os.path.exists(ttc):
-            return flist
         for tc_root in [stc, ttc, htc]:
             if os.path.exists(tc_root) and 'suprsync' in os.listdir(tc_root):
                 for root, _, files in os.walk(
@@ -753,11 +751,10 @@ class DataPackaging:
             return 
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
-
-        if os.path.exists(stc): 
-            if len(os.listdir(stc)) == 0 or just_suprsync(stc):
-                shutil.rmtree(stc)
-        if os.path.exists(ttc):
-            if len(os.listdir(ttc)) == 0 or just_suprsync(ttc):
-                shutil.rmtree(ttc)
+        htc = os.path.join(self.HK.hkarchive_path, str(timecode))
+        
+        for tc_root in [stc, ttc, htc]:
+            if os.path.exists(tc_root): 
+                if len(os.listdir(tc_root)) == 0 or just_suprsync(tc_root):
+                    shutil.rmtree(tc_root)
         return 
