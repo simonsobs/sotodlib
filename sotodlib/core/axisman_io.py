@@ -283,7 +283,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None,
             print(f'Unhandled {item["name"]}->{item["encoding"]}')
 
     if len(scalars):
-        dest.attrs['_scalars'] = json.dumps(scalars)
+        dest.attrs['_scalars'] = json.dumps(_safe_scalars(scalars))
 
     if len(units):
         dest.attrs['_units'] = json.dumps(units)
