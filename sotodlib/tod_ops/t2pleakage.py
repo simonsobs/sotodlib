@@ -2,7 +2,7 @@
 """
 import numpy as np
 from sotodlib import core
-from sotodlib.tod_ops import filters, apodize
+from sotodlib.tod_ops import filters
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from scipy.odr import ODR, Model, RealData
 from lmfit import Model as LmfitModel

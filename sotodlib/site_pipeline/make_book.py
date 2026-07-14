@@ -31,6 +31,8 @@ def bind_books_parallel(platform, book_list, n_proc ):
             if status == FAILED:
                 failed_list.append( book.bid)
                 print(f"Error binding book {book.bid}: {err}")
+            else:
+                print(f"Finished binding {book.bid}")
     return failed_list
 
 def _bookbinding_helper(platform, bid ):
@@ -38,7 +40,7 @@ def _bookbinding_helper(platform, bid ):
     return imprint._run_book_binding(bid)
 
 
-def main(config: str, n_proc:int=1, alert_webhook: str=''):
+def main(config: str, n_proc:int=1, alert_webhook: list[str]=None):
     """Make books based on imprinter db
     
     Parameters
@@ -47,8 +49,8 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
         path to imprinter configuration file
     n_proc : int
         Number of processes
-    alert_webhook : str
-        Webhook URL to send alerts
+    alert_webhook : list[str]
+        Webhook URLs to send alerts
     """
     imprinter = Imprinter(
         config, 
@@ -63,9 +65,6 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
 
     if n_proc>1:
         multiprocessing.set_start_method('spawn')
-        #parallel_list = [
-        #    book for book in unbound_books if book.type == 'oper'
-        #]
         bind_books_parallel(imprinter.daq_node, unbound_books, n_proc=n_proc)
     else:
         for book in unbound_books:
@@ -99,7 +98,13 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
-            alert = send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=book.start)
+            alert = send_alert(
+                alert_webhook,
+                alertname=book.bid,
+                tag='bookbinder',
+                error=str(e),
+                timestamp=book.start
+            )
             print(alert)
 
 
@@ -116,7 +121,7 @@ def get_parser(parser=None):
         help="The number of processes to run for operations books"
     )
     parser.add_argument(
-        "--alert-webhook", type=str, default='',
+        "--alert-webhook", type=str, default='', nargs="+",
         help="Webhook address to send error alerts"
     )
     return parser
