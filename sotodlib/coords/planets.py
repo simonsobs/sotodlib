@@ -762,7 +762,8 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              filename=None, source_flags=None, cuts=None,
              data_splits=None,
              low_pass=None, n_modes=10,
-             eigentol=1e-3, info={}):
+             eigentol=1e-3, info={},
+             rot_bs=None, rot_fp=None):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
@@ -804,6 +805,14 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                                  cuts=cuts,
                                  threads=thread_algo,
                                  wcs_kernel=wcsk)
+        
+        # apply an optional boresight rotation or focal plane rotation
+        # e.g. HWP deflection is rot_fp
+        if rot_bs is not None:
+            P.sight.Q = rot_bs * P.sight.Q
+        if rot_fp is not None:
+            P.sight.Q = P.sight.Q * rot_fp
+            
     with MmTimer('get_proj_threads'):
         P._get_proj_threads()
 
