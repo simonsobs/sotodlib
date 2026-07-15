@@ -156,7 +156,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
-                         t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
+                         t_buffer=2., kernel_size=1500, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
     Compute turnaround flags for a dataset.
@@ -229,6 +229,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         # Make a step-function like matched filter. Kernel is normarized to make peak height ~1
         kernel = np.ones(kernel_size) / approx_daz / kernel_size
         kernel[kernel_size//2:] *= -1
+        kernel[kernel_size//2-kernel_size//10:kernel_size//2+kernel_size//10] *= 0
 
         # convolve signal with the kernel
         pad_init = np.ones(kernel_size//2) * daz[0]
