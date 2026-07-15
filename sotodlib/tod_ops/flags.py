@@ -158,7 +158,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False,
-                         az_throw_threshold=None):
+                         az_throw_threshold=0.):
     """
     Compute turnaround flags for a dataset.
 
@@ -197,29 +197,28 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     turnarounds_in_subscan : bool
         (Optional). Turnarounds are included as part of a subscan.
     az_throw_threshold : float
-        Minimum azimuth throw required to attempt turnaround flagging. If ``aman.obs_info.az_throw`` falls below this value, 
-        the obs is treated as stationary or incomplete and a ``ValueError`` is raised instead.
+        (Optional). Minimum azimuth throw required to attempt turnaround flagging. Returns no turnarounds if below threshold.
 
     Returns
     -------
     Ranges : RangesMatrix
         The turnaround flags as a Ranges object.
     """
-    if az_throw_threshold is None:
-        raise ValueError(
-                "`az_throw_threshold` is required and cannot be None"
-                )
-
     if az is None : 
         az = aman.boresight.az
 
-    # Check that telescope was scanning. 
-    if aman.obs_info.az_throw < az_throw_threshold:
-        raise ValueError(
-                f"""Azimuth motion {aman.obs_info.az_throw} is too small compared to threshold {az_throw_threshold} 
-                to compute turnaround flags"""
-                )
+    # Get the throw (convert to degrees).
+    az_throw = np.ptp(az) * 90 / np.pi
 
+    # If the throw is below the threshold, just output empty flags
+    if az_throw < az_throw_threshold:
+        ta_flag = Ranges.from_bitmask(np.zeros(aman.samps.count, dtype=bool))
+        ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
+        if method == 'scanspeed':
+            return ta_exp, ta_exp, ta_exp
+        return ta_exp
+        
+        
     if method not in ['az', 'scanspeed']:
         raise ValueError('Unsupported method. Supported methods are `az` or `scanspeed`')
     

@@ -1510,7 +1510,8 @@ class FlagTurnarounds(_Preprocess):
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
-            calc_aman.wrap('subscan_info', aman.subscan_info)
+            if hasattr(aman, 'subscan_info'):
+                calc_aman.wrap('subscan_info', aman.subscan_info)
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
@@ -1526,6 +1527,19 @@ class FlagTurnarounds(_Preprocess):
             raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         return aman, proc_aman
+    
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+    
+        ta = proc_aman[self.save_name].turnarounds
+    
+        if np.all(count_cuts(ta) == 0):
+            meta.restrict('dets', meta.dets.vals[:0])
+    
+        return meta
 
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
