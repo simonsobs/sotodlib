@@ -84,7 +84,7 @@ class PSDTest(unittest.TestCase):
         boresight.wrap("az", az, [(0, "samps")])
         aman.wrap('boresight', boresight)
         aman.wrap('flags', core.AxisManager(aman.dets, aman.samps))
-        get_turnaround_flags(aman, az_throw_threshold = 0.1)
+        get_turnaround_flags(aman)
 
         # test default arguments, this is biased
         calc_psd(aman, merge=True, nperseg=2**18)

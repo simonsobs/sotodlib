@@ -48,7 +48,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
-            _ = flags.get_turnaround_flags(aman,az_throw_threshold=0.,truncate=True)
+            _ = flags.get_turnaround_flags(aman,truncate=True)
         ls_mask = aman.flags["left_scan"].mask()
         rs_mask = aman.flags["right_scan"].mask()
         ta_mask = aman.flags["turnarounds"].mask()
@@ -60,7 +60,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     else:
         if ("left_scan" not in aman.flags):
             logger.warning('aman does not have left/right scan. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
-            _ = flags.get_turnaround_flags(aman,az_throw_threshold=0.,truncate=True)
+            _ = flags.get_turnaround_flags(aman,truncate=True)
             
         ls_mask = aman.flags["left_scan"].mask()
         rs_mask = aman.flags["right_scan"].mask()
