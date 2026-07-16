@@ -1194,6 +1194,7 @@ class Apodize(_Preprocess):
           signal_name: signal
           apodize_samps: 2000
           flags: glitch_flags
+          apo_type: C1
 
     .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """

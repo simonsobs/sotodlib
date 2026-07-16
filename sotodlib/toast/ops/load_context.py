@@ -166,7 +166,7 @@ class LoadContext(Operator):
     )
 
     ignore_preprocess_archive = Bool(
-        False,
+        True,
         help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
