@@ -14,6 +14,94 @@ from sotodlib.core import AxisManager
 from ..flag_utils import _merge
 
 
+_INT32_MAX = 2**31 - 1
+
+
+def call_chunked(fn, *args,
+                 array_arg_indices=(0, 1),
+                 chunk_axis=0,
+                 **kwargs):
+    """
+    Call ``fn(*args, **kwargs)`` while chunking the array arguments along
+    ``chunk_axis`` so each underlying call has
+    ``chunk_ndet * other_dims <= INT32_MAX``.
+
+    Parameters
+    ----------
+    fn : callable
+        so3g function (e.g. ``so3g.block_minmax``).
+    *args :
+        Positional args. Arrays whose index appears in
+        ``array_arg_indices`` are sliced along ``chunk_axis``; other args
+        pass through unchanged.
+    array_arg_indices : tuple of int, default (0, 1)
+        Indices of ``args`` that are arrays and must be split. For
+        block_minmax this is (input, output) so (0, 1). For a single-array
+        function pass (0,).
+    chunk_axis : int, default 0
+        Axis along which to split. Usually the detector axis.
+    **kwargs :
+        Forwarded to ``fn`` unchanged.
+
+    Notes
+    -----
+    Assumes the operation is independent along ``chunk_axis`` (per-det
+    computations). This holds for block_minmax/block_moment/etc.; do NOT
+    use for cross-det operations (PCA, common-mode, etc.).
+    """
+    arrs = [args[i] for i in array_arg_indices]
+    ndet = int(arrs[0].shape[chunk_axis])
+
+    def _other_size(a):
+        return int(np.prod([s for i, s in enumerate(a.shape) if i != chunk_axis]))
+
+    other = max((_other_size(a) for a in arrs), default=1)
+
+    # Fast path
+    if other == 0 or ndet * other <= _INT32_MAX:
+        return fn(*args, **kwargs)
+
+    chunk = max(1, _INT32_MAX // other)
+    for s in range(0, ndet, chunk):
+        e = min(s + chunk, ndet)
+        new_args = list(args)
+        for i in array_arg_indices:
+            sl = [slice(None)] * args[i].ndim
+            sl[chunk_axis] = slice(s, e)
+            new_args[i] = args[i][tuple(sl)]
+        fn(*new_args, **kwargs)
+
+
+def int32_safe(fn=None, *, array_arg_indices=(0, 1), chunk_axis=0):
+    """
+    Decorator / wrapper that returns an int32-safe version of an so3g
+    function.
+
+    Usage:
+        safe_block_minmax = int32_safe(so3g.block_minmax)
+        safe_block_minmax(signal, output, bsize, mode, shift)
+
+    Or as a decorator on your own wrapper:
+        @int32_safe(array_arg_indices=(0,))
+        def my_so3g_func(arr, param): ...
+    """
+    def _wrap(f):
+        def wrapped(*args, **kwargs):
+            return call_chunked(f, *args,
+                                array_arg_indices=array_arg_indices,
+                                chunk_axis=chunk_axis, **kwargs)
+        wrapped.__wrapped__ = f
+        wrapped.__name__ = getattr(f, '__name__', 'wrapped')
+        return wrapped
+    return _wrap if fn is None else _wrap(fn)
+
+
+so3g.block_minmax = int32_safe(so3g.block_minmax)
+so3g.block_minmax64 = int32_safe(so3g.block_minmax64)
+so3g.matched_jumps = int32_safe(so3g.matched_jumps)
+so3g.matched_jumps64 = int32_safe(so3g.matched_jumps64)
+
+
 def std_est(
     x: NDArray[np.floating],
     ds: int = 1,
@@ -213,7 +301,16 @@ def jumpfix_subtract_heights(
         fix = so3g.subtract_jump_heights64
     else:
         raise TypeError("x must be float32 or float64")
-    fix(x_use, x_fixed, heights, jumps_rm)
+
+    ndet, nsamp = x_use.shape
+    if ndet * nsamp <= _INT32_MAX:
+        fix(x_use, x_fixed, heights, jumps_rm)
+    else:
+        chunk = max(1, _INT32_MAX // nsamp)
+        for s in range(0, ndet, chunk):
+            e = min(s + chunk, ndet)
+            fix(x_use[s:e], x_fixed[s:e], heights[s:e], jumps_rm[s:e])
+
     if force_copy and inplace:
         x[:] = x_fixed[:]
 
@@ -461,12 +558,21 @@ def twopi_jumps(
     _signal = np.asarray(_signal, dtype=_signal.dtype, order="C")
     heights = np.empty_like(_signal, order="C")
     atol = np.asarray(atol, dtype=_signal.dtype, order="C")
+    ndet, nsamp = _signal.shape
     if _signal.dtype.name == "float32":
-        so3g.find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+        fq = so3g.find_quantized_jumps
     elif _signal.dtype.name == "float64":
-        so3g.find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+        fq = so3g.find_quantized_jumps64
     else:
         raise TypeError("signal must be float32 or float64")
+
+    if ndet * nsamp <= _INT32_MAX:
+        fq(_signal, heights, atol, win_size, 2 * np.pi)
+    else:
+        chunk = max(1, _INT32_MAX // nsamp)
+        for s in range(0, ndet, chunk):
+            e = min(s + chunk, ndet)
+            fq(_signal[s:e], heights[s:e], atol[s:e], win_size, 2 * np.pi)
 
     # Shift things by half the window
     heights = np.roll(heights, -1 * int(win_size / 2), -1)
