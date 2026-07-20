@@ -52,6 +52,7 @@ parser.add_argument("-q", "--quiet",   action="count", default=0)
 parser.add_argument("-@", "--center-at", type=str, default=None)
 parser.add_argument("-w", "--window",  type=float, default=0.0)
 parser.add_argument("-i", "--inject",  type=str,   default=None)
+parser.add_argument(      "--soft-pass1",  action="store_true",  default=False, help="When enabled, the first pass will use the uncorrelated noise model regardless of the nmat argument, to preserve the sky signal.")
 parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats", help="Directory to save/load noise models")
 parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to build the noise matrix. Options:\
     'build': Always build from tod. \
@@ -60,8 +61,10 @@ parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to
     'save': Build from tod and save.")
 parser.add_argument("-d", "--downsample", type=str, default="1", help="Downsample TOD by this factor")
 parser.add_argument(      "--maxiter",    type=str, default="500", help="Maximum number of CG iterations")
+parser.add_argument(      "--maxerr",     type=float, default=1e-6, help="Maximum CG residual target for mapmaker convergence")
 parser.add_argument(      "--interpol",   type=str, default="nearest", help="Interpolation mode for the pointing matrix")
 parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="Distribute the maps in tiles")
+parser.add_argument(      "--apply_wobble",   action="store_true", default=False, help="Apply HWP wobble correction")
 parser.add_argument("--extra_cuts", action="store_true",  default=False, help="Add extra quality cuts to the data after preprocessing to catch any anomalies that may have survived. "
     "These cuts include: "
     "1) Cutting detectors that are overly cut relative to the median cut fraction across detectors, "
@@ -140,7 +143,8 @@ def prepare_demod_data(obs, frel=1.9, comps="QU"):
     down    = utils.nint(ifmax/ofmax)
     
     # Make downsampled obs which we will modify to produce our output
-    obs_down= mapmaking.downsample_obs(obs, down, skip_signal=True)
+    obs_down= mapmaking.downsample_obs(obs, down, skip_signal=True, sparse_handling="skip")
+    drop_fields_if_present(obs_down, ["preprocess", "dsT", "demodQ", "demodU"])
     onsamp  = obs_down.samps.count
 
     # Reformat the data
@@ -193,28 +197,32 @@ def prepare_demod_data(obs, frel=1.9, comps="QU"):
     obs_demod.wrap("signal", osignal, [(0,"dets"),(1,"samps")])
 
     # Construct pointing weights
-    # iQ = np.cos(2*obs_demod.focal_plane.gamma[:ndet])
-    # iU = np.sin(2*obs_demod.focal_plane.gamma[:ndet])
+    iQ = np.cos(2*obs_demod.focal_plane.gamma[:ndet])
+    iU = np.sin(2*obs_demod.focal_plane.gamma[:ndet])
     obs_demod.focal_plane.move("gamma", None)
-    if comps == "TQU":
+    if comps == "T":
+        oT = np.ones(ndet, dtype=dtype_tod)
+        obs_demod.focal_plane.wrap("T", oT, [(0,"dets")])
+    elif comps == "TQU":
         oT, oQ, oU = np.zeros((3,3,ndet),dtype_tod)
         # T-detectors have response [1,0,0]
         oT[0], oQ[0], oU[0] = 1,  0,   0
         # cos-detectors have response [0,+detQ,-detU]
-        # oT[1], oQ[1], oU[1] = 0, iQ, -iU
-        oT[1], oQ[1], oU[1] = 0, 1, 0 # rotation already applied in preprocessing
+        oT[1], oQ[1], oU[1] = 0, iQ, -iU
+        # oT[1], oQ[1], oU[1] = 0, 1, 0 # rotation already applied in preprocessing
         # sin-detectors have response [0,+detU,+detQ]
-        # oT[2], oQ[2], oU[2] = 0, iU,  iQ
-        oT[2], oQ[2], oU[2] = 0, 0,  1 # rotation already applied in preprocessing
+        oT[2], oQ[2], oU[2] = 0, iU,  iQ
+        # oT[2], oQ[2], oU[2] = 0, 0,  1 # rotation already applied in preprocessing
         obs_demod.focal_plane.wrap("T", oT.reshape(-1), [(0,"dets")])
     elif comps == "QU":
         oQ, oU = np.zeros((2,2,ndet),dtype_tod)
-        # oQ[0], oU[0] = iQ, -iU
-        # oQ[1], oU[1] = iU,  iQ
-        oQ[0], oU[0] = 1, 0 # rotation already applied in preprocessing
-        oQ[1], oU[1] = 0, 1 # rotation already applied in preprocessing
-    obs_demod.focal_plane.wrap("Q", oQ.reshape(-1), [(0,"dets")])
-    obs_demod.focal_plane.wrap("U", oU.reshape(-1), [(0,"dets")])
+        oQ[0], oU[0] = iQ, -iU
+        oQ[1], oU[1] = iU,  iQ
+        # oQ[0], oU[0] = 1, 0 # rotation already applied in preprocessing
+        # oQ[1], oU[1] = 0, 1 # rotation already applied in preprocessing
+    if comps != "T":
+        obs_demod.focal_plane.wrap("Q", oQ.reshape(-1), [(0,"dets")])
+        obs_demod.focal_plane.wrap("U", oU.reshape(-1), [(0,"dets")])
 
     return obs_demod
 
@@ -333,23 +341,33 @@ for ipass, passinfo in enumerate(passes):
     # model. Typically the different passes will differ by sample rate. This means
     # that e.g. SignalCut will be different for each pass, and the degrees of freedom
     # will need to be translated between them.
-    if   args.nmat == "white":  
+        
+    # Handling of noise model choice for the first pass when soft_pass1 is enabled
+    if ipass == 0 and args.soft_pass1:
+        nmat_arg = "uncorr"
+    else:
+        nmat_arg = args.nmat
+    
+    if   nmat_arg == "white":  
         noise_model = mapmaking.NmatWhite()
-    elif args.nmat == "uncorr": 
-        noise_model = mapmaking.NmatUncorr(spacing="exp", nbin=100, window=args.window)
-    elif args.nmat == "corr":
+    elif nmat_arg == "uncorr": 
+        noise_model = mapmaking.NmatUncorr(spacing="exp", nbin=100, window=args.window, detrend_order=1)
+    elif nmat_arg == "corr":
+        max_modes = None
+        if comps == "T":
+            max_modes = 30
         noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window,
             mode_bins=[1e-4,1.8], bmin_eigvec=5, bin_edges="exp", single_lim=None,
-            mp_significance=0.999, wnoise_band=[0.5,1.8], detrend_order=2,
+            mp_significance=0.999, wnoise_band=[0.5, 1.8], max_noise_modes=max_modes, detrend_order=1,
         )
-    elif args.nmat == "corr2":
+    elif nmat_arg == "corr2":
         nmat_uncorr = mapmaking.NmatUncorr()
         nmat_corr   = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window,
-            mode_bins=[1e-4,1e-1,4.0], bmin_eigvec=5, eig_lim=5, bin_edges="exp",
+            mode_bins=[1e-4,1e-1,4.0], bmin_eigvec=5, single_lim=None, bin_edges="exp",
         )
         noise_model = mapmaking.NmatScaledvecs(nmat_uncorr, nmat_corr, window=args.window)
     else: 
-        raise ValueError("Unrecognized noise model '%s'" % args.nmat)
+        raise ValueError("Unrecognized noise model '%s'" % nmat_arg)
 
     # Set up the pointing matrix and mapmaker
     signal_map = mapmaking.SignalMap(
@@ -361,6 +379,7 @@ for ipass, passinfo in enumerate(passes):
         recenter=recenter,
         tiled=args.tiled > 0,
         interpol=args.interpol,
+        apply_wobble=args.apply_wobble,
     )
     signal_cut  = mapmaking.SignalCut(comm=comm, dtype=dtype_tod)
     signals     = [signal_cut, signal_map]
@@ -396,7 +415,7 @@ for ipass, passinfo in enumerate(passes):
                 if len(preprocess_config)==1:
                     # NOTE: Passing with meta fails for now, so we are unable to do direct restrictions on meta hence the commented code above
                     # We instead restrict the obs after loading and preprocessing.
-                    obs = preprocess.load_and_preprocess(obs_id, configs=preproc_init, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
+                    obs,_ = preprocess.load_and_preprocess(obs_id, configs=preproc_init, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
                 else:
                     obs = preprocess.multilayer_load_and_preprocess(obs_id, configs_init=preproc_init, configs_proc=preproc_proc, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
             
@@ -406,6 +425,7 @@ for ipass, passinfo in enumerate(passes):
             # Note: This should ideally be done before loading the obs, see comments above.
             obs.restrict("dets", np.sort(obs.dets.vals))
             if args.max_dets is not None:
+                obs.restrict("dets", np.sort(obs.dets.vals))
                 obs.restrict('dets', obs['dets'].vals[:args.max_dets])
             
             # We add flags if missing.
@@ -518,7 +538,7 @@ for ipass, passinfo in enumerate(passes):
     x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
 
     t1 = time.time()
-    for step in mapmaker.solve(maxiter=passinfo.maxiter, x0=x0, maxerr=1e-6):
+    for step in mapmaker.solve(maxiter=passinfo.maxiter, x0=x0, maxerr=args.maxerr):
         t2 = time.time()
         dump = step.i % 10 == 0
         L.info("CG step %4d %15.7e %8.3f %s" % (step.i, step.err, t2-t1, "" if not dump else "(write)"))

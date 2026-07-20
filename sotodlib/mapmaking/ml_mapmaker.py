@@ -291,6 +291,7 @@ class SignalMap(Signal):
         tile_shape=(500, 500),
         tiled=False,
         interpol=None,
+        apply_wobble=False,
         cut_field= "flags.glitch_flags",
     ):
         """Signal describing a sky map in the coordinate system given by "sys", which defaults
@@ -306,6 +307,7 @@ class SignalMap(Signal):
         self.dtype = dtype
         self.tiled = tiled
         self.interpol = interpol
+        self.apply_wobble = apply_wobble
         self.data = {}
         self.cut_field = cut_field
         ncomp = len(comps)
@@ -331,6 +333,19 @@ class SignalMap(Signal):
         ctime  = obs.timestamps
         if cuts is None: cuts = obs[self.cut_field]
         pcut   = PmatCut(cuts)  # could pass this in, but fast to construct
+        if self.apply_wobble:
+            from sotodlib.coords.helpers import get_deflected_sightline
+            # Get deflection parameters
+            wobble_meta = obs.wobble_params
+            # Get the wobble-corrected sightline
+            sight = get_deflected_sightline(
+                obs,
+                wobble_meta,
+                site=smutils.unarr(obs.site),
+                weather=smutils.unarr(obs.weather),
+            )
+        else:
+            sight = None
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
@@ -353,6 +368,7 @@ class SignalMap(Signal):
                 weather=smutils.unarr(obs.weather),
                 site=smutils.unarr(obs.site),
                 interpol=self.interpol,
+                sight=sight,
             )
         # Build the RHS for this observation
         pcut.clear(Nd)

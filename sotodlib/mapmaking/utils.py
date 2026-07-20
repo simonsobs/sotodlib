@@ -776,7 +776,17 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
         elif key == "signal" and skip_signal:
             continue
         elif isinstance(obs[key], (core.AxisManager, core.FlagManager)):
-            res.wrap(key, downsample_obs(obs[key], down, skip_signal, fft_resample))
+            res.wrap(
+                key,
+                downsample_obs(
+                    obs[key],
+                    down,
+                    skip_signal=skip_signal,
+                    fft_resample=fft_resample,
+                    sparse_handling=sparse_handling,
+                    logger=logger,
+                ),
+            )
         # TODO: This is a pretty naive way of handling flags, could lead to wierdness
         # Again not an issue if this is done after preprocess
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
