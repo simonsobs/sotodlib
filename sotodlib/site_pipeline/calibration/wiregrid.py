@@ -43,7 +43,7 @@ def circular_mean(angle, error=1.0, axis=None, period=np.pi * 2):
     c = np.nansum(np.cos(angle * spin) * w, axis=axis)
     s = np.nansum(np.sin(angle * spin) * w, axis=axis)
     ave = e / np.hypot(c, s)
-    av = (np.arctan2(s, c) / spin) % period
+    av = np.arctan2(s, c) / spin
     return av, ave
 
 @dataclass
@@ -779,7 +779,8 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
     _det_angle_err = np.array(_det_angle_err).T
 
     # calibrated gamma
-    gamma, gamma_err = circular_mean(_det_angle, _det_angle_err, axis=1, period=np.pi)%np.pi
+    gamma, gamma_err = circular_mean(_det_angle, _det_angle_err, axis=1, period=np.pi)
+    gamma = gamma % np.pi
 
     # back ground polarization
     _bg_theta = (0.5*np.arctan2(_cfr.cy0, _cfr.cx0) - gamma)%np.pi
