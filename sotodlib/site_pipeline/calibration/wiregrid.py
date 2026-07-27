@@ -741,7 +741,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
         _det_angle_err.append(
             np.sqrt(
                 (_cd.Uerr.T[:,_i]**2 + _cd.Qerr.T[:,_i]**2) * 0.5
-                + (_cfr.cy0_err[_i]**2 + _cfr.cx0_err[_i]**2) * 0.5 / _cfr.cr[_i]
+                + (_cfr.cy0_err[:]**2 + _cfr.cx0_err[:]**2) * 0.5 / _cfr.cr[:]
             )
         )
 
