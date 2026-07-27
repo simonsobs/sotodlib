@@ -15,6 +15,36 @@ from sotodlib.io import hk_utils
 from sotodlib.site_pipeline.utils.logging import init_logger
 logger = init_logger('wiregrid', 'wiregrid: ')
 
+def circular_mean(angle, error=1.0, axis=None, period=np.pi * 2):
+    """
+    Circular mean of angle
+
+    Parameters
+    ----------
+    angle : np.ndarray
+        Angle in radian
+    error : float or np.ndarray
+        Angle error in radian used for weight. (Default: 1.0)
+    axis : int or None
+        Axis of array to take average (Default: None)
+    period : float
+        Period of angle in radian. (Default: 2pi)
+
+    Returns
+    -------
+    av : np.ndarray
+        Average angle
+    ave : np.ndarray
+        Error of average angle
+    """
+    spin = np.pi * 2 / period
+    w = (1 / error)**2
+    e = np.sqrt(np.nansum((error * w) ** 2, axis=axis))
+    c = np.nansum(np.cos(angle * spin) * w, axis=axis)
+    s = np.nansum(np.sin(angle * spin) * w, axis=axis)
+    ave = e / np.hypot(c, s)
+    av = (np.arctan2(s, c) / spin) % period
+    return av, ave
 
 @dataclass
 class wg_config:
@@ -749,8 +779,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
     _det_angle_err = np.array(_det_angle_err).T
 
     # calibrated gamma
-    gamma = np.nanmean(_det_angle, axis=1)%np.pi
-    gamma_err = np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1])
+    gamma, gamma_err = circular_mean(_det_angle, _det_angle_err, axis=1, period=np.pi)%np.pi
 
     # back ground polarization
     _bg_theta = (0.5*np.arctan2(_cfr.cy0, _cfr.cx0) - gamma)%np.pi
