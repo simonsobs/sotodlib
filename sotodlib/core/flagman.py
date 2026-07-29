@@ -172,7 +172,7 @@ class FlagManager(AxisManager):
             flags: List of flags to collapse together. Uses their names.
                    If flags is None then all flags are reduced
             method: How to collapse the data. Accepts 'union','intersect',
-                        or function.
+                    'except', or function.
             wrap: if True, add reduced flag to self
             new_flag: name of new flag, required if wrap is True
             remove_reduced: if True, remove all reduced flags from self
@@ -198,6 +198,8 @@ class FlagManager(AxisManager):
             op = lambda x, y: x+y
         elif method == 'intersect':
             op = lambda x, y: x*y
+        elif method == 'except':
+            op = lambda x, y: x*~y
         else:
             op = method
         out = reduce(op, to_reduce)

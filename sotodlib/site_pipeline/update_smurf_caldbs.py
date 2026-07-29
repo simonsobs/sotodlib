@@ -116,6 +116,8 @@ def smurf_detset_info(config: Union[str, dict],
     stream_maps = {}
     for tube in imprinter.tubes:
         for s, slot in enumerate(imprinter.tubes[tube]['slots']):
+            if imprinter.tubes[tube]['slots'].count(slot) > 1:
+                s='.'
             stream_maps[slot] = (f'ws{s}', tube)
 
     c = ctx.obsfiledb.conn.execute('select distinct name from detsets')
@@ -296,7 +298,7 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
         ridx = np.where(
             (iva['bands'] == band) & (iva['channels'] == chan)
         )[0]
-        if not ridx: # Channel doesn't exist in IV analysis
+        if ridx.size == 0: # Channel doesn't exist in IV analysis
             continue
 
         ridx = ridx[0]
@@ -344,7 +346,7 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
         ridx = np.where(
             (bsa['bands'] == band) & (bsa['channels'] == chan)
         )[0]
-        if not ridx: # Channel doesn't exist in bias step analysis
+        if ridx.size == 0: # Channel doesn't exist in bias step analysis
             continue
 
         ridx = ridx[0]

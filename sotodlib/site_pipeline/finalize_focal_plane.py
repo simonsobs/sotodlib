@@ -6,6 +6,10 @@ from copy import deepcopy
 from importlib import import_module
 from typing import List, Optional
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 import git
 import h5py
 import megham.transform as mt
@@ -229,6 +233,7 @@ def _load_ctx(config):
         logger.warning("No observations provided in configuration")
     amans = []
     dets = config["context"].get("dets", {})
+    failed = []
     for obs_id in obs_ids:
         roll = ctx.obsdb.get(obs_id)["roll_center"]
         if roll is None:
@@ -238,8 +243,9 @@ def _load_ctx(config):
             continue
         try:
             aman = ctx.get_meta(obs_id, dets=dets)
-        except metadata.loader.LoaderError:
+        except: # metadata.loader.LoaderError:
             logger.error("Failed to load %s, skipping", obs_id)
+            failed += [obs_id]
             continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
@@ -273,6 +279,8 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
     obs_ids = [aman.obs_info.obs_id for aman in amans]
+    if len(failed) > 0:
+        logger.error("Failed to load %s", str(failed))
 
     # Figure out stream_ids and OTs
     query_all = f"type=='obs' and start_time>{config['start_time']} and stop_time<{config['stop_time']}"
@@ -383,6 +391,7 @@ def _load_rset(config):
 def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
     config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
+    ot_config_path = os.path.join(config_dir, "shared/focalplane/optics_tubes.yaml")
     zemax_path = config.get("zemax_path", None)
 
     pointing_cfg = {
@@ -390,6 +399,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
         "tube_slot": tube_slot,
         "wafer_slot": wafer_slot,
         "config_path": config_path,
+        "ot_config_path": config_path,
         "zemax_path": zemax_path,
         "return_fp": False,
     }
@@ -399,7 +409,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, _, template_msk = focal_plane.map_by_det_id(aman)
+    fp, _, _, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -463,11 +473,14 @@ def _apply_pointing_model(config, aman):
             config["pointing_model"]["function"][1],
         )
     if "az" not in aman.pointing:
-        raise ValueError("Need to have az in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have az in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("az", np.deg2rad(aman.obs_info.az_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "el" not in aman.pointing:
-        raise ValueError("Need to have el in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have el in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("el", np.deg2rad(aman.obs_info.el_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "roll" not in aman.pointing:
-        raise ValueError("Need to have roll in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have roll in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("roll", np.deg2rad(aman.obs_info.roll_center)*np.ones(aman.dets.count), [(0, aman.dets)])
 
     params = config["pointing_model"].get("params", {})
     if "pointing_model" in aman:
@@ -481,6 +494,7 @@ def _apply_pointing_model(config, aman):
     ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
     ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
     ancil.wrap("roll_enc", np.rad2deg(aman.pointing.roll))
+    ancil.wrap("boresight_enc", -1*np.rad2deg(aman.pointing.roll)) # for SATs
     bs = func(aman, params, ancil, False)
     q_fp = quat.rotation_xieta(aman.pointing.xi, aman.pointing.eta)
     have_gamma = False
@@ -499,7 +513,7 @@ def _apply_pointing_model(config, aman):
         ~quat.euler(2, bs.roll)
         * ~quat.rotation_lonlat(-bs.az, bs.el)
         * quat.rotation_lonlat(-1 * aman.pointing.az, aman.pointing.el)
-        * quat.euler(2, aman.pointing.roll)
+        * quat.euler(2, (not config["pointing_model"].get("force_zero_roll", False)) * aman.pointing.roll)
         * q_fp
     )
 
@@ -771,7 +785,7 @@ def main():
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, r2, template_msk = focal_plane.map_by_det_id(aman)
+                fp, r2, det_boresight, template_msk = focal_plane.map_by_det_id(aman)
                 focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
@@ -808,7 +822,7 @@ def main():
 
                 # Store weighted values
                 weights = np.column_stack((weights, r2))
-                focal_plane.add_fp(i, fp, weights, template_msk)
+                focal_plane.add_fp(i, fp, weights, det_boresight, template_msk)
 
                 n_obs += 1
 

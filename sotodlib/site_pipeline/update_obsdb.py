@@ -19,8 +19,7 @@ The config file could be of the form:
     obsfiledb: dummyobsfiledb.sqlite
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
-    skip_bad_books: True
-    known_bad_books_file: path to \n-separated file listing bad books 
+    known_bad_books_file: path to file listing bad books (one obs_id per line)
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -34,6 +33,7 @@ from sotodlib.core import Context
 from sotodlib.site_pipeline import check_book
 from sotodlib.io import load_book
 import os
+import fnmatch
 import glob
 import yaml
 import re
@@ -84,14 +84,35 @@ def telescope_lookup(telescope: str):
         logger.error("unknown telescope type given by bookbinder")
         return {}
 
+def _find_books_deep(basedirs):
+    """Use os.walk to find any directories within basedirs (including each
+    basedir itself) that contains a file M_index.yaml, and yield each
+    directory path.
 
-def main(config: str, 
-        recency: float = None, 
-        booktype: Optional[str] = "both",
-        verbosity: Optional[int] = 2,
-        overwrite: Optional[bool] = False,
-        fastwalk: Optional[bool] = False):
+    """
+    for b in basedirs:
+        for dirpath, dirnames, filenames in os.walk(b):
+            if 'M_index.yaml' in filenames:
+                yield dirpath
 
+def _find_books_shallow(basedirs):
+    """Like _find_books_deep but only checks immediate subdirectories
+    within each basedir.
+
+    """
+    for b in basedirs:
+        for d in sorted(glob.glob(b + '/*/M_index.yaml')):
+            yield os.path.dirname(d)
+
+def main(config: str,
+         recency: float = None,
+         booktype: Optional[str] = "both",
+         verbosity: Optional[int] = 2,
+         overwrite: Optional[bool] = False,
+         fastwalk: Optional[bool] = False,
+         limit: Optional[int] = None,
+         filter: Optional[str] = None,
+         ):
     """
     Create or update an obsdb for observation or operations data.
 
@@ -112,7 +133,12 @@ def main(config: str,
         if True, assume the directories have a structure /base_dir/obs|oper/\\d{5}/...
         Then replace base_dir with only the directories where \\d{5} is greater or 
         equal to recency.
+    limit : int
+        Limit the number of books to process; helpful for debugging.
+        If None or 0, there is no limit.
+
     """
+    logger.handlers[0].setLevel(logging.DEBUG)
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:
@@ -150,16 +176,17 @@ def main(config: str,
         for col, typ in config_dict["obsdb_cols"].items():
             col_list.append(col+" "+typ)
         bookcartobsdb.add_obs_columns(col_list)
-    if "skip_bad_books" not in config_dict:
-        config_dict["skip_bad_books"] = False
     
     config_dict["known_bad_books"] = []
-    if "known_bad_books_file" in config_dict:
+    if config_dict.get("known_bad_books_file"):
         try:
             with open(config_dict["known_bad_books_file"], "r") as bbf:
-                config_dict["known_bad_books"] = bbf.read().split("\n")
+                # Read the file, dropping empty lines and lines led by #.
+                config_dict["known_bad_books"] = [
+                    x.strip() for x in bbf.readlines() if x.strip()[:1] not in ["", "#"]]
         except:
-            raise IOError("Bad books file couldn't be read in")
+            raise IOError("Failed to read bad books file: " +
+                          str(config_dict["known_bad_books_file"]))
         
     #How far back we should look
     tnow = time.time()
@@ -175,33 +202,52 @@ def main(config: str,
     if fastwalk:
         abv_tback = int(f"{int(tback):05}"[:5]) #Make sure we have at least five chars
         abv_tnow = int(f"{int(tnow):05}"[:5])
-        abv_codes = np.arange(abv_tback, abv_tnow+1)
+        abv_codes = list(range(abv_tback, abv_tnow+1))
         #Build the combinations base_dir/booktype/\d{5}
+        bd_fmt = "{base_dir}/{obs_type}/{abv_code}"
+        logger.info(f"Search path limited to {bd_fmt}")
+        logger.info(f" where base_dir in {base_dir}")
+        logger.info(f" and obs_type in {accept_type}")
+        logger.info(f" and abv_code in [{abv_codes[0]}-{abv_codes[-1]}]")
         base_dir = [f"{os.path.join(x[0], x[1], str(x[2]))}" for x in product(base_dir, accept_type, abv_codes)]
-        logger.info(f"Looking in the following directories only: {str(base_dir)}")
+        book_cand_iterable = _find_books_shallow(base_dir)
+    else:
+        book_cand_iterable = _find_books_deep(base_dir)
 
-    for bd in base_dir:
-        #Find folders that are book-like and recent
-        for dirpath, _, _ in os.walk(bd):
-            if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-                _, book_id = os.path.split(dirpath)
-                if book_id in existing and not overwrite:
-                    continue
-                if book_id in config_dict["known_bad_books"]:
-                    logger.debug(f"{book_id} known to be bad, skipping it")
-                    continue
-                edit_time = os.path.getmtime(dirpath)
-                if edit_time > tback:
-                    #Looks like a book folder and edited recently enough
-                    bookcart.append(dirpath)
+    skipped_count = 0
+    for dirpath in book_cand_iterable:
+        _, book_id = os.path.split(dirpath)
+        if book_id in existing and not overwrite:
+            continue
+        if book_id in config_dict["known_bad_books"]:
+            logger.debug(f"{book_id} known to be bad, skipping it")
+            skipped_count += 1
+            continue
+        edit_time = os.path.getmtime(dirpath)
+        if edit_time > tback:
+            #Looks like a book folder and edited recently enough
+            bookcart.append(dirpath)
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
+    if skipped_count:
+        logger.info(f"(Excluded {skipped_count} known bad books.)")
+
+    if filter is not None:
+        bookcart = [bookpath for bookpath in bookcart
+                    if fnmatch.fnmatch(bookpath, filter)]
+        logger.info(f"Filtering to match pattern {filter}: leaves {len(bookcart)} items.")
+
     #Check the books for the observations we want
+    op_counter = 0
     bad_book_counter = 0
+
     for bookpath in sorted(bookcart):
+        if limit and op_counter >= limit:
+            break
         if check_meta_type(bookpath) in accept_type:
             t1 = time.time()
-            logger.info(f"Examining book at {bookpath}")
+            op_counter += 1
+            logger.info(f"Starting processing of book at {bookpath}")
             try:
                 #obsfiledb creation
                 ok, obsfiledb_info = check_book.scan_book_dir(
@@ -212,17 +258,9 @@ def main(config: str,
                     obsfiledb_info, logger, config_dict, overwrite=True)
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
-                if config_dict["skip_bad_books"]:
-                    _, book_id = os.path.split(bookpath)
-                    config_dict["known_bad_books"].append(book_id)
-                    logger.error(f"failed to add {bookpath}. There are now {len(config_dict['known_bad_books'])} known bad books.")
-                    bad_book_counter +=1
-                    if "known_bad_books_file" in config_dict:
-                        with open(config_dict["known_bad_books_file"], "w") as bbf:
-                            bbf.write("\n".join(config_dict["known_bad_books"]))
-                    continue
-                else:
-                    raise e
+                logger.error(f"Failed to add {bookpath}. Error: {e}")
+                bad_book_counter += 1
+                continue
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
@@ -262,20 +300,27 @@ def main(config: str,
             #Stream_ids and wafers
             try:
                 stream_ids = index["stream_ids"]
-                bookcartobsdb.add_obs_columns(["wafer_count int"])
-                very_clean["wafer_count"] = len(stream_ids)
+                unused_ids_check = np.ones(len(stream_ids), bool)
                 wafer_slots = index["wafer_slots"]
-                if len(wafer_slots) < len(stream_ids):
-                    logger.error("Missing info on some stream_ids")
-                    continue
-                bookcartobsdb.add_obs_columns(["wafer_slots_list str", "stream_ids_list str"])
+                wafer_count = 0
                 wafer_slots_list = ""
                 stream_ids_list = ",".join(stream_ids)
                 for slot in wafer_slots:
                     if slot["stream_id"] in stream_ids:
                         wafer_slots_list += slot["wafer_slot"]+","
-                very_clean["wafer_slots_list"] = wafer_slots_list[:-1]#Eliminate last comma
+                        wafer_count += 1
+                        unused_ids_check[stream_ids.index(slot["stream_id"])] = False
+                very_clean["wafer_count"] = wafer_count
+                very_clean["wafer_slots_list"] = wafer_slots_list[:-1] #Eliminate last comma
                 very_clean["stream_ids_list"] = stream_ids_list
+                if np.any(unused_ids_check): 
+                    #Some stream_ids not linked to wafers.
+                    bad_streams = [sid for sid, uic in zip(stream_ids, unused_ids_check) if uic]
+                    bad_streams_string = ", ".join(map(str, bad_streams))
+                    logger.error(f"Missing info on some stream_ids: {bad_streams_string}")
+                    bad_book_counter += 1
+                    continue
+                bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
             except KeyError:
                 logger.error("Unable to find stream_ids or wafer slots")
 
@@ -338,8 +383,9 @@ def main(config: str,
         else:
             bookcart.remove(bookpath)
     if bad_book_counter != 0:
-        logger.error(f"Found {bad_book_counter} new bad books, There are now {len(config_dict['known_bad_books'])} known bad books.")
+        logger.error(f"Failed to add {bad_book_counter} books.")
         raise(Exception)
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -356,6 +402,10 @@ def get_parser(parser=None):
         help="If true, writes over existing entries")
     parser.add_argument("--fastwalk", action="store_true",
         help="Assume known directory tree shape and speed up walkthrough")
+    parser.add_argument("--limit", type=int,
+        help="Limit processing to only this number of book candidates.")
+    parser.add_argument("--filter", type=str, default=None,
+        help="Limit processing to books (full path) matching this fnmatch wildcard string.")
     return parser
 
 

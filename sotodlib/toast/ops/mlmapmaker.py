@@ -420,7 +420,7 @@ class MLMapmaker(Operator):
              view_ranges = np.array(
                  [[x.first, x.last] for x in ob.intervals[self.view]]
              )
-             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
+             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges.astype(np.int32), nsample)
 
         # Convert the focalplane offsets into the expected form
         det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
@@ -637,10 +637,8 @@ class MLMapmaker(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        timer = Timer()
         comm = data.comm.comm_world
         gcomm = data.comm.comm_group
-        timer.start()
 
         if self.write_div == 'all':
             self.write_div = self.comps
@@ -714,6 +712,8 @@ class MLMapmaker(Operator):
 
         for ipass, passinfo in enumerate(passes):
             # The multipass mapmaking loop
+            timer = Timer()
+            timer.start()
             log.info_rank(
                 f"Starting pass {ipass + 1}/{npass}, maxit={passinfo.maxiter} "
                 f"down={passinfo.downsample}, interp={passinfo.interpol}",
@@ -780,7 +780,7 @@ class MLMapmaker(Operator):
             if comm is not None:
                 comm.barrier()
             log.info_rank(
-                f"MLMapmaker wrapped observations in",
+                f"MLMapmaker wrapped observations and built noise models in",
                 comm=comm,
                 timer=timer,
             )

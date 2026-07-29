@@ -41,7 +41,7 @@ def make_map(tod,
         If specified, trim source-centored map to a local square with `size`, in radian.
         If None, not trimming will be applied. Only valid when `centor_on` is specified.
     res : float, optional
-        The resolution of the output map, in radian.        
+        The resolution of the output map, in radian.
     dsT : array-like or None, optional
         The input dsT timestream data. If None, the 'dsT' field of `tod` will be used.
     demodQ : array-like or None, optional
@@ -92,7 +92,7 @@ def make_map(tod,
                 tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU', hwp=flip_gamma)
         else:
             P, X = coords.planets.get_scan_P(tod, planet=center_on, res=res, hwp=flip_gamma)
-            
+
 
     if det_weights is None:
         if det_weights_demod is None:
@@ -136,13 +136,13 @@ def make_map(tod,
     # remove weights
     mTQU = P.remove_weights(signal_map=mTQU_weighted,
                               weights_map=wTQU, comps='TQU')
-    
+
     output = {'map': mTQU,
              'weighted_map': mTQU_weighted,
              'weight': wTQU}
     return output
 
-def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False):
+def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, interpol=None, sight=None):
     """
     Generate simulated TOD with HWP from a given signal map.
 
@@ -152,22 +152,24 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         cuts (RangesMatrix, optional): Cuts to apply to the data. Default is None.
         flip_gamma (bool, optional): Whether to flip detector coordinate. If you use the HWP, keep it `True`. Default is True.
         wrap (bool, optional): Whether to wrap the simulated data. Default is False.
-        modulated (bool, optional): If True, return modulated signal. If False, return the demodulated signal 
-        (`dsT`, `demodQ`, and `demodU`). Default is False. 
+        modulated (bool, optional): If True, return modulated signal. If False, return the demodulated signal
+        (`dsT`, `demodQ`, and `demodU`). Default is False.
+        interpol : Sub-pixel interpolation method. If None it will be nearest. Can be bilinear.
+        sight : A CelestialSightLine, representing the boresight pointing. Default is None.
 
     Returns:
         `modulate==False`: A tuple containing the TOD (np.array) of dsT, demodQ and demodU.
         `modulate==True` : The modulated TOD (np.array)
-        
+
     """
     Tmap, Qmap, Umap = signal_map
-    
-    P = coords.P.for_tod(tod=tod, geom=signal_map.geometry, cuts=cuts, 
-                         comps='QU', hwp=flip_gamma)
+
+    P = coords.P.for_tod(tod=tod, sight=sight, geom=signal_map.geometry, cuts=cuts,
+                         comps='QU', hwp=flip_gamma, interpol=interpol)
     dsT_sim = P.from_map(Tmap, comps='T')
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
-    
+
     if modulated is False:
         if wrap:
             tod.wrap('dsT', dsT_sim, [(0, 'dets'), (1, 'samps')])
@@ -177,6 +179,8 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
     else:
         assert 'hwp_angle' in tod._fields
         signal_sim = dsT_sim + demodQ_sim*np.cos(4*tod.hwp_angle) + demodU_sim*np.sin(4*tod.hwp_angle)
+        # signal is promoted to float64 because hwp_angle is float64, cast back to float32
+        signal_sim = signal_sim.astype('float32')
         if wrap:
             tod.wrap('signal', signal_sim, [(0, 'dets'), (1, 'samps')])
         return signal_sim
@@ -206,11 +210,11 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
     and tod.demodU, in place.
     To get Qr Ur timestreams, run `rotate_demodQU(tod)` and then `rotate_demodQU(tod, radial=True)`.
     To restore the Q U timestreams, run `rotate_demodQU(tod, sign=-1, radial=True)`.
-    
+
 
     Args:
         tod : an axisManager object
-        update_focal_plane (bool, optional): Whether to update focal_plane.gamma angles consistent with new coordinate reference. 
+        update_focal_plane (bool, optional): Whether to update focal_plane.gamma angles consistent with new coordinate reference.
             Make this True for polarization mapmaking using make_map.
         offset : float, optional
             The rotation angle in degrees to apply (default is 0).
@@ -218,8 +222,8 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
             A sign factor to control the direction of the rotation (default is +1).
         radial : bool, optional
             If True and the Q U timestreams in tod are in a common telescope flame, this function turns Q U
-            into Qr Ur. 
-            
+            into Qr Ur.
+
 
     """
     if radial:

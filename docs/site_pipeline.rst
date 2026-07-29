@@ -97,6 +97,191 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb-ancil
+------------------
+
+This script may be used to update ancillary data archives and then to
+update an ObsDb with reduced statistics from those archives.  The
+script requires a configuration file, which includes a list of
+"datasets"; each dataset corresponds to some ancillary data source and
+a method for reducing that data to be summarized in :class:`ObsDb
+<sotodlib.core.metadata.ObsDb>` columns.  Each dataset is mapped to a
+class in the :mod:`sotodlib.io.ancil` module; the code there defines
+how the data are to be obtained, stored, and reduced.
+
+The main processing commands are ``update-base-data`` and
+``update-obsdb``.  For each of these, the caller can specify which
+configured datasets they want to run on, and what time range to
+consider for the update.
+
+For example, to perform a bulk update of all ancillary data archives,
+considering data from the past week, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-base-data -c ancil.yaml --lookback-days=7
+
+
+To then update the specified obsdb, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-obsdb -c ancil.yaml --lookback-days=7
+
+
+In automation (e.g. from cronjob) users will most likely use the
+``run-job`` command, which can run a pre-configured series of
+operations (different combinations of ``update-base-data`` and
+``update-obsdb``).  That might look like::
+
+  so-site-pipeline update-obsdb-ancil \
+    run-job -c ancil.yaml standard_7day_update
+
+
+This script complements the basic Book checking and indexing done by
+``site_pipeline.update_obsdb``. To import records from some upstream
+obsdb into the "target_obsdb", use the ``import-records`` command
+(this requires ``upstream_obsdb`` to be set in the config file).  To
+trigger a run of the ``site_pipeline.update_obsdb`` script, the
+``update-books`` command can be used.  Note this command should be
+provided with a config file suitable for
+``site_pipeline.update_obsdb``.  The CLI arguments ``config_file``,
+``lookback_days``, and ``redo`` are translated to ``config``,
+``recency`` and ``overwrite``, respectively.
+
+For testing there are ``check`` and ``test`` commands.  The ``check``
+command simply instantiates an engine for each dataset -- basically
+checking for configuration problems and summarizing some easily
+determined state.  E.g.::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+      check --dataset apex-pwv
+
+  Loading config file ancil.yaml ...
+    dataset=apex-pwv
+      output_dir: apex/
+      files_found: 33
+
+
+The ``test`` command can be used to load data and run a reduction
+operation, targeting a specific obs in the ObsDb.  For example::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test --dataset apex-pwv \
+        --query "type == 'obs' and timestamp > 1760100000"
+
+  apex-pwv
+  obs_1760103123_satp1_1111111 {'mean': 0.48, 'start': 0.44, 'end': 0.51, 'span': 0.13}
+  obs_1760106068_satp1_1111111 {'mean': 0.6, 'start': 0.58, 'end': 0.82, 'span': 0.31}
+  obs_1760108443_satp1_1111111 {'mean': 0.78, 'start': 0.78, 'end': 0.78, 'span': 0.0}
+  ...
+
+Or with a specific obs_id::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test obs_1760168230_satp1_1111111
+
+  apex-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.56, 'start': 0.57, 'end': 0.55, 'span': 0.06}
+
+  toco-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.439, 'start': 0.459, 'end': 0.463, 'span': 0.091}
+
+  pwv-combo
+  obs_1760168230_satp1_1111111 {'mean': 0.44, 'std': 0.018, 'qual': 1.0}
+
+  weather-station
+  obs_1760168230_satp1_1111111 {'wind_speed': 1.2, 'wind_dir': 228.7, 'uv': nan, 'ambient_temp': -2.83}
+  ...
+
+
+Configuration
+`````````````
+
+The configuration file is yaml.  In addition to some general settings
+at root level, two large sub-blocks are used to define the data
+archives (``datasets``) and the different job definitions
+(``job_defs``).
+
+In the ``datasets`` block, each entry will be parsed as the
+configuration for one of the classes registered in
+:py:data:`sotodlib.io.ancil.ANCIL_ENGINES`; find links to each
+engine's configuration dataclass in the :ref:`io.ancil Engines
+section<io-ancil-engines>`.  Note that the key of each entry is
+normally used to find the engine in ANCIL_ENGINES -- but you can call
+the datasets entries whatever you want as long as the ``class`` is
+defined, in the block (i.e. instead of ``"apex-pwv": {...}`` you could
+have ``"my-weird-name": {"class": "apex-pwv", ...}``).
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # ObsDb to use for update-obsdb jobs
+  target_obsdb: /so/metadata/obsdb.sqlite
+
+  # ObsDb to use as a source for "import-records" (optional; will not
+  # be modified).
+  upstream_obsdb: /so/metadata/obsdb0.sqlite
+
+  # This (optionally) sets the default data_prefix used for base data
+  # in all datasets (can be overridden by setting data_prefix in a
+  # dataset config block).
+  data_prefix: /data/ancil
+
+  # Datasets -- the entry names are looked up in
+  # the io.ancil registered engines.
+  datasets:
+    apex-pwv:
+      data_dir: apex/
+    toco-pwv:
+      data_dir: toco/
+      hkdb_config: "/db_configs/hkdb-site.cfg"
+    pwv-combo: {}
+
+  # job_defs -- a list of named jobs; this is like
+  # a shortcut for running common operations.
+  job_defs:
+    - name: basic
+      steps:
+        - command: "update-base-data"
+          lookback_days: 7
+          carry_fail: true
+        - command: "update-obsdb"
+          lookback_days: 3
+          redo: true
+        - command: "update-obsdb"
+          lookback_days: 7
+
+
+Each block in the job_defs list will be run, in sequence.  The dict is
+passed through to the command being run unaltered, except as noted:
+
+- ``config_file``, if not specified explicitly, will be set to the
+  path of this file.
+- ``command`` provides the name of the sub-command to run (as if it
+  had been specified on command line).
+- ``ignore_fail``, if set to true, will cause the step to not block
+  completion of subsequent steps if it fails; the script may exit
+  successfully in the end.
+- ``carry_fail``, if set to true, will permit subsequent steps to
+  run, if this step fails, but will cause the whole job to fail, in
+  the end.
+
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb_ancil
+   :func: get_parser
+   :prog: update-obsdb-ancil
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb_ancil
+   :members:
+   :undoc-members:
+
 update-smurf-caldbs
 -----------------------
 This update script is used to add detset and calibration metadata to manifest
@@ -163,7 +348,7 @@ make_det_info_wafer
 ```````````````````
 
 This script uses basic array construction inputs to assemble a table
-of information about a set of UFMs and save it toan HDF5 file.  The
+of information about a set of UFMs and save it to an HDF5 file.  The
 resulting datasets may be used to populate ``det_info.wafer``, once
 the ``det_id`` of the readout channels is known.  The detector info
 mapping created by this script is re-usable as long as the UFM
@@ -191,12 +376,276 @@ values, add a config file entry like this::
     150: 280
 
 
+For LF arrays, the inputs and outputs are somewhat different and the
+config should include ``mode: LF``; e.g.::
+
+  output_dir: ./lat_wafer_info_260211
+  array_info_dir: "/home/pipeline/site-pipeline-configs/shared/detmapping/design/"
+
+  mode: LF
+
+  stream_ids:
+    - mfm_lot1
+
+
 The output database ``wafer_info.sqlite`` and HDF5 file
 ``wafer_info.h5`` are written to the ``output_dir``, which is created
 if it does not exist.
 
-make_read_det_match
+
+get_brightsrc_pointing_part1  
+----------------------------
+
+The two-part ``get_brightsrc_pointing_part{}`` script set will solve for the xieta
+coordinates of detectors that observe a bright source during an observation.
+
+It is a two part process that requires a map step and then a TOD step.
+The scripts require the settings and preprocessing config files described below. 
+
+For job submission and parallelization, see example NERSC slurm submission config at the end of this section.
+
+The code will process all wafers unless otherwise specified. 
+It is recommended to run with ``parallel_job: True`` in the config files if analyzing 
+multiple wafers at once. 
+Otherwise, specify a wafer slot or restrict detectors in command line args to debug.
+
+Command Line arguments:
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1
+   :func: get_parser
+
+
+There options to include min_ctime and max_ctime arguments, which will process all observations
+in the time frame, is not recommended unless severely restricting the detectors for debugging.
+
+
+Generated results
 ```````````````````
+The Step 1 map-based analysis scripts will generate the following outputs in the specified directory:
+
+ 1. Single detector maps in ``/results/single_det_maps/<obs_id>_<ws#>.hdf``. 
+
+  * All single maps are packaged in a single hdf file, with detector readout_id as the keys in the h5py file. 
+
+ 2. Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/map_based_results``
+ as specified in the Step 1 config file. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'
+
+  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, R2], N rows>``
+
+
+The Step 2 TOD-based analysis scripts will use the map-based results as a starting point
+ and then generate the finalized outputs in the specified directory:
+
+ 1.  Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/tod_based_results``
+ as specified in config file for Step-2. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'.
+ The median boresight values from small time range the source was visible to each detector is included.
+
+  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, xi_err, eta_err, R2, redchi2, az, el, roll], N rows>``
+ 
+Configuration Files
+```````````````````
+The configuration files to be input as ``configs`` in the command line should 
+have the following arguments as well as any preprocessing steps wished to be taken.
+Only processing steps that are agnostic of det-match can be used to do
+initial analyses without formalized metadata.
+
+The parameters in these examples could be used for SAT mid-freq moon observations.
+
+Step 1 Config:
+
+.. code-block:: yaml
+
+  context_file: /path/to/context.yaml
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
+
+  optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
+  single_det_maps_dir: /path/to/results/single_det_maps
+  results_dir: /path/to/results/map_based_results
+
+  parallel_job: True  #For job submission. Parallel across wafers.
+  wafer_mask_det: 8.  # (degrees) mask around detector to cut TOD when source too far away. 
+  res_deg: 0.3
+  xieta_bs_offset: [0., 0.]  #Good to input xieta offset in radians. (!!! for satp2)
+  save_normal_roll: False  #false for SAT, true for LAT
+  save_force_zero_roll: True  #true for SAT, false for LAT
+
+  hit_circle_r_deg: 7.  # radial mask to decide which UFMs are hit by source and should be analyzed.
+  hit_time_threshold: 600  #seconds, if hit_time not met then UFM does not get analyzed.
+
+  process_pipe:
+    - name: 'detrend'
+      process:
+        count: 2000
+        method: 'linear'
+    - name: 'apodize'
+      process:
+        apodize_samps: 2000
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "low_pass_sine2"
+        trim_samps: null
+        filter_params:
+          cutoff: 1.9
+          width: 0.2
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "high_pass_sine2"
+        trim_samps: 2000
+        filter_params:
+          cutoff: 0.05
+          width: 0.1
+  
+Part 2 is the TOD-based step. Its config file should look like the following.
+The parameters in these examples are used for SAT mid-freq moon observations.
+
+.. code-block:: yaml
+
+  context_file: /path/to/context.yaml
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
+
+  optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
+  fp_hdf_dir: /path/to/results/map_based_results from step 1 config file. 
+      # If force_zero_roll is was True, then append _force_zero_roll to the end.
+      # Just make sure it matches where the results from Step 1 are.
+  result_dir: /path/to/resuls/tod_based_results #Where you want the final Step2 results to show up.
+  
+  parallel_job: True
+  force_zero_roll: True  #Results will show up roatated in the xi-eta results as they are on the sky.
+  ds_factor: 40
+  mask_deg: 2.5  # (degrees) size for circular mask around SSO (helps exclude focal plane reflections too)
+  fit_func_name: 'gaussian2d_nonlin'
+  max_non_linear_order: 3  #Suggested to use 1 for jupiter or sso's 
+                           #that do not saturate.
+  fwhm_init_deg: 0.5  # (degrees) Lower for SATp2
+  error_estimation_method: 'force_one_redchi2'
+  flag_name_rms_calc: 'around_source'
+  flag_rms_calc_exclusive: False
+
+  process_pipe:
+    - name: 'detrend'
+      process:
+        count: 2000
+        method: 'linear'
+    - name: 'fourier_filter'
+      process:
+        signal_name: 'signal'
+        filt_function: 'iir_filter'
+        trim_samps: null
+        filter_params:
+          invert: True
+    - name: 'apodize'
+      process:
+        apodize_samps: 2000
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "low_pass_sine2"
+        trim_samps: null
+        filter_params:
+          cutoff: 1.9
+          width: 0.2
+    - name: 'source_flags'
+      source_flags_name: 'source_wide'
+      save: True
+      calc:
+        mask:
+          shape: circle
+          xyr: [0., 0., 5.0]
+        merge: True
+        max_pix: 10000000000
+    - name: 'source_flags'
+      source_flags_name: 'source_narrow'
+      save: True
+      calc:
+        mask:
+          shape: circle
+          xyr: [0., 0., 3.0]
+        merge: True
+        max_pix: 10000000000
+    - name: 'combine_flags'
+      process:
+        flag_labels: ['source_wide.moon', 'source_narrow.moon']
+        method: 'except' 
+        total_flags_label: 'around_source'
+    - name: 'flag_turnarounds'
+      process:
+        truncate: True
+    - name: 'sub_polyf'
+      process: 
+        method: 'legendre'
+        degree: 2
+        mask: 'around_source'
+        exclusive: False
+
+Example NERSC slurm job submission config file
+``````````````````````````````````````````````
+
+.. code-block:: yaml
+  #!/bin/bash -l
+
+  #SBATCH --qos=shared
+  #SBATCH --constraint=cpu
+  #SBATCH --nodes=1
+  #SBATCH --ntasks=1
+  
+  #SBATCH --cpus-per-task=14
+  #SBATCH --time=00:30:00
+  #SBATCH --mem=220G`` #(may need regular queue & up to 400 Gb for long obs)
+  
+  export OMP_NUM_THREADS=1
+  set -e
+
+  tele=$1
+  obs=$2
+  map=$3
+  basis=$4
+  source="moon_from_moon"
+
+  ymldir="/path/to/processing_settings_config_folder"
+  yfile="${ymldir}/preprocess_config_moon_${basis}_based_${tele}.yaml"
+
+  if (($map)); then
+    echo submitted map job;
+    srun -n 1 -N 1 -c 14 python3 
+       /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile
+       --obs_id=${2} --sso_name="moon";
+  else
+    echo submitted tod job;
+    srun -n 1 -N 1 -c 14 python3 
+        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile 
+        --obs_id=${2} --sso_name="moon";
+  fi
+
+
+Submit the job submission file with the following commands:
+
+1. For Step 1 map-based
+
+ * ``sbatch submit_moon_job_script.sh <platform> <obs_id> 1 map``
+
+2. For Step 2 TOD based
+
+ * ``sbatch submit_moon_job_script.sh <platform> <obs_id> 0 tod``
+
+
+get_brightsrc_pointing_part2
+----------------------------
+See Part 1 for description
+
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :func: get_parser
+
+
+make_read_det_match
+-------------------
 This script generates the readout ID to detector ID mapping required to
 translate between the detector hardware information (ex: pixel position) and the
 readout IDs of the resonators used to index the SMuRF data. The script uses the 
@@ -264,6 +713,7 @@ entries mater.
         - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
           multi: true
+
 
 update_det_match
 ------------------
@@ -510,6 +960,10 @@ The ``focal_plane_full`` dataset contains nine columns:
 - ``eta_m``: The measured eta in radians
 - ``gamma_m``: The measured gamma in radians.
 - ``weights``: The average weights of the measurements for this det.
+- ``r2``: The fit weight passed in from the get_brightsrc_pointing dataset
+- ``az``: The median Az value in radians from source-detector crossing
+- ``el``: The median El value in radians from source-detector crossing
+- ``roll``: The median Roll value in radians from source-detector crossing
 - ``n_point``: The number of pointing fits used for the det.
 - ``n_gamma``: The number of gamma fits used for this det.
 
@@ -550,7 +1004,7 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
 By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
+If you are running in ``per_obs`` mode then it will be indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
@@ -979,6 +1433,73 @@ timestreams. A typical configuration file could look like this:
         # Path to housekeeping data (this is used for extracting pwv)
         hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
+make-depth1-map
+---------------
+
+This script will create depth1 maps.
+
+Configuration yaml file
+````````````````````````
+
+The mapmaker is configured by supplying a yaml file with ``--config-file``.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_depth1_map
+   :func: get_parser
+   :prog: make-depth1-map
+
+A typical configuration file could look like this:
+
+.. code-block:: yaml
+
+        # Query
+        query: "1"
+
+        # Context file containing TODs
+        context: 'context.yaml'
+        # A preprocess database configuration file that will tell the script how to process the timestreams
+        preprocess_config: ./lat_config_mf.yaml
+        # Telescope info
+        site: 'so_lat'
+
+        # Mapping area footprint
+        area: 'geometry.fits'
+
+        # Output Directory and file name prefix
+        odir: './output/'
+
+        # Mapmaking meta
+        comps: 'T' # TQU
+        downsample: 1 # Downsample TOD by this factor
+        tiled: 0 # Tiling boolean (0 or 1)
+        unit: 'K'
+        maxiter: 2
+        srcsamp: 'srcsamp_mask.fits'
+        
+        # Scripting tools
+        verbose: True
+        quiet: False
+        tasks_per_group: 4
+
+        # Database integration
+        mapcat_database_name: './mapcat.sqlite'
+        mapcat_depth_one_parent: './output/'
+
+
+
+update-mapviewer-dbs
+--------------------
+
+This module maintains databases for mapviewer instances that show atomic/depth-1 maps
+per instrument.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_mapviewer_dbs
+   :func: get_parser
+   :prog: update-mapviewer-dbs
 
 QDS Monitor
 ===========
@@ -1215,9 +1736,91 @@ API
 Support
 =======
 
-.. automodule:: sotodlib.site_pipeline.util
+utils
+-----
+
+Utilities for site_pipeline.
+
+alerts
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.alerts
    :members:
    :undoc-members:
+
+archive
+```````
+
+.. automodule:: sotodlib.site_pipeline.utils.archive
+   :members:
+   :undoc-members:
+
+config
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.config
+   :members:
+   :undoc-members:
+
+
+constants
+`````````
+
+.. automodule:: sotodlib.site_pipeline.utils.constants
+   :members:
+   :undoc-members:
+
+depth1_utils
+````````````
+
+.. automodule:: sotodlib.site_pipeline.utils.depth1_utils
+   :members:
+   :undoc-members:
+
+exceptions
+``````````
+
+.. automodule:: sotodlib.site_pipeline.utils.exceptions
+   :members:
+   :undoc-members:
+
+io
+``
+
+.. automodule:: sotodlib.site_pipeline.utils.io
+   :members:
+   :undoc-members:
+
+logging
+```````
+
+.. automodule:: sotodlib.site_pipeline.utils.logging
+   :members:
+   :undoc-members:
+
+mapcat
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.mapcat
+   :members:
+   :undoc-members:
+
+obsdb
+`````
+
+.. automodule:: sotodlib.site_pipeline.utils.obsdb
+   :members:
+   :undoc-members:
+
+pipeline
+````````
+
+.. automodule:: sotodlib.site_pipeline.utils.pipeline
+   :members:
+   :undoc-members:
+
+jobdb
+-----
 
 .. automodule:: sotodlib.site_pipeline.jobdb
    :members:

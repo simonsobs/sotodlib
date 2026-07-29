@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import DbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
@@ -167,7 +168,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          pb_path: Optional[str] = None):
 
     temp_subdir = "temp"
 
@@ -243,7 +245,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             if db is not None and not overwrite:
                 x = db.inspect({'obs:obs_id': obs_id})
                 if x is not None and len(x) != 0 and len(x) != len(groups):
-                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    try:
+                        [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    except Exception as e:
+                        logger.error(f"filtering of {groups} for {obs_id} with entry {x} failed with {e}")
+                        raise
+
 
             for group in groups:
                 if 'NC' not in group:
@@ -291,7 +298,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     # ensure db exists up front to prevent race conditions
-    pp_util.get_preprocess_db(configs, group_by, logger)
+    db = pp_util.get_preprocess_db(configs, group_by, logger)
 
     # get stats db
     statsdb_path = configs.get("statsdb", None)
@@ -320,69 +327,73 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
+    # batch updates to ManifestDb
+    batch_size = configs['archive'].get('batch_size', 1)
+    
     add_obs_cols = True
-    pb_name = f"pb_{str(int(time.time()))}.txt"
+
+    pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
-        for future in tqdm(as_completed_callable(futures), total=total,
-                           desc="preprocess_tod", file=f,
-                           miniters=max(1, total // 100)):
-            obs_id, group = futures_dict[future]
-            out_meta = (obs_id, group)
-            try:
-                out_dict, errors, stats = future.result()
-                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-                logger.info(f"{obs_id}: {group} extracted successfully")
-            except Exception as e:
-                errmsg, tb = PreprocessErrors.get_errors(e)
-                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-                out_dict = None
-                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+        with DbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
+            for future in tqdm(as_completed_callable(futures), total=total,
+                            desc="preprocess_tod", file=f,
+                            miniters=max(1, total // 100)):
+                obs_id, group = futures_dict[future]
+                out_meta = (obs_id, group)
+                try:
+                    out_dict, errors = future.result()
+                    obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                    logger.info(f"{obs_id}: {group} extracted successfully")
+                except Exception as e:
+                    errmsg, tb = PreprocessErrors.get_errors(e)
+                    logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                    obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                    out_dict = None
+                    errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-            futures.remove(future)
+                futures.remove(future)
 
-            logger.info(f"Adding future result to db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
-                                  logger, overwrite)
+                pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
+                                    logger, overwrite, db_manager=db_manager)
 
-            # update jobdb
-            if jobdb_path is not None:
-                tags = {}
-                tags["obs:obs_id"] = obs_id
-                for gb, g in zip(group_by, group):
-                    tags['dets:' + gb] = g
-                job = jdb.get_jobs(jclass="init", jstate=JState.open, tags=tags)
-                with jdb.locked(job) as j:
-                    j.mark_visited()
-                    if errors[0] is not None:
-                        j.jstate = JState.failed
-                        for _t in j._tags:
-                            if _t.key == "error":
-                                _t.value = errors[0]
-                    else:
-                        j.jstate = JState.done
+                # update jobdb
+                if jobdb_path is not None:
+                    tags = {}
+                    tags["obs:obs_id"] = obs_id
+                    for gb, g in zip(group_by, group):
+                        tags['dets:' + gb] = g
+                    job = jdb.get_jobs(jclass="init", jstate=JState.open, tags=tags)
+                    with jdb.locked(job) as j:
+                        j.mark_visited()
+                        if errors[0] is not None:
+                            j.jstate = JState.failed
+                            for _t in j._tags:
+                                if _t.key == "error":
+                                    _t.value = errors[0]
+                        else:
+                            j.jstate = JState.done
 
-            # update statsdb
-            if (
-                errors[0] is None
-                and statsdb_path is not None
-                and stats is not None
-            ):
-                if add_obs_cols == True:
-                    stats_keys = []
-                    for k, v in stats.items():
-                        if isinstance(v, int):
-                            t = "int"
-                        elif isinstance(v, float):
-                            t = "float"
-                        elif isinstance(v, str):
-                            t = "string"
+                # update statsdb
+                if (
+                    errors[0] is None
+                    and statsdb_path is not None
+                    and stats is not None
+                ):
+                    if add_obs_cols == True:
+                        stats_keys = []
+                        for k, v in stats.items():
+                            if isinstance(v, int):
+                                t = "int"
+                            elif isinstance(v, float):
+                                t = "float"
+                            elif isinstance(v, str):
+                                t = "string"
 
-                        stats_keys.append(f"{k} {t}")
+                            stats_keys.append(f"{k} {t}")
 
-                    statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
-                    add_obs_cols = False
-                statsdb.update_obs((obs_id, *group), stats)
+                        statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
+                        add_obs_cols = False
+                    statsdb.update_obs((obs_id, *group), stats)
 
     if raise_error:
         n_obs_fail = 0
@@ -475,6 +486,12 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--pb-path',
+        help="Path to where to save progress bar.",
+        type=str,
+        default=None
+    )
     return parser
 
 
@@ -491,7 +508,8 @@ def main(configs: str,
          nproc: int = 4,
          compress: bool = False,
          run_from_jobdb: bool = False,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         pb_path: Optional[str] = None):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -510,7 +528,8 @@ def main(configs: str,
               nproc=nproc,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              pb_path=pb_path)
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)
