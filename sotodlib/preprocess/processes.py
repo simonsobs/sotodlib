@@ -13,7 +13,8 @@ from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
-                                   count_cuts, flag_cut_select,
+                                   count_cuts, has_ratio_cuts,
+                                   flag_cut_select,
                                    sparse_to_ranges_matrix)
 
 from sotodlib.preprocess import preprocess_util as pp_util
@@ -250,11 +251,18 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        flag = sparse_to_ranges_matrix(
-            proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
-        )
-        n_cut = count_cuts(flag)
-        keep = n_cut <= self.select_cfgs["max_n_glitch"]
+        if "sig_glitch" in self.select_cfgs and "max_n_glitch" in self.select_cfgs:
+            flag = sparse_to_ranges_matrix(
+                proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
+            )
+            n_cut = count_cuts(flag)
+            keep = n_cut <= self.select_cfgs["max_n_glitch"]
+        else:
+            keep = np.ones(proc_aman.dets.count, dtype=bool)
+
+        if "max_t_frac" in self.select_cfgs:
+            above_ratios = has_ratio_cuts(proc_aman[self.glitch_name].glitch_flags, self.select_cfgs["max_t_frac"])
+            keep = keep & ~above_ratios
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
