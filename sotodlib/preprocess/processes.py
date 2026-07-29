@@ -199,7 +199,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     Saves retsults in proc_aman under the "glitches" field.
 
     Data section should define either a glitch significant "sig_glitch" and a maximum
-    number of glitches "max_n_glitch" or a maximum fraction of the TOD samples that is
+    number of glitches "max_n_glitch" and/or a maximum fraction of the TOD samples that is
     allowed to be flagged by glitches.
 
     Example configuration block::
