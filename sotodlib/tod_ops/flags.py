@@ -990,11 +990,15 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
 def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
     """
     Generate flags for invalid detectors in the focal plane.
-        The tod.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Axismanager containing the focal plane AxisManager.
     merge : bool
-        If true, merges the generated flag into aman.
+        If True, merges the generated flag into aman.
     overwrite : bool
-        If true, write over flag. If false, don't.
+        If True, write over flag. If False, don't.
     invalid_flags_name : str
         Name of flag to add to aman.flags if merge is True.
 
@@ -1020,6 +1024,51 @@ def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='f
             aman.flags.wrap(invalid_flags_name, msk_invalid_fp, [(0, 'dets'), (1, 'samps')])
 
     return msk_invalid_fp
+
+
+def get_det_cal_nan_flags(aman, fields, merge=True, overwrite=True, invalid_flags_name="det_cal_nan_flags"):
+    """
+    Generate flags for invalid det_cal parameters.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager containing the det_cal AxisManager.
+    fields : list[str]
+        List of fields in det_cal to check for NaNs.
+    merge : bool
+        If True, merges the generated flag into aman.
+    overwrite : bool
+        If True, write over flag. If False, don't.
+    invalid_flags_name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    msk_invalid_det_cal : RangesMatrix
+        RangesMatrix of invalid detectors in det_cal.
+    """
+
+    x = Ranges(aman.samps.count)
+    flag_invalid_det_cal = np.any(
+        [np.isnan(getattr(aman.det_cal, field)) for field in fields],
+        axis=0,
+    )
+
+    msk_invalid_det_cal = RangesMatrix(
+        [Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_det_cal]
+    )
+
+    if merge:
+        if invalid_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {invalid_flags_name} already exists in aman.flags")
+        if invalid_flags_name in aman.flags:
+            aman.flags[invalid_flags_name] = msk_invalid_det_cal
+        else:
+            aman.flags.wrap(invalid_flags_name, msk_invalid_det_cal, [(0, 'dets'), (1, 'samps')])
+
+    return msk_invalid_det_cal
+
 
 def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     """
