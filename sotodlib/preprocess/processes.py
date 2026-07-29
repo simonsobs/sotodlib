@@ -198,8 +198,9 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
 
     Saves retsults in proc_aman under the "glitches" field.
 
-    Data section should define a glitch significant "sig_glitch" and a maximum
-    number of glitches "max_n_glitch."
+    Data section should define either a glitch significant "sig_glitch" and a maximum
+    number of glitches "max_n_glitch" or a maximum fraction of the TOD samples that is
+    allowed to be flagged by glitches.
 
     Example configuration block::
         
@@ -218,6 +219,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         select:
           max_n_glitch: 10
           sig_glitch: 10
+          max_t_frac: 0.1
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
