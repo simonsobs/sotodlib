@@ -558,3 +558,75 @@ def simulated_telescope(
         site=site,
     )
     return telescope
+
+
+def convert_sim_meta(obs):
+    """Convert a synthetic observation into a format that matches real data.
+
+    This goes through the metadata (mainly the focalplane table) and renames fields to
+    match the way that the same information appears when loading real data.  The
+    observation is modified in-place.
+
+    **This is a temporary workaround**.  Once simulated observations have the same
+    focalplane columns and other metadata as real data, this function can be removed.
+
+    Args:
+        obs (Observation):  The toast observation
+
+    Returns:
+        None
+
+    """
+
+    tele_name_convert = {
+        "SAT1": "satp1",
+        "SAT2": "satp2",
+        "SAT3": "satp3",
+        "SAT4": "satp4",
+        "SAT5": "satp5",
+        "SAT6": "satp6",
+        "LAT": "lat",
+    }
+
+    tele = obs.telescope
+    if tele.name in tele_name_convert:
+        tele_name = tele_name_convert[tele.name]
+    else:
+        tele_name = tele.name
+    tele_uid = tele.uid
+
+    site = tele.site
+
+    fp = tele.focalplane
+    fov = fp.field_of_view
+    rate = fp.sample_rate
+
+    fp_data = fp.detector_data
+
+    # tube_convert = {
+    # }
+
+    col_convert = {
+        "readout_id": "det_info:readout_id",
+        "stream_id": "det_info:stream_id",
+        "wafer_slot": "det_info:wafer_slot",
+        #"tube_slot": f"det_info:{}"
+    }
+
+
+
+    print(fp_data.colnames)
+
+    new_fp = Focalplane(
+        detector_data=new_fp_data,
+        field_of_view=fov,
+        sample_rate=rate,
+        thinfp=None,
+    )
+
+    new_tele = Telescope(
+        name=tele_name,
+        uid=tele_uid,
+        focalplane=new_fp,
+        site=site,
+    )
