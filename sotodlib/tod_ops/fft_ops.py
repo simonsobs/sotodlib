@@ -356,7 +356,7 @@ def calc_psd(
         if kwargs["nperseg"] > max_samples:
             nseg = 1
         else:
-            nseg = int(max(n_samps, max_samples) / kwargs["nperseg"])
+            nseg = int((stop - start) / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
         axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
