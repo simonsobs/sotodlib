@@ -128,7 +128,7 @@ class HDF5AtomicTest(TestCase):
         # even when a reader has it open.
 
         # Ensure the atomic update env variable is unset
-        os.environ.pop("SOTODLIB_HDF5_ATOMIC_UPDATE")
+        os.environ.pop("SOTODLIB_HDF5_ATOMIC_UPDATE", None)
         opts = [
             "--test_dir",
             self.outdir,
