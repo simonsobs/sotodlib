@@ -2330,6 +2330,65 @@ class PCAFilter(_Preprocess):
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
 
+
+class JointQUNmatFilter(_Preprocess):
+    """Apply a joint demodulated Q/U Fourier Nmat filter.
+
+    The Q and U detector streams are whitened and analyzed together. Modes
+    inconsistent with independent noise according to a Marchenko--Pastur plus
+    Tracy--Widom threshold are inverse-covariance weighted in Fourier space.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_filter"
+        skip_on_sim: False
+        use_data_aman: True
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        process:
+          fmin: 0.0015
+          fmax: 0.2
+          noise_band: [0.5, 1.75]
+          bin_width_hz: 0.2
+          operator: "nmat"
+          mp_significance: 0.999
+          n_modes_max: 18
+          singleness_max: 0.55
+          profile_n_bins: 40
+          profile_min_nfreq: 20
+          profile_diagonal_floor: 0.05
+          psd_scale: 1.0
+
+    See sotodlib.tod_ops.nmat_filter.apply_joint_qu_nmat_filter.
+    """
+    name = "joint_qu_nmat_filter"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = None
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        model_aman = data_aman if data_aman is not None else aman
+        _, diag = tod_ops.nmat_filter.apply_joint_qu_nmat_filter(
+            aman,
+            signal_Q=self.signal_Q,
+            model_tod=model_aman,
+            signal_U=self.signal_U,
+            in_place=True,
+            return_diagnostics=True,
+            **self.process_cfgs,
+        )
+        logger.info(
+            "Joint Q/U Nmat filter selected %s modes with mean "
+            "subtraction weights %s",
+            diag["selected_modes"].tolist(),
+            diag["mean_mode_weights"].tolist(),
+        )
+        return aman, proc_aman
+
+
 class GetCommonMode(_Preprocess):
     """
     Calculate common mode.
@@ -3275,6 +3334,7 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(JointQUNmatFilter)
 _Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
