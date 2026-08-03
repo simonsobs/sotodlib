@@ -491,8 +491,8 @@ class TestAxisManager(unittest.TestCase):
 
     def test_420_axis_mismatch_policy(self):
         # wrap/merge intersect axes that share a name but not coverage;
-        # the on_mismatch policy controls whether that is silent
-        # ('intersect'), logged ('warn', default) or a ValueError ('error').
+        # the on_mismatch policy controls whether log warning ('warn') or
+        # raise ValueError ('error').
         logger = core.axisman.logger
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
@@ -505,34 +505,36 @@ class TestAxisManager(unittest.TestCase):
                      [(0, 'dets'), (1, 'samps')])
             return tod
 
-        # Default policy: shorter incoming axis logs a warning, then
-        # truncates exactly as before.
+        # on_mismatch='warn' warns shorter axis and then truncates.
         tod = make_tod()
         with self.assertLogs(logger, 'WARNING'):
             tod.wrap('x', np.zeros(n - 100),
-                     [(0, core.OffsetAxis('samps', n - 100, ofs))])
+                     [(0, core.OffsetAxis('samps', n - 100, ofs))],
+                     on_mismatch='warn')
         self.assertEqual(tod.samps.count, n - 100)
         self.assertEqual(tod.sig.shape, (3, n - 100))
 
-        # Longer incoming axis warns too (the incoming data is cut).
+        # Longer incoming axis warns.
         tod = make_tod()
         with self.assertLogs(logger, 'WARNING'):
             tod.wrap('x', np.zeros(n + 100),
-                     [(0, core.OffsetAxis('samps', n + 100, ofs))])
+                     [(0, core.OffsetAxis('samps', n + 100, ofs))],
+                     on_mismatch='warn')
         self.assertEqual(len(tod.x), n)
 
         # Same count but different offset warns.
         tod = make_tod()
         with self.assertLogs(logger, 'WARNING'):
             tod.wrap('x', np.zeros(n),
-                     [(0, core.OffsetAxis('samps', n, ofs + 10))])
+                     [(0, core.OffsetAxis('samps', n, ofs + 10))],
+                     on_mismatch='warn')
         self.assertEqual(tod.samps.count, n - 10)
 
         # LabelAxis truncation (dets subset via child) warns.
         tod = make_tod()
         child = core.AxisManager(core.LabelAxis('dets', dets[:2]))
         with self.assertLogs(logger, 'WARNING'):
-            tod.wrap('child', child)
+            tod.wrap('child', child, on_mismatch='warn')
         self.assertEqual(tod.dets.count, 2)
 
         # No error with matching axes.
