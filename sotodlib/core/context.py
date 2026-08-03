@@ -356,21 +356,25 @@ class Context(odict):
 
             # Both tones and det_info exist.
             else:
-                # Grab all band and channel info for dets + tdets
+                # Grab all stream, band, and channel info for dets + tdets
+                det_streams = aman.det_info.stream_id
                 det_bands = aman.det_info.smurf.band
                 det_channels = aman.det_info.smurf.channel
+                tdet_streams = aman.tones.stream_id
                 tdet_bands = aman.tones.band
                 tdet_channels = aman.tones.channel
     
                 # Create a sorted array of dets + tdets
-                special_band_ch = [(b, c) for b, c in zip(tdet_bands, tdet_channels)]
-                normal_band_ch = [(b, c) for b, c in zip(det_bands, det_channels)]
-                band_ch = np.array(sorted(normal_band_ch + special_band_ch))
+                special_band_ch = [(s, b, c) for s, b, c in zip(tdet_streams, tdet_bands, tdet_channels)]
+                normal_band_ch = [(s, b, c) for s, b, c in zip(det_streams, det_bands, det_channels)]
+                band_ch = sorted(normal_band_ch + special_band_ch)
     
                 # Grab the det idxs from the det band + channels
                 det_indexes = np.full(len(band_ch), np.nan)
-                for i, (b, c) in enumerate(band_ch):
-                    w = np.where((det_bands == b) & (det_channels == c))[0]
+                for i, (s, b, c) in enumerate(band_ch):
+                    w = np.where((det_streams == s) & \
+                                 (det_bands == b) & \
+                                 (det_channels == c))[0]
                     if len(w) == 0:
                         continue
     
@@ -378,8 +382,10 @@ class Context(odict):
     
                 # Grab the tdet idxs from the tdet band + channels
                 tdet_indexes = np.full(len(band_ch), np.nan)
-                for i, (b, c) in enumerate(band_ch):
-                    w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
+                for i, (s, b, c) in enumerate(band_ch):
+                    w = np.where((tdet_streams == s) & \
+                                 (tdet_bands == b) & \
+                                 (tdet_channels == c))[0]
                     if len(w) == 0:
                         continue
     
@@ -393,13 +399,20 @@ class Context(odict):
     
                 # Finally use the tdet idxs to fill in the tdet data
                 # For the signal, band, and channels
+
+                # If there is no signal, need to pre-populate the signal axis
+                if no_signal:
+                    del aman['signal']
+                    aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
                 for i, tidx in enumerate(tdet_indexes):
                     if np.isnan(tidx):
                         continue
-    
+   
                     aman.signal[i] = aman.tones.signal[int(tidx)]
+                    aman.det_info.stream_id[i] = aman.tones.stream_id[int(tidx)]
                     aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
                     aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
+                    aman.det_info.wafer.type[i] = 'PROB'
     
                 def add_tdet_ids(aman, tdet_indexes, tdet_ids):
                     """

@@ -323,7 +323,10 @@ class SuperLoader:
         if len(results) == 1:
             result = results[0]
         else:
-            result = results[0].concatenate(results)
+            if isinstance(results[0], core.AxisManager):
+                result = results[0].concatenate(results, other_fields='first')
+            else:
+                result = results[0].concatenate(results)
         return result
 
     def load(self, spec_list, request, det_info=None, free_tags=[],

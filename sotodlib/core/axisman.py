@@ -870,25 +870,78 @@ class AxisManager:
             else:
                 # By this point we have a non AxisManager
                 # assignment assigned to only our axis.
-                # Build new array with the correct indexes.
-                shape = [len(indexes)]
-                if isinstance(v, np.ndarray):
-                    for s in np.shape(v)[1:]:
-                        shape.append(s)
 
-                new_v = np.empty(shape, dtype=v.dtype)
-                if isinstance(v.dtype, float):
-                    # Fill any float arrays with nans
-                    # Non float arrays may have weird
-                    # behavior for newly added indexes. 
-                    # Oh well.
-                    new_v *= np.nan  
+                from so3g.proj import RangesMatrix, Ranges
+                import scipy.sparse as sp
 
-                for i, index in enumerate(indexes):
-                    if np.isnan(index) or not (0 <= index < len(v)):
-                        continue
+                if isinstance(v, RangesMatrix):
+                    # RangesMatrix has no dtype; build a new one by selecting
+                    # ranges, using empty Ranges for missing indices.
+                    if len(v.shape) >= 2:
+                        nsamps = v.shape[-1]
+                    elif len(v.ranges) > 0 and hasattr(v.ranges[0], 'count'):
+                        nsamps = v.ranges[0].count
+                    else:
+                        nsamps = 0
 
-                    new_v[i] = v[int(index)]
+                    new_ranges = []
+                    for index in indexes:
+                        if (isinstance(index, float) and np.isnan(index)) \
+                                or not (0 <= int(index) < len(v.ranges)):
+                            new_ranges.append(Ranges(nsamps))
+                        else:
+                            new_ranges.append(v.ranges[int(index)])
+                    new_v = RangesMatrix(new_ranges)
+
+                elif sp.issparse(v):
+                    # Sparse matrix: select rows without densifying.
+                    # Invalid indices become all-zero rows.
+                    v_csr = v.tocsr()
+                    n_rows_in = v_csr.shape[0]
+                    valid_mask = np.array([
+                        not (isinstance(idx, float) and np.isnan(idx))
+                        and 0 <= int(idx) < n_rows_in
+                        for idx in indexes
+                    ])
+                    safe = np.array([
+                        int(idx) if valid else 0
+                        for idx, valid in zip(indexes, valid_mask)
+                    ], dtype=np.int64)
+                    selected = v_csr[safe]
+                    if not valid_mask.all():
+                        diag = sp.diags(valid_mask.astype(v_csr.dtype))
+                        selected = (diag @ selected).tocsr()
+                    new_v = selected
+
+                else:
+                    # ndarray (or anything else with len/shape/dtype/__getitem__)
+                    shape = [len(indexes)]
+                    if isinstance(v, np.ndarray):
+                        for s in np.shape(v)[1:]:
+                            shape.append(s)
+                    elif hasattr(v, 'shape') and len(v.shape) > 1:
+                        for s in v.shape[1:]:
+                            shape.append(s)
+
+                    if v.dtype == float:
+                        # Fill any float arrays with nans
+                        # Non float arrays may have weird
+                        # behavior for newly added indexes.
+                        # Oh well.
+                        new_v = np.full(shape, np.nan)
+                    elif v.dtype == int:
+                        # Fill with -1 values which generally
+                        # correspond ot unassigned (e.g. bias lines)
+                        new_v = np.full(shape, -1)
+                    else:
+                        new_v = np.zeros(shape, dtype=v.dtype)
+
+                    v_len = v.shape[0] if hasattr(v, 'shape') and len(v.shape) > 0 else len(v)
+                    for i, index in enumerate(indexes):
+                        if np.isnan(index) or not (0 <= index < v_len):
+                            continue
+
+                        new_v[i] = v[int(index)]
 
             reindexed_vs[assignment] = new_v
             new_axes[assignment] = np.array(axes)
