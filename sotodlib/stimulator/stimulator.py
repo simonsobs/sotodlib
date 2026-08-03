@@ -607,8 +607,8 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         ensure_wrapped(
             aman.stm_cal.coadd_data,
             "x",
-            arr=np.full((aman.dets.count, n_bins), np.nan),
-            axis=[(0, "dets"), (1, "stm_coadd_bins")],
+            arr=np.full(n_bins, np.nan),
+            axis=[(0, "stm_coadd_bins")],
         )
 
         for filt_key in filt_keys:

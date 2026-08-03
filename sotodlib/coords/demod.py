@@ -179,6 +179,8 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
     else:
         assert 'hwp_angle' in tod._fields
         signal_sim = dsT_sim + demodQ_sim*np.cos(4*tod.hwp_angle) + demodU_sim*np.sin(4*tod.hwp_angle)
+        # signal is promoted to float64 because hwp_angle is float64, cast back to float32
+        signal_sim = signal_sim.astype('float32')
         if wrap:
             tod.wrap('signal', signal_sim, [(0, 'dets'), (1, 'samps')])
         return signal_sim
