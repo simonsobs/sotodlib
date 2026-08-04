@@ -156,7 +156,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
-                         t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
+                         t_buffer=2., az_buffer=None,
+                         kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
     Compute turnaround flags for a dataset.
@@ -177,8 +178,16 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         (Optional). Merge left and right scan flags as ``aman.flags.left_scan`` and ``aman.flags.right_scan`` if ``True``.
     overwrite : bool
         (Optional). Overwrite an existing flag in ``aman.flags`` with the same name.
-    t_buffer : float
-        (Optional). Buffer time (in seconds) for flagging turnarounds in ``scanspeed`` method.
+    t_buffer : float or tuple (float, float)
+        (Optional). Buffer time (in seconds) for flagging turnarounds in the ``scanspeed`` method.
+        If a single float is provided, half of the value is applied to each side (before and after)
+        of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
+        corresponding side.
+    az_buffer : None or float or tuple (float, float)
+        (Optional). Buffer angle (in degree) for flagging turnarounds in the ``az`` method.
+        If a single float is provided, half of the value is applied to each side (before and after)
+        of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
+        corresponding side.
     kernel_size : int
         (Optional). Size of the step-wise matched filter kernel used in ``scanspeed`` method.
     peak_threshold : float
@@ -201,18 +210,45 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     Ranges : RangesMatrix
         The turnaround flags as a Ranges object.
     """
-    if az is None : 
+    if az is None:
         az = aman.boresight.az
-        
+
     if method not in ['az', 'scanspeed']:
         raise ValueError('Unsupported method. Supported methods are `az` or `scanspeed`')
-    
+
     # `az` method: flag turnarounds based on azimuth threshold specifled by qlim
     elif method=='az':
         lo, hi = np.percentile(az, [qlim, 100 - qlim])
-        m = np.logical_or(az < lo, az > hi)
-        ta_flag = Ranges.from_bitmask(m)
-    
+
+        if az_buffer is None:
+            buffer_before, buffer_after = 0., 0.
+        elif np.isscalar(az_buffer):
+            buffer_before, buffer_after = az_buffer / 2., az_buffer / 2.
+        elif len(az_buffer) == 2:
+            buffer_before, buffer_after = az_buffer
+        else:
+            raise ValueError
+        buffer_before = np.deg2rad(buffer_before)
+        buffer_after = np.deg2rad(buffer_after)
+
+        daz = np.diff(az, append=az[-1])
+        if buffer_before == 0 and buffer_after == 0:
+            _ta_flag = np.logical_or(az < lo, az > hi)
+        else:
+            # top/bottom turnarounds, approaching/leaving
+            top_appr = (daz > 0) & (az > hi - buffer_before)
+            top_leav = (daz < 0) & (az > hi - buffer_after)
+            bot_appr = (daz < 0) & (az < lo + buffer_before)
+            bot_leav = (daz > 0) & (az < lo + buffer_after)
+            _ta_flag = top_appr | top_leav | bot_appr | bot_leav
+
+        _right_flag = (daz > 0) & ~_ta_flag
+        _left_flag  = (daz < 0) & ~_ta_flag
+
+        ta_flag = Ranges.from_bitmask(_ta_flag)
+        left_flag = Ranges.from_bitmask(_left_flag)
+        right_flag = Ranges.from_bitmask(_right_flag)
+
     # `scanspeed` method: flag turnarounds based on scanspeed.
     elif method=='scanspeed':
         daz = np.diff(az)
@@ -249,16 +285,26 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         _right_flag = np.zeros(aman.samps.count, dtype=bool)
         
         dt = np.mean(np.diff(aman.timestamps))
-        nbuffer_half = int(t_buffer/dt//2)
-        
+        if t_buffer is None:
+            nbuffer_before, n_buffer_after = 0, 0
+        elif isinstance(t_buffer, tuple):
+            nbuffer_before, nbuffer_after = t_buffer
+            nbuffer_before = int(nbuffer_before/dt)
+            nbuffer_after = int(nbuffer_after/dt)
+        else:
+            nbuffer_before, nbuffer_after = int(t_buffer/dt//2), int(t_buffer/dt//2)
+
         for ip,p in enumerate(peaks[:-1]):
-            _ta_flag[p-nbuffer_half:p+nbuffer_half] = True
-            if is_pos[ip]: 
+            _ta_flag[p-nbuffer_before:p+nbuffer_after] = True
+            if is_pos[ip]:
                 _right_flag[peaks[ip]:peaks[ip+1]] = True
             else:
                 _left_flag[peaks[ip]:peaks[ip+1]] = True
-        _ta_flag[peaks[-1]-nbuffer_half:peaks[-1]+nbuffer_half] = True
-        
+        _ta_flag[peaks[-1]-nbuffer_before:peaks[-1]+nbuffer_after] = True
+
+        left_flag = Ranges.from_bitmask(_left_flag)
+        right_flag = Ranges.from_bitmask(_right_flag)
+
         # Check the initial/last part. If the daz is the same as the other scaning part,
         # the part is regarded as left or right scan. If not, flagged as `_truncate_flag`, which
         # will be truncated if `truncate` is True, or flagged as `turnarounds` if `truncate` is False.
@@ -288,22 +334,6 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         check_sum = np.all(np.ones(aman.samps.count, dtype=int) == check_sum)
         if not check_sum:
             raise ValueError('Check sum failed. There are samples not allocated any of left, right, or truncate.')
-        
-        # merge left/right mask
-        left_flag = Ranges.from_bitmask(_left_flag)
-        right_flag = Ranges.from_bitmask(_right_flag)
-        if merge_lr:
-            if ("left_scan" in aman.flags or "right_scan" in aman.flags ) and not overwrite:
-                raise ValueError("Flag name left/right_flag already exists in aman.flags.")
-            else : 
-                if "left_scan" in aman.flags:
-                    aman.flags["left_scan"] = left_flag
-                else :
-                    aman.flags.wrap("left_scan", left_flag)
-                if "right_scan" in aman.flags:
-                    aman.flags["right_scan"] = right_flag
-                else :
-                    aman.flags.wrap("right_scan", right_flag)
 
         # truncate unstable scan before the first turnaround or after the last turnaround
         if truncate:
@@ -313,7 +343,21 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
-    
+
+    # merge left/right mask
+    if merge_lr:
+        if ("left_scan" in aman.flags or "right_scan" in aman.flags ) and not overwrite:
+            raise ValueError("Flag name left/right_flag already exists in aman.flags.")
+        else :
+            if "left_scan" in aman.flags:
+                aman.flags["left_scan"] = left_flag
+            else :
+                aman.flags.wrap("left_scan", left_flag)
+            if "right_scan" in aman.flags:
+                aman.flags["right_scan"] = right_flag
+            else :
+                aman.flags.wrap("right_scan", right_flag)
+
     # merge turnaround flags
     if merge:
         if name in aman.flags and not overwrite:
@@ -326,15 +370,12 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     if merge_subscans:
         get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan)
 
-    if method == 'az':
-        ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
-        return ta_exp
-    if method == 'scanspeed':
-        ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
-        left_exp = RangesMatrix([left_flag for i in range(aman.dets.count)])
-        right_exp = RangesMatrix([right_flag for i in range(aman.dets.count)])
-        return ta_exp, left_exp, right_exp
-    
+    ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
+    left_exp = RangesMatrix([left_flag for i in range(aman.dets.count)])
+    right_exp = RangesMatrix([right_flag for i in range(aman.dets.count)])
+    return ta_exp, left_exp, right_exp
+
+
 def get_glitch_flags(aman,
                      t_glitch=0.002,
                      hp_fc=0.5,
