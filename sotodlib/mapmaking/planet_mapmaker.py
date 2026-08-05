@@ -22,6 +22,12 @@ def save_pkl(data, path):
     with open(path, 'wb') as f:
         pickle.dump(data, f)
 
+def read_pkl(path):
+    with open(path, 'rb') as f:
+        ret = pickle.load(f)
+    return ret
+
+
 def FWHM2sigma(FWHM):
     fac = np.sqrt(8*np.log(2))
     return FWHM/fac
@@ -117,7 +123,7 @@ def planet_mapmake_eachobs(config_path, obs_id, wafer_info, verbosity = 3, debug
 
     # get inverce variance
     get_inv_var(configs, aman, full, logger=logger)
-
+    
     # Fit TOD
     if configs['mapmaking']['fittod']['process']:
         logger.debug('Execute to fit TOD')
