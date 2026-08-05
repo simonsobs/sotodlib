@@ -15,8 +15,8 @@
 #        example downloaded from: https://conda-forge.org/download/
 #        Make sure "conda" is in your path before running this script.
 #
-#    2.  If you are running on a cluster / HPC center you 
-#        should set the MPICC environment variable to the 
+#    2.  If you are running on a cluster / HPC center you
+#        should set the MPICC environment variable to the
 #        name of your MPI C compiler.  For example, at NERSC
 #        you would do:
 #
@@ -49,6 +49,10 @@
 pushd $(dirname $0) >/dev/null 2>&1
 scriptdir=$(pwd)
 popd >/dev/null 2>&1
+
+# List of conda packages from soconda
+common_url="https://raw.githubusercontent.com/simonsobs/soconda/refs/heads/main/config/common.txt"
+common_local="~/temporary_conda_package_list.txt"
 
 show_help () {
     echo "" >&2
@@ -129,7 +133,7 @@ fi
 
 # Determine whether we are installing MPI with conda.  This matters due
 # to a bug in the ucx package (required by the MPI packages).  The ucx package
-# will only install correctly if listed as an initial package during the 
+# will only install correctly if listed as an initial package during the
 # "create" command.
 
 conda_mpi="yes"
@@ -171,16 +175,15 @@ fi
 echo "Installing python-${pyversion}..."
 conda install --yes --update-all ${initial_pkgs}
 
-# Next, install build tools
-echo "Installing conda packages for development..."
-conda install --yes --update-all \
-    compilers \
-    pybind11 \
-    cmake \
-    ninja \
-    scikit-build-core \
-    setuptools \
-    setuptools-scm
+# Get the list of conda packages to install
+curl -SL -o "${common_local}" "${common_url}"
+
+# Install everything
+echo "Install SO dependencies from conda-forge..."
+conda install --yes --update-all --file "${common_local}"
+
+# Remove temp package list
+rm "${common_local}"
 
 # Reload the environment to pick up compiler environment variables
 conda deactivate
@@ -189,11 +192,6 @@ conda activate "${envname}"
 # The conda compiler packages make a symlink "cc", which conflicts
 # with the Cray MPI compiler needed for mpi4py.  Remove this symlink.
 rm -f "${CONDA_PREFIX}/bin/cc"
-
-# Install dependencies that we have on conda-forge
-echo "Installing SO packages that are on conda-forge"
-# FIXME: add so3g here eventually (spt3g is already there)
-conda install --yes pixell toast qpoint
 
 installed_pkgs="$(conda list | awk '{print $1}')"
 
@@ -204,7 +202,9 @@ python -m pip install pipgrip
 
 pushd "${scriptdir}" 2>&1 >/dev/null
 
-# FIXME: remove so3g (and the loop) once that package is on conda-forge
+# FIXME: Remove this entire loop once so3g and sotodlib
+# are on conda-forge.
+
 for pkg in "so3g" "."; do
     deps=$(pipgrip --threads 4 --pipe ${pkg} | sed -e 's/\(==[^[:space:]]\+\)//g')
     for dep in ${deps}; do
