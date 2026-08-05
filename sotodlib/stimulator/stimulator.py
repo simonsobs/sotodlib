@@ -241,9 +241,7 @@ def calc_timeconstant(aman, idxs=None):
                     if np.isnan(a0s).all():
                         continue
 
-                    result = models[fit_key].fit(
-                        a0s, params, f=f, method="least_squares"
-                    )
+                    result = models[fit_key].fit(a0s, params, f=f)
                     fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                 else:
                     if np.isnan(t0s).all():
@@ -259,13 +257,10 @@ def calc_timeconstant(aman, idxs=None):
                                 -np.array(t0s) * 360,
                                 params,
                                 f=f,
-                                method="least_squares",
                             )
                             fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                     else:
-                        result = models[fit_key].fit(
-                            -np.array(t0s) * 360, params, f=f, method="least_squares"
-                        )
+                        result = models[fit_key].fit(-np.array(t0s) * 360, params, f=f)
                         fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
 
     aman.stm_cal.wrap(
