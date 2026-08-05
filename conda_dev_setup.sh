@@ -52,13 +52,13 @@ popd >/dev/null 2>&1
 
 # List of conda packages from soconda
 common_url="https://raw.githubusercontent.com/simonsobs/soconda/refs/heads/main/config/common.txt"
-common_local="~/temporary_conda_package_list.txt"
+common_local="${HOME}/temporary_conda_package_list.txt"
 
 show_help () {
     echo "" >&2
     echo "Usage:  $0" >&2
     echo "    [-e <environment, either name or full path>]" >&2
-    echo "    [-p <python version (e.g. 3.12)>]" >&2
+    echo "    [-p <python version (e.g. 3.13)>]" >&2
     echo "" >&2
     echo "    Create a conda environment for SO development." >&2
     echo "" >&2
@@ -66,8 +66,7 @@ show_help () {
 }
 
 envname=""
-pyversion=$(python3 --version 2>&1 | awk '{print $2}' | sed -e "s#\(.*\)\.\(.*\)\..*#\1.\2#")
-extra="no"
+pyversion=3.13
 
 while getopts ":e:p:x" opt; do
     case $opt in
@@ -178,12 +177,15 @@ conda install --yes --update-all ${initial_pkgs}
 # Get the list of conda packages to install
 curl -SL -o "${common_local}" "${common_url}"
 
-# Install everything
+# Install conda dependencies
 echo "Install SO dependencies from conda-forge..."
 conda install --yes --update-all --file "${common_local}"
 
 # Remove temp package list
 rm "${common_local}"
+
+# Install sotodlib
+python3 -m pip install .
 
 # Reload the environment to pick up compiler environment variables
 conda deactivate
@@ -192,51 +194,6 @@ conda activate "${envname}"
 # The conda compiler packages make a symlink "cc", which conflicts
 # with the Cray MPI compiler needed for mpi4py.  Remove this symlink.
 rm -f "${CONDA_PREFIX}/bin/cc"
-
-installed_pkgs="$(conda list | awk '{print $1}')"
-
-# Some of our dependencies are only available from pypi.  Install
-# pipgrip so that we can try to install as many dependencies as
-# possible from conda-forge
-python -m pip install pipgrip
-
-pushd "${scriptdir}" 2>&1 >/dev/null
-
-# FIXME: Remove this entire loop once so3g and sotodlib
-# are on conda-forge.
-
-for pkg in "so3g" "."; do
-    deps=$(pipgrip --threads 4 --pipe ${pkg} | sed -e 's/\(==[^[:space:]]\+\)//g')
-    for dep in ${deps}; do
-        if [ ${dep} != ${pkg} ]; then
-            # Special handling of ruamel.yaml / ruamel-yaml.  This is a longstanding
-            # mess across PyPI and conda ecosystems...
-            if [ "${dep}" = "ruamel-yaml" ] || [ "${dep}" = "ruamel-yaml-clib" ]; then
-                dep="ruamel.yaml"
-            fi
-            depcheck=$(echo "$installed_pkgs" | grep -E "^${dep}\$")
-            if [ -z "${depcheck}" ]; then
-                # It is not already installed, try to install it with conda
-                echo "Attempt to install conda package for dependency \"${dep}\"..."
-                conda install --yes --quiet ${dep}
-                # A failure of the above command is NOT AN ERROR.  If the
-                # conda package does not exist, then the dependency will be
-                # installed by pip below.
-                if [[ $? = 0 ]]; then
-                    installed_pkgs="${installed_pkgs}"$'\n'"${dep}"
-                fi
-            else
-                echo "  Package for dependency \"${dep}\" already installed"
-            fi
-        fi
-    done
-    echo "Installing package ${pkg}"
-    python3 -m pip install ${pkg}
-    [[ $? != 0 ]] && exit 1
-    installed_pkgs="${installed_pkgs}"$'\n'"${pkg}"
-done
-
-popd 2>&1 >/dev/null
 
 # Install mpi4py from source if using an external MPI
 if [ "${conda_mpi}" = "no" ]; then
