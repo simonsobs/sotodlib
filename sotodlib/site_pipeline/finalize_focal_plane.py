@@ -33,7 +33,7 @@ from sotodlib.coords.fp_containers import (
 )
 from sotodlib.coords.pointing_model import apply_pointing_model
 from sotodlib.core import AxisManager, Context, IndexAxis, metadata
-from sotodlib.io.metadata import read_dataset
+from sotodlib.io.metadata import read_dataset, write_dataset, ResultSet
 from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "finalize_focal_plane: ")
@@ -54,7 +54,7 @@ def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
     scheme = metadata.ManifestScheme()
-    scheme.add_exact_match("dets:stream_id")
+    scheme.add_exact_match("dets:wafer.array")
     if per_obs:
         scheme.add_exact_match("obs:obs_id")
     else:
@@ -65,7 +65,11 @@ def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
     return metadata.ManifestDb(filename), base, group
 
 
-def _avg_focalplane(full_fp, tot_weight):
+def _avg_focalplane(full_fp, tot_weight, dists):
+    if np.sum(np.isfinite(dists)) > 5:
+        msk = (dists - np.nanmedian(dists)) > 3 * np.nanstd(dists)
+        msk *= np.isnan(dists)
+        full_fp[:, :, msk] = np.nan
     # Figure out how many good pointings we have for each det
     msk = np.isfinite(full_fp)
     n_obs = np.sum(np.any(msk, axis=1), axis=-1)
@@ -131,9 +135,14 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _load_template(template_path, ufm, pointing_cfg):
-    template_rset = read_dataset(template_path, ufm)
+def _load_template(template_path, stream_id, pointing_cfg, ufm):
+    template_rset = read_dataset(template_path, stream_id)
+    if "wafer_name" in template_rset.keys:
+        idx = np.where(template_rset["wafer_name"] == f"ufm_{ufm}")[0]
+        template_rset = template_rset.subset(rows=idx)
     det_ids = template_rset["dets:det_id"]
+    det_ids, i = np.unique(np.array(det_ids), return_index=True)
+    template_rset = template_rset.subset(rows=i)
     template = np.column_stack(
         (
             np.array(template_rset["xi"]),
@@ -249,8 +258,6 @@ def _load_ctx(config):
             continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
-        if aman.obs_info.tube_slot == "o6":
-            continue
         if "det_info" not in aman:
             raise ValueError(f"No det_info in {obs_id}")
         if "wafer" not in aman.det_info and dm_name in aman:
@@ -285,109 +292,20 @@ def _load_ctx(config):
         logger.error("Failed to load %s", str(failed))
 
     # Figure out stream_ids and OTs
-    query_all = f"type=='obs' and start_time>{config['start_time']} and stop_time<{config['stop_time']}"
     ot_sid = []
-    for obs in ctx.obsdb.query(query_all):
-        if obs["wafer_slots_list"] is None or obs["stream_ids_list"] is None:
-            continue
-        ot = obs["tube_slot"]
+    for aman in amans:
+        ot = aman.obs_info.tube_slot
+        tel = aman.obs_info.telescope_flavor
         if ot == "stp1":
             ot = "st1"
-        ot_sid += [
-            (obs["telescope_flavor"], ot, ws, sid)
-            for ws, sid in zip(
-                obs["wafer_slots_list"].split(","), obs["stream_ids_list"].split(",")
-            )
-        ]
+        ws = [w1 if w1 != "ws." else w2 for w1, w2 in zip(aman.det_info.wafer_slot, aman.det_info.wafer.wafer_slot)]
+        sid = aman.det_info.stream_id
+        ufm = aman.det_info.wafer.array
+        dat = np.column_stack([[tel]*len(ws), [ot]*len(ws), ws, sid, ufm]).tolist()
+        ot_sid += dat
     ot_sid = np.unique(np.array(ot_sid), axis=0)
 
     return amans, obs_ids, ot_sid
-
-
-def _load_rset_single(config):
-    obs_id = config["resultsets"].get("obs_id", "")
-    pointing_rset = read_dataset(*config["resultsets"]["pointing"])
-    pointing_aman = pointing_rset.to_axismanager(axis_key="dets:readout_id")
-    aman = AxisManager(pointing_aman.dets)
-    aman = aman.wrap("pointing", pointing_aman)
-
-    if "polarization" in config["resultsets"]:
-        polarization_rset = read_dataset(*config["resultsets"]["polarization"])
-        polarization_aman = polarization_rset.to_axismanager(axis_key="dets:readout_id")
-        aman = aman.wrap("polarization", polarization_aman)
-
-    det_info = AxisManager(aman.dets)
-    dm_rset = read_dataset(*config["resultsets"]["detmap"])
-    dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
-    det_info.wrap("wafer", dm_aman)
-    det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
-    det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
-    det_info.wrap(
-        "stream_id",
-        np.array([config["stream_id"].lower()] * det_info.dets.count),
-        [(0, det_info.dets)],
-    )
-    det_info.wrap(
-        "wafer_slot",
-        np.array([config["wafer_slot"].lower()] * det_info.dets.count),
-        [(0, det_info.dets)],
-    )
-    det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
-    det_info.det_id = np.char.strip(det_info.det_id)  # Needed for some old results
-    aman = aman.wrap("det_info", det_info)
-    aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
-
-    obs_info = AxisManager()
-    obs_info.wrap("telescope_flavor", config["telescope_flavor"].lower())
-    obs_info.wrap("tube_slot", config["tube_slot"].lower())
-    aman.wrap("obs_info", obs_info)
-
-    smurf = AxisManager(aman.dets)
-    if "band" in aman.pointing:
-        smurf.wrap("band", np.array(aman.pointing.band, dtype=int), [(0, smurf.dets)])
-    elif "wafer" in det_info and "smurf_band" in det_info.wafer:
-        smurf.wrap(
-            "band", np.array(det_info.wafer.smurf_band, dtype=int), [(0, smurf.dets)]
-        )
-    if "channel" in aman.pointing:
-        smurf.wrap(
-            "channel", np.array(aman.pointing.channel, dtype=int), [(0, smurf.dets)]
-        )
-    elif "wafer" in det_info and "smurf_channel" in det_info.wafer:
-        smurf.wrap(
-            "channel",
-            np.array(det_info.wafer.smurf_channel, dtype=int),
-            [(0, smurf.dets)],
-        )
-    aman.det_info.wrap("smurf", smurf)
-
-    return aman, obs_id
-
-
-def _load_rset(config):
-    stream_id = config["stream_id"]
-    telescope_flavor = config["telescope_flavor"].lower()
-    ot = config["tube_slot"].lower()
-    ws = config["wafer_slot"].lower()
-    obs = config["resultsets"]
-    _config = config.copy()
-    obs_ids = np.array(list(obs.keys()))
-    amans: List[Optional[AxisManager]] = [None] * len(obs_ids)
-    obs_info = AxisManager()
-    obs_info.wrap("stream_id", stream_id)
-    for i, (obs_id, rsets) in enumerate(obs.items()):
-        _config["resultsets"] = rsets
-        _config["resultsets"]["obs_id"] = obs_id
-        aman, _ = _load_rset_single(_config)
-        if "det_info" not in aman or "det_id" not in aman.det_info:
-            raise ValueError(f"No detmap for {obs_id}")
-        amans[i] = aman
-
-    return (
-        amans,
-        obs_ids,
-        [(telescope_flavor, ot, ws, stream_id)],
-    )
 
 
 def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
@@ -447,10 +365,11 @@ def _restrict_inliers(aman, focal_plane):
 
     # Now kill dets that seem too far from their match
     fp[~inliers] = np.nan
-    rot, sft = mt.get_rigid(fp, focal_plane.template.fp[template_msk, :2])
-    fp_aligned = mt.apply_transform(fp, rot, sft)
-    likelihood = mu.gen_weights(fp_aligned, focal_plane.template.fp[template_msk, :2])
-    inliers *= likelihood > 0.61  # ~1 sigma cut
+    if np.sum(inliers) >= 4:
+        rot, sft = mt.get_rigid(fp, focal_plane.template.fp[template_msk, :2])
+        fp_aligned = mt.apply_transform(fp, rot, sft)
+        likelihood = mu.gen_weights(fp_aligned, focal_plane.template.fp[template_msk, :2])
+        inliers *= likelihood > 0.61  # ~1 sigma cut
 
     # Now restrict the AxisManager
     inlier_det_ids = focal_plane.template.det_ids[template_msk][inliers]
@@ -614,12 +533,7 @@ def main():
     )
 
     # Load data
-    if "context" in config:
-        amans, obs_ids, ot_sids = _load_ctx(config)
-    elif "resultsets" in config:
-        amans, obs_ids, ot_sids = _load_rset(config)
-    else:
-        raise ValueError("No valid inputs provided")
+    amans, obs_ids, ot_sids = _load_ctx(config)
     if len(ot_sids) == 0:
         raise ValueError("No stream_ids found!")
     if np.any(ot_sids[:, 0] != ot_sids[0][0]):
@@ -682,7 +596,7 @@ def main():
             with h5py.File(outpath, "a") as f:
                 if group in f:
                     rx = Receiver.load(f, group)
-        for tel, ot, ws, stream_id in ot_sids:
+        for tel, ot, ws, stream_id, ufm in ot_sids:
             if len(stream_ids) > 0 and stream_id not in stream_ids:
                 continue
             logger.info("Working on %s", stream_id)
@@ -709,7 +623,7 @@ def main():
                     logger.error(message, stream_id)
 
             # Make pointing config
-            logger.info("\t%s is in %s %s %s", stream_id, tel, ot, ws)
+            logger.info("\t%s is in %s %s %s", ufm, tel, ot, ws)
             pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
 
             # Cnstructing the OT if we need to
@@ -735,19 +649,20 @@ def main():
                 )
             elif have_template:
                 logger.info("\tLoading template from %s", template_path)
-                template = _load_template(template_path, stream_id, pointing_cfg)
+                template = _load_template(template_path, stream_id, pointing_cfg, ufm)
             else:
                 raise ValueError(
                     "No template provided and unable to generate one for some reason"
                 )
 
             focal_plane = FocalPlane.empty(
-                template, stream_id, ws, len(amans), config=cfg_str
+                template, ufm, ws, len(amans), config=cfg_str
             )
             if focal_plane.template is None:
                 raise ValueError("Template is somehow None")
 
             n_obs = 0
+            dists = np.zeros(focal_plane.full_fp.shape[-1]) + np.nan
             for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids_restrict)):
                 logger.info("\tWorking on %s", obs_id)
                 if aman.dets.count < min_points:
@@ -828,6 +743,7 @@ def main():
                 focal_plane.add_fp(i, fp, weights, det_boresight, template_msk)
 
                 n_obs += 1
+                dists[i] = np.linalg.norm(sft)
 
             # Compute the average focal plane with weights
             (
@@ -835,7 +751,7 @@ def main():
                 focal_plane.weights,
                 focal_plane.n_point,
                 focal_plane.n_gamma,
-            ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight)
+            ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight, np.array(dists))
             tot_points = np.sum((focal_plane.n_point > 0).astype(int))
             focal_plane.id_strs = focal_plane.template.id_strs
             logger.info("\t%d points from %d obs in fit", tot_points, n_obs)
@@ -1089,6 +1005,14 @@ def main():
             f.create_group(group)
             receiver.save(f, (db, base), group)
 
+            # Make a dummy for the non-matched array in LF
+            outdt = [ ("dets:det_id", 'U8'), ("xi", np.float32), ("eta", np.float32), ("gamma", np.float32), ("padded", np.bool_), ]
+            fake = np.zeros((1,), outdt)
+            fake[0] = ("NO_MATCH", np.nan, np.nan, np.nan, True)
+            write_dataset(ResultSet.from_friend(fake), f, "fake", True)
+            entry = {"dets:wafer.array": "", "dataset": "fake"}
+            entry.update(base) # type: ignore
+            db.add_entry(entry, filename=os.path.basename(f.filename), replace=True)
 
 if __name__ == "__main__":
     main()
