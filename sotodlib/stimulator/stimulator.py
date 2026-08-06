@@ -1,14 +1,18 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import lmfit
-from pathlib import Path
 import ruptures as rpt
-from joblib import Parallel, delayed
+import astropy
 
 from sotodlib import tod_ops, core
 from sotodlib.io import hkdb
+from sotodlib.stimulator.utils_stimulator import (
+    func_sines,
+    func_response_amplitude,
+    func_response_phase_with_dt,
+)
 
 CHOPPING_FREQS = {
+    "f1_gain": 6,
     "f1": 6,
     "f2": 15,
     "f3": 33,
@@ -17,147 +21,24 @@ CHOPPING_FREQS = {
     "f6": 123,
     "f7": 147,
 }
-
-
-def _get_ufm_label(aman, i_det):
-    ufm = aman.det_info.stream_id[i_det][4:]
-    return ufm[0].upper() + ufm[1:]
-
-
-def get_ufm_list(run_type):
-    # Getting UFM names in LATR
-    #
-    # run_type: 'SO' or 'ASO', which means before or after ASO deployment on 2026
-    # Jan, respectively.
-
-    if run_type == "SO":
-        list_ufm = [
-            "Uv38",
-            "Uv39",
-            "Uv46",
-            "Uv31",
-            "Uv42",
-            "Uv47",
-            "Mv21",
-            "Mv24",
-            "Mv28",
-            "Mv13",
-            "Mv20",
-            "Mv34",
-            "Mv14",
-            "Mv32",
-            "Mv49",
-            "Mv25",
-            "Mv26",
-            "Mv11",
-        ]
-    elif run_typ == "ASO":
-        list_ufm = [
-            "Uv54",
-            "Uv58",
-            "Uv60",
-            "Uv57",
-            "Uv59",
-            "Uv62",
-            "Mv29",
-            "Mv68",
-            "Mv73",
-            "Mv65",
-            "Mv67",
-            "Mv75",
-            "Mv15",
-            "Mv64",
-            "Mv70",
-            "Mv63",
-            "Mv76",
-            "Mv77",
-            "Ln2",
-            "Ln3",
-            "Ln4",
-        ]
-    else:
-        raise ValueError("Invalid type. Please specify either 'SO' or 'ASO'.")
-
-    return list_ufm
-
-
-def get_obs_list(ufm, ctx, timestamp_min, timestamp_max):
-    # Getting obs_list for stimulator during specified time range
-    #
-    # ufm: ufm name
-    # ctx: context file
-    # timestamp_min: Minimum timestamp
-    # timestamp_max: Maximum timestamp
-
-    ufm = ufm.lower()
-    ot = get_ot(ufm)
-    downsample_factor_tag = get_downsample_factor_tags(ctx)
-
-    query = (
-        f"tube_slot == '{ot}' and stimulator "
-        f"and timestamp >= {timestamp_min} "
-        f"and timestamp <= {timestamp_max}"
-    )
-    obs_list = ctx.obsdb.query(
-        query,
-        tags=["stimulator", "gain", "time_constant", "gain_and_timeconstant"]
-        + downsample_factor_tag,
-    )
-
-    if len(obs_list) == 0:
-        raise ValueError(
-            "Error: No stimulator data in the specified time range"
-        )
-
-    return obs_list
-
-
-def get_ot(ufm):
-    # Getting Optics tube name
-    # ufm: ufm name
-
-    ufm = ufm.lower()
-
-    if ufm in ["uv38", "uv39", "uv46"]:
-        ot = "c1"
-    elif ufm in ["mv21", "mv24", "mv28"]:
-        ot = "i1"
-    elif ufm in ["uv54", "uv58", "uv60"]:
-        ot = "i2"
-    elif ufm in ["mv13", "mv20", "mv34"]:
-        ot = "i3"
-    elif ufm in ["mv14", "mv32", "mv49"]:
-        ot = "i4"
-    elif ufm in ["uv31", "uv42", "uv47"]:
-        ot = "i5"
-    elif ufm in ["mv25", "mv26", "mv11"]:
-        ot = "i6"
-    elif ufm in ["uv57", "uv59", "uv62"]:
-        ot = "o1"
-    elif ufm in ["mv29", "mv68", "mv73"]:
-        ot = "o2"
-    elif ufm in ["mv65", "mv67", "mv75"]:
-        ot = "o3"
-    elif ufm in ["mv15", "mv64", "mv70"]:
-        ot = "o4"
-    elif ufm in ["mv63", "mv76", "mv77"]:
-        ot = "o5"
-    elif ufm in ["ln2", "ln3", "ln4"]:
-        ot = "o6"
-    else:
-        raise ValueError("No OT")
-
-    return ot
+STM_NORMALIZE_TEMP = (
+    750  # Kelvin. Normalization temperature for stimulator signal temperature.
+)
 
 
 def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
-    # Getting hk data for one axis manager data
-    #
-    # hkdb_cfg: HK data base config
-    # aman: Axis manager of detector data
-    # t_start: Start time of hk data. If None, use aman's start time.
-    # t_end: End time of hk data. If None, use aman's end time.
+    """
+    Get housekeeping data for one axis manager.
 
+    Args:
+        hkdb_cfg: HK database config.
+        aman: Axis manager of detector data.
+        t_start: Start time of HK data. If None, use aman's start time.
+        t_end: End time of HK data. If None, use aman's end time.
+
+    Return:
+        Housekeeping data.
+    """
     feed_list = [
         "stimulator-blh.motor.*",
         "stimulator-ds378.relay.*",
@@ -185,276 +66,159 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
 
 
-def get_downsample_factor(aman, ctx):
-    # Getting downsample factor of SMuRF readout for the axis manager data
-    # aman: Axis manager of detector data
-    # ctx: context file
-
-    downsample_factor_tag = get_downsample_factor_tags(ctx)
-
-    obs_list = ctx.obsdb.query(
-        f"obs.obs_id == '{aman.obs_info.obs_id}'", tags=downsample_factor_tag
-    )
-
-    obs = obs_list[0]
-    for tag in downsample_factor_tag:
-        if obs[tag] == 1:
-            downsample_factor = int(tag.split("_")[-1])
-
-    aman.obs_info.wrap("downsample_factor", downsample_factor, overwrite=True)
-    aman.obs_info.wrap(
-        "sampling_rate", 4000 / downsample_factor, overwrite=True
-    )
-
-
-def get_downsample_factor_tags(ctx):
-    # Getting downsample factor of SMuRF readout
-    # ctx: context file
-
-    cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
-    all_tags = np.array([row[0] for row in cursor.fetchall()])
-    mask = np.char.find(all_tags, "downsample") != -1
-
-    return np.array(all_tags)[mask].tolist()
-
-
-def calc_gain(
-    aman,
-    hkdata,
-    idxs=None,
-    plot=False,
-    save_plot=False,
-    preprocess=True,
-    output_dir=None,
+def preprocessing(
+    aman, hkdata, idxs=None, n_bins=40, delete_tod=True, make_iirc_coadd=False
 ):
-    # aman: axis manager of tod data, including timestamps and raw signal
-    # hkdata: hkdata for aman
-    # idxs: list of detector index for calculation. If None, all detectors
-    # are calculated.
-    # plot: If true, makes plot.
-    # save_plot: If true, save plot
+    """
+    Preprocessing for stimulator data analysis using HK data.
+    This includes getting timing against encoder signal, chopping status,
+    timing cut for analysis, signal temperature, filtering of TOD, and making and fitting coadded data.
 
+    For each detector, the raw signal is deconvolved using the IIR filter, and then either high-pass filtered (hpf),
+    or both low-pass and high-pass filtered (lpf) to form a bandpass around the stimulator's chopping frequency.
+    The filtered signal is co-added into chopper phase bins.
+    In former case (hpf), coadded signal is fit to a seven-harmonic sine model to obtain its fundamental amplitude (a0).
+    In the latter case (lpf), the co-added waveform is instead fit to a single-mode sine curve.
+
+    Lowest chopping frequency data will be used for gain calculation,
+    while higher frequencies will be used for time constant calculation.
+
+    Args:
+        aman: Axis manager of detector data.
+        hkdata: Housekeeping data for aman.
+        idxs: List of detector indices for calculation. If None, all detectors are calculated.
+        n_bins: Number of bins for co-adding data.
+        delete_tod: Whether to delete TOD data after processing.
+        make_iirc_coadd: Whether to make IIR filter co-added data.
+    Return:
+        valid_gain: bool, True if gain can be calculated, False otherwise.
+        valid_timeconstant: bool, True if time constant can be calculated, False otherwise.
+    """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
         det_mask[:] = True
     else:
         det_mask[idxs] = True
 
-    valid_data = True
-    if preprocess:
-        valid_data = get_encoder_timing(
-            aman, hkdata
-        )  # Get timing against encoder t0
+    valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
+    aman.stm_cal.wrap(
+        "sampling_rate", 1 / np.median(np.diff(aman.timestamps)), overwrite=True
+    )
+    get_chopping_status(aman)
+    get_timing_cut(aman)
+    get_chopping_freqs(aman)
+    get_signal_temp(aman, hkdata)
 
-        get_chopping_status(aman)
+    # Finite data check
+    arr = np.isfinite(aman.signal).all(axis=1)
+    aman.stm_cal.wrap("finite_data", arr, [(0, "dets")], overwrite=True)
 
-        get_timing_cut(aman)
-
-        get_signal_temp(aman, hkdata)
-
-    if plot:
-        plot_hkdata(aman, hkdata, cal_type="gain")
-
+    # Check if data is valid for gain or time constant calculation
     if not valid_data:
-        return valid_data
-
-    chopping_freqs = {}
-    if round(aman.stm_ana.chopping_freqs[0]) != CHOPPING_FREQS["f1"]:
-        chopping_freqs["f1_gain"] = round(aman.stm_ana.chopping_freqs[0])
+        valid_gain = False
+        valid_timeconstant = False
+        return valid_gain, valid_timeconstant
     else:
-        chopping_freqs["f1_gain"] = CHOPPING_FREQS["f1"]
-
-    filtering_params = filtering(aman, chopping_freqs, "gain")
-
-    model, params_base = get_fit_params(cal_type="gain")
-
-    # Make and get co-added data
-    coadd_data, fit_result = get_dicts("gain")
-    n_bins = 40
-    get_coadd_data(aman, coadd_data, n_bins, det_mask)
-
-    for i_det, m in enumerate(det_mask):
-        if not m:
-            fill_none(fit_result=fit_result)
-            continue
-
-        # Strange data check
-        if not np.isfinite(aman.signal[i_det]).all():
-            fill_none(fit_result=fit_result)
-            continue
-
-        # Fitting
-        for filt_key in fit_result["fit_coadd"].keys():
-            params = params_base.copy()
-
-            x = coadd_data[filt_key]["f1_gain"]["x"][i_det]
-            y = coadd_data[filt_key]["f1_gain"]["y"][i_det]
-            yerr = coadd_data[filt_key]["f1_gain"]["yerr"][i_det]
-
-            if y is None:
-                fit_result["fit_coadd"][filt_key]["f1_gain"].append(None)
-                continue
-
-            if filt_key == "lpf":
-                params["a1"].set(value=0, vary=False)
-                params["a2"].set(value=0, vary=False)
-                params["a3"].set(value=0, vary=False)
-                params["a4"].set(value=0, vary=False)
-                params["a5"].set(value=0, vary=False)
-                params["a6"].set(value=0, vary=False)
-                params["t1"].set(value=0, vary=False)
-                params["t2"].set(value=0, vary=False)
-                params["t3"].set(value=0, vary=False)
-                params["t4"].set(value=0, vary=False)
-                params["t5"].set(value=0, vary=False)
-                params["t6"].set(value=0, vary=False)
-                result = model.fit(y, params, t=x, weights=1 / np.array(yerr))
-            else:
-                result = model.fit(y, params, t=x, weights=1 / np.array(yerr))
-
-            fit_result["fit_coadd"][filt_key]["f1_gain"].append(result)
-
-        if not plot and not save_plot:
-            pass
+        valid_gain = True
+        if aman.stm_cal.chopping_freqs.shape[0] <= 1:
+            valid_timeconstant = False
         else:
-            fig = plot(
-                aman,
-                i_det,
-                coadd_data,
-                fit_result,
-                filtering_params,
-                cal_type="gain",
-            )
+            valid_timeconstant = True
 
-            if save_plot:
-                obs_id = aman.obs_info.obs_id
-                if output_dir is not None:
-                    ufm = _get_ufm_label(aman, i_det)
-                    save_dir = Path(f"{output_dir}/{ufm}_{obs_id}")
-                    save_dir.mkdir(parents=True, exist_ok=True)
-                    plt.savefig(f"{save_dir}/Gain_det{i_det:04d}.png")
-            if not plot:
-                plt.close(fig)
+    # Co-add data and fit it for each frequency
+    model, params_base = get_fit_params(cal_type="coadd")
+    initialize_aman(aman, "coadd", model, n_bins, make_iirc_coadd=make_iirc_coadd)
 
-    fill_data(aman, coadd_data, fit_result, n_bins, cal_type="gain")
+    for freq_key in aman.stm_cal.chopping_freq_key.vals:
+        freq = aman.stm_cal.chopping_freqs[
+            aman.stm_cal.chopping_freq_key.vals == freq_key
+        ][0]
+        if round(freq) != CHOPPING_FREQS[freq_key]:
+            filter_freq = round(freq)
+        else:
+            filter_freq = CHOPPING_FREQS[freq_key]
 
-    return valid_data
+        filtering(aman, freq_key, filter_freq, delete_tod=delete_tod)
+        get_coadd_data(aman, freq_key, n_bins, det_mask)
+        if delete_tod:
+            aman.move(f"signal_lpf_{freq_key}", None)
+        fit_coadd_data(aman, freq_key, det_mask, model, params_base)
+
+    if delete_tod:
+        aman.move("signal_hpf", None)
+        if make_iirc_coadd:
+            aman.move("signal_iirc", None)
+
+    return valid_gain, valid_timeconstant
 
 
-def calc_timeconstant(
-    aman,
-    hkdata,
-    idxs=None,
-    plot=False,
-    save_plot=False,
-    preprocess=True,
-    output_dir=None,
-):
-    # aman: axis manager of tod data, including timestamps and raw signal
-    # hkdata: hkdata for aman
-    # idxs: list of detector index for calculation. If None, all detectors
-    # are calculated.
-    # plot: if true, makes plot.
-    # save_plot: If true, save plot
+def calc_gain(aman):
+    """
+    Calculate the gain of the detectors.
+    Gain is the amplitude of the fundamental sine wave (a0)
+    normalized to a typical temperature of 750 K by the measured heater/env temperatures.
+    Results are written into aman.stm_cal.
 
+    Args:
+        aman: Axis manager of TOD data, including timestamps and raw signal.
+    """
+    heater_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "heater"][0][0]
+    env_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "env"][0][0]
+
+    arr = abs(aman.stm_cal["fit_coadd"]["lpf"]["f1_gain"]["a0"]) * (
+        STM_NORMALIZE_TEMP / (heater_temp - env_temp)
+    )
+    aman.stm_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
+
+
+def calc_timeconstant(aman, idxs=None):
+    """
+    Calculate the time constant of the detectors and the readout delay.
+
+    For each detector, TOD is co-added and fitted by a seven harmonics sine model to get its fundamental amplitude (a0)
+    and phase delay (t0) per chopping frequency during preprocessing() function.
+    In this function, fits amplitude (a0) vs. chopping frequency to a single-pole response model to get the time constant (tau),
+    then fits phase delay (t0) vs. chopping frequency with tau fixed to get the readout delay (dt).
+    Additionally fits phase delay (t0) vs. chopping frequency with both timeconstant and readout delay as free parameters.
+    Results are written into aman.stm_cal
+
+    Args:
+        aman: Axis manager of TOD data, including timestamps and raw signal.
+        hkdata: HK data for aman.
+        idxs: List of detector indices for calculation. If None, all detectors are calculated.
+    """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
         det_mask[:] = True
     else:
         det_mask[idxs] = True
-
-    valid_data = True
-    if preprocess:
-        valid_data = get_encoder_timing(
-            aman, hkdata
-        )  # Get timing against encoder t0
-
-        get_chopping_status(aman)
-
-        get_timing_cut(aman)
-
-        get_signal_temp(aman, hkdata)
-
-    if plot:
-        plot_hkdata(aman, hkdata, cal_type="timeconstant")
-    if not valid_data:
-        return valid_data
-
-    chopping_freqs = {}
-    for i, (key, f) in enumerate(CHOPPING_FREQS.items()):
-        if round(aman.stm_ana.chopping_freqs[0]) != f:
-            chopping_freqs[key] = round(aman.stm_ana.chopping_freqs[i])
-        else:
-            chopping_freqs[key] = f
-
-    filtering_params = filtering(aman, chopping_freqs, "timeconstant")
 
     models, params_bases = get_fit_params(cal_type="timeconstant")
-
-    coadd_data, fit_result = get_dicts("timeconstant")
-    n_bins = 40
-    get_coadd_data(aman, coadd_data, n_bins, det_mask)
-
+    initialize_aman(aman, "timeconstant", models)
     for i_det, m in enumerate(det_mask):
         if not m:
-            fill_none(fit_result=fit_result)
             continue
 
         # Strange data check
-        if not np.isfinite(aman.signal[i_det]).all():
-            fill_none(fit_result=fit_result)
+        if not aman.stm_cal.finite_data[i_det]:
             continue
 
         # Fitting
-        for filt_key in fit_result["fit_coadd"].keys():
-            for f_key in chopping_freqs.keys():
-                params = params_bases["fit_coadd"].copy()
-
-                x = coadd_data[filt_key][f_key]["x"][i_det]
-                y = coadd_data[filt_key][f_key]["y"][i_det]
-                yerr = coadd_data[filt_key][f_key]["yerr"][i_det]
-
-                if y is None:
-                    fit_result["fit_coadd"][filt_key][f_key].append(None)
-                    continue
-
-                if filt_key == "lpf":
-                    params["a1"].set(value=0, vary=False)
-                    params["a2"].set(value=0, vary=False)
-                    params["a3"].set(value=0, vary=False)
-                    params["a4"].set(value=0, vary=False)
-                    params["a5"].set(value=0, vary=False)
-                    params["a6"].set(value=0, vary=False)
-                    params["t1"].set(value=0, vary=False)
-                    params["t2"].set(value=0, vary=False)
-                    params["t3"].set(value=0, vary=False)
-                    params["t4"].set(value=0, vary=False)
-                    params["t5"].set(value=0, vary=False)
-                    params["t6"].set(value=0, vary=False)
-                    result = models["fit_coadd"].fit(
-                        y, params, t=x, weights=1 / np.array(yerr)
-                    )
-                else:
-                    result = models["fit_coadd"].fit(
-                        y, params, t=x, weights=1 / np.array(yerr)
-                    )
-
-                fit_result["fit_coadd"][filt_key][f_key].append(result)
-
+        for filt_key in aman.stm_cal["fit_coadd"]._fields:
             a0s = [
-                fit_result["fit_coadd"][filt_key][f_key][-1].best_values["a0"]
-                if fit_result["fit_coadd"][filt_key][f_key][-1] is not None
-                else np.nan
-                for f_key in fit_result["fit_coadd"][filt_key].keys()
+                aman.stm_cal["fit_coadd"][filt_key][f_key]["a0"][i_det]
+                for f_key in aman.stm_cal["fit_coadd"][filt_key]._fields
+                if f_key != "f1_gain"
             ]
             t0s = [
-                fit_result["fit_coadd"][filt_key][f_key][-1].best_values["t0"]
-                if fit_result["fit_coadd"][filt_key][f_key][-1] is not None
-                else np.nan
-                for f_key in fit_result["fit_coadd"][filt_key].keys()
+                aman.stm_cal["fit_coadd"][filt_key][f_key]["t0"][i_det]
+                for f_key in aman.stm_cal["fit_coadd"][filt_key]._fields
+                if f_key != "f1_gain"
             ]
 
             # Edit a0 and t0 result
+            # This flip of half period of sin function is needed because limiting a0 range to positive values makes fitting fails sometimes.
+            # Fitting function will be changed to a*cos(t)+b*sin(t) instead of a0*sin(t+t0) in the future to prevent this issue.
             for i in range(len(t0s)):
                 if a0s[i] < 0:
                     t0s[i] = t0s[i] - 0.5
@@ -464,372 +228,110 @@ def calc_timeconstant(
             a0s = np.abs(a0s)
             t0s = np.array(t0s)
 
-            f = [chopping_freqs[f_key] for f_key in chopping_freqs.keys()]
-            for fit_key in [
-                "fit_amp",
-                "fit_phase__fix_tau",
-                "fit_phase__free",
-            ]:
+            f = [
+                freq
+                for key, freq in zip(
+                    aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
+                )
+                if key != "f1_gain"
+            ]
+            for fit_key in ["fit_amp", "fit_phase__fix_tau", "fit_phase__free"]:
                 params = params_bases[fit_key].copy()
                 if fit_key == "fit_amp":
                     if np.isnan(a0s).all():
-                        fit_result[fit_key][filt_key].append(None)
                         continue
 
-                    weights = [
-                        fit_result["fit_coadd"][filt_key][f_key][-1]
-                        .params["a0"]
-                        .stderr
-                        if fit_result["fit_coadd"][filt_key][f_key][-1]
-                        is not None
-                        and fit_result["fit_coadd"][filt_key][f_key][-1]
-                        .params["a0"]
-                        .stderr
-                        is not None
-                        else np.nan
-                        for f_key in fit_result["fit_coadd"][filt_key].keys()
-                    ]
-                    weights = np.array(weights)
-                    # No weight for first step analysis
                     result = models[fit_key].fit(
                         a0s, params, f=f, method="least_squares"
                     )
+                    fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                 else:
                     if np.isnan(t0s).all():
-                        fit_result[fit_key][filt_key].append(None)
                         continue
 
-                    weights = [
-                        fit_result["fit_coadd"][filt_key][f_key][-1]
-                        .params["t0"]
-                        .stderr
-                        if fit_result["fit_coadd"][filt_key][f_key][-1]
-                        is not None
-                        and fit_result["fit_coadd"][filt_key][f_key][-1]
-                        .params["t0"]
-                        .stderr
-                        is not None
-                        else np.nan
-                        for f_key in fit_result["fit_coadd"][filt_key].keys()
-                    ]
-                    weights = np.array(weights) * 360
                     if fit_key == "fit_phase__fix_tau":
-                        if fit_result["fit_amp"][filt_key][-1] is not None:
+                        if ~np.isnan(aman.stm_cal["fit_amp"][filt_key]["tau"][i_det]):
                             params["tau"].set(
-                                value=fit_result["fit_amp"][filt_key][
-                                    -1
-                                ].best_values["tau"],
+                                value=aman.stm_cal["fit_amp"][filt_key]["tau"][i_det],
                                 vary=False,
                             )
-                            # No weight for first step analysis
                             result = models[fit_key].fit(
                                 -np.array(t0s) * 360,
                                 params,
                                 f=f,
                                 method="least_squares",
                             )
-                        else:
-                            result = None
+                            fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                     else:
-                        # No weight for first step analysis
                         result = models[fit_key].fit(
-                            -np.array(t0s) * 360,
-                            params,
-                            f=f,
-                            method="least_squares",
+                            -np.array(t0s) * 360, params, f=f, method="least_squares"
                         )
-                fit_result[fit_key][filt_key].append(result)
+                        fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
 
-        if not plot and not save_plot:
-            pass
-        else:
-            fig = plot(
-                aman,
-                i_det,
-                coadd_data,
-                fit_result,
-                filtering_params,
-                cal_type="timeconstant",
-            )
-
-            obs_id = aman["obs_info"]["obs_id"]
-            if save_plot:
-                ufm = _get_ufm_label(aman, i_det)
-                save_dir = Path(f"{output_dir}/{ufm}_{obs_id}")
-                save_dir.mkdir(parents=True, exist_ok=True)
-                plt.savefig(f"{save_dir}/Tau_det{i_det:04d}.png")
-            if not plot:
-                plt.close(fig)
-
-    fill_data(aman, coadd_data, fit_result, n_bins, cal_type="timeconstant")
-
-    return valid_data
-
-
-def _fit_timeconstant_one_detector(
-    i_det,
-    aman,
-    det_mask,
-    chopping_freqs,
-    models,
-    params_bases,
-    coadd_data,
-):
-    _, one_fit_result = get_dicts("timeconstant")
-
-    if not det_mask[i_det]:
-        fill_none(fit_result=one_fit_result)
-        return one_fit_result
-
-    # Strange data check
-    if not np.isfinite(aman.signal[i_det]).all():
-        fill_none(fit_result=one_fit_result)
-        return one_fit_result
-
-    # Fitting
-    for filt_key in one_fit_result["fit_coadd"].keys():
-        for f_key in chopping_freqs.keys():
-            params = params_bases["fit_coadd"].copy()
-
-            x = coadd_data[filt_key][f_key]["x"][i_det]
-            y = coadd_data[filt_key][f_key]["y"][i_det]
-            yerr = coadd_data[filt_key][f_key]["yerr"][i_det]
-
-            if y is None:
-                one_fit_result["fit_coadd"][filt_key][f_key].append(None)
-                continue
-
-            if filt_key == "lpf":
-                params["a1"].set(value=0, vary=False)
-                params["a2"].set(value=0, vary=False)
-                params["a3"].set(value=0, vary=False)
-                params["a4"].set(value=0, vary=False)
-                params["a5"].set(value=0, vary=False)
-                params["a6"].set(value=0, vary=False)
-                params["t1"].set(value=0, vary=False)
-                params["t2"].set(value=0, vary=False)
-                params["t3"].set(value=0, vary=False)
-                params["t4"].set(value=0, vary=False)
-                params["t5"].set(value=0, vary=False)
-                params["t6"].set(value=0, vary=False)
-                result = models["fit_coadd"].fit(
-                    y, params, t=x, weights=1 / np.array(yerr)
-                )
-            else:
-                result = models["fit_coadd"].fit(
-                    y, params, t=x, weights=1 / np.array(yerr)
-                )
-
-            one_fit_result["fit_coadd"][filt_key][f_key].append(result)
-
-        a0s = [
-            one_fit_result["fit_coadd"][filt_key][f_key][-1].best_values["a0"]
-            if one_fit_result["fit_coadd"][filt_key][f_key][-1] is not None
-            else np.nan
-            for f_key in one_fit_result["fit_coadd"][filt_key].keys()
-        ]
-        t0s = [
-            one_fit_result["fit_coadd"][filt_key][f_key][-1].best_values["t0"]
-            if one_fit_result["fit_coadd"][filt_key][f_key][-1] is not None
-            else np.nan
-            for f_key in one_fit_result["fit_coadd"][filt_key].keys()
-        ]
-
-        # Edit a0 and t0 result
-        for i in range(len(t0s)):
-            if a0s[i] < 0:
-                t0s[i] = t0s[i] - 0.5
-            if i > 0:
-                if t0s[i] < t0s[i - 1]:
-                    t0s[i] = t0s[i] + 1
-        a0s = np.abs(a0s)
-        t0s = np.array(t0s)
-
-        f = [chopping_freqs[f_key] for f_key in chopping_freqs.keys()]
-
-        for fit_key in ["fit_amp"]:
-            if np.isnan(a0s).all():
-                one_fit_result[fit_key][filt_key].append(None)
-                continue
-
-            params = params_bases[fit_key].copy()
-
-            # No weight for first step analysis
-            result = models[fit_key].fit(
-                a0s, params, f=f, method="least_squares"
-            )
-
-            one_fit_result[fit_key][filt_key].append(result)
-
-        for fit_key in ["fit_phase__fix_tau", "fit_phase__free"]:
-            if np.isnan(t0s).all():
-                one_fit_result[fit_key][filt_key].append(None)
-                continue
-
-            params = params_bases[fit_key].copy()
-
-            if fit_key == "fit_phase__fix_tau":
-                if one_fit_result["fit_amp"][filt_key][-1] is not None:
-                    params["tau"].set(
-                        value=one_fit_result["fit_amp"][filt_key][
-                            -1
-                        ].best_values["tau"],
-                        vary=False,
-                    )
-                    # No weight for first step analysis
-                    result = models[fit_key].fit(
-                        -np.array(t0s) * 360,
-                        params,
-                        f=f,
-                        method="least_squares",
-                    )
-                else:
-                    result = None
-            else:
-                # No weight for first step analysis
-                result = models[fit_key].fit(
-                    -np.array(t0s) * 360,
-                    params,
-                    f=f,
-                    method="least_squares",
-                )
-
-            one_fit_result[fit_key][filt_key].append(result)
-
-    return one_fit_result
-
-
-def calc_timeconstant_parallel(
-    aman,
-    hkdata,
-    idxs=None,
-    plot=False,
-    save_plot=False,
-    preprocess=True,
-    output_dir=None,
-):
-    # aman: axis manager of tod data, including timestamps and raw signal
-    # hkdata: hkdata for aman
-    # idxs: list of detector index for calculation. If None, all detectors
-    # are calculated.
-    # plot: if true, makes plot.
-    # save_plot: If true, save plot
-
-    det_mask = np.full(aman.dets.count, False)
-    if idxs is None:
-        det_mask[:] = True
-    else:
-        det_mask[idxs] = True
-
-    valid_data = True
-    if preprocess:
-        valid_data = get_encoder_timing(
-            aman, hkdata
-        )  # Get timing against encoder t0
-
-        get_chopping_status(aman)
-
-        get_timing_cut(aman)
-
-        get_signal_temp(aman, hkdata)
-
-    if plot:
-        plot_hkdata(aman, hkdata, cal_type="timeconstant")
-    if not valid_data:
-        return valid_data
-
-    chopping_freqs = {}
-    for i, (key, f) in enumerate(CHOPPING_FREQS.items()):
-        if round(aman.stm_ana.chopping_freqs[0]) != f:
-            chopping_freqs[key] = round(aman.stm_ana.chopping_freqs[i])
-        else:
-            chopping_freqs[key] = f
-
-    filtering_params = filtering(aman, chopping_freqs, "timeconstant")
-
-    models, params_bases = get_fit_params(cal_type="timeconstant")
-
-    coadd_data, fit_result = get_dicts("timeconstant")
-    n_bins = 40
-    get_coadd_data(aman, coadd_data, n_bins, det_mask)
-
-    all_fit_result = Parallel(n_jobs=4, prefer="threads")(
-        delayed(_fit_timeconstant_one_detector)(
-            i_det,
-            aman,
-            det_mask,
-            chopping_freqs,
-            models,
-            params_bases,
-            coadd_data,
-        )
-        for i_det in range(aman.dets.count)
+    aman.stm_cal.wrap(
+        "stm_tau", aman.stm_cal["fit_amp"]["lpf"]["tau"], [(0, "dets")], overwrite=True
+    )
+    aman.stm_cal.wrap(
+        "readout_delay",
+        aman.stm_cal["fit_phase__fix_tau"]["lpf"]["dt"],
+        [(0, "dets")],
+        overwrite=True,
     )
 
-    for i_det in range(len(all_fit_result)):
-        for fit_key in fit_result.keys():
-            for filt_key in fit_result[fit_key].keys():
-                if fit_key == "fit_coadd":
-                    for freq_key in fit_result[fit_key][filt_key].keys():
-                        fit_result[fit_key][filt_key][freq_key].append(
-                            all_fit_result[i_det][fit_key][filt_key][freq_key][
-                                0
-                            ]
-                        )
-                else:
-                    fit_result[fit_key][filt_key].append(
-                        all_fit_result[i_det][fit_key][filt_key][0]
-                    )
-
-    for i_det, m in enumerate(det_mask):
-        if not m:
-            continue
-
-        if not plot and not save_plot:
-            pass
-        else:
-            fig = plot(
-                aman,
-                i_det,
-                coadd_data,
-                fit_result,
-                filtering_params,
-                cal_type="timeconstant",
-            )
-
-            obs_id = aman["obs_info"]["obs_id"]
-            if save_plot:
-                ufm = _get_ufm_label(aman, i_det)
-                save_dir = Path(f"{output_dir}/{ufm}_{obs_id}")
-                save_dir.mkdir(parents=True, exist_ok=True)
-                plt.savefig(f"{save_dir}/Tau_det{i_det:04d}.png")
-            if not plot:
-                plt.close(fig)
-
-    fill_data(aman, coadd_data, fit_result, n_bins, cal_type="timeconstant")
-
-    return valid_data
+    if "stm_gain" in aman.stm_cal:
+        f = aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == "f1"][0]
+        correction_factor = 1 / func_response_amplitude(
+            f=f, tau=aman.stm_cal["fit_amp"]["lpf"]["tau"], a=1
+        )
+        aman.stm_cal.wrap(
+            "stm_gain_with_tau_correction",
+            aman.stm_cal.stm_gain * correction_factor,
+            [(0, "dets")],
+            overwrite=True,
+        )
 
 
 def get_encoder_timing(aman, hkdata):
-    # Get timing against encoder t0
+    """
+    Get timing during one cycle of the chopping.
+    t_enc: Time when the encoder signal is at state 0.
+        This is Temps Atomique International(TAI) time with finer resolution than HK time.
+    t_hk: HK time when the encoder signal is at state 0. This is UNIX time with 0.1 second resolution.
+    frac_timing: Timing of each TOD data against encoder signal.
+        The range is [0,1). During this range, the detector views the stimulator's heater and blackbody once each.
 
-    # Get encoder t0 list
+    Args:
+        aman: Axis manager with the detector data.
+        hkdata: The housekeeping data.
+
+    Returns:
+        bool: True if timing data is valid, False otherwise.
+    """
+
+    t_astropy = astropy.time.Time(
+        hkdata.data["stimulator-enc.stim_enc.state"][0][0], format="unix"
+    )
+    leap_seconds = t_astropy.unix_tai - t_astropy.unix
+
     state = np.array(hkdata.data["stimulator-enc.stim_enc.state"][1])
     t_enc = (
-        np.array(hkdata.data["stimulator-enc.stim_enc.timestamps_tai"][1])[
-            state == 0
-        ]
-        - 37
+        np.array(hkdata.data["stimulator-enc.stim_enc.timestamps_tai"][1])[state == 0]
+        - leap_seconds
     )
     t_hk = np.array(hkdata.data["stimulator-enc.stim_enc.timestamps_tai"][0])[
         state == 0
     ]
 
+    # Cut Encoder data not to contain next run data
+    # Take 30s buffer from last TOD data
+    mask = t_hk < aman.timestamps[-1] + 30
+    t_enc = t_enc[mask]
+    t_hk = t_hk[mask]
+
     # Get timing against encoder t0
     i_enc = 0
-    frac_timing = []
-    for t in aman.timestamps:
+    frac_timing = np.full(aman.samps.count, np.nan)
+    for i, t in enumerate(aman.timestamps):
         if i_enc >= len(t_enc) - 2:
             continue
         t1_enc_tmp = t_enc[i_enc]
@@ -840,43 +342,50 @@ def get_encoder_timing(aman, hkdata):
             t1_enc_tmp = t_enc[i_enc]
             t2_enc_tmp = t_enc[i_enc + 1]
 
-        frac_timing.append((t - t1_enc_tmp) / (t2_enc_tmp - t1_enc_tmp))
+        frac_timing[i] = (t - t1_enc_tmp) / (t2_enc_tmp - t1_enc_tmp)
 
     if "stm_samps" not in aman._axes.keys():
         stm_samps = core.IndexAxis("stm_samps", t_enc.size)
-        stm_ana = core.AxisManager(stm_samps)
-        aman.wrap("stm_ana", stm_ana, overwrite=True)
-    aman.stm_ana.wrap("t_enc", t_enc, [(0, "stm_samps")], overwrite=True)
-    aman.stm_ana.wrap("t_hk", t_hk, [(0, "stm_samps")], overwrite=True)
+        stm_cal = core.AxisManager(stm_samps, aman.samps, aman.dets)
+        aman.wrap("stm_cal", stm_cal, overwrite=True)
+    aman.stm_cal.wrap("t_enc", t_enc, [(0, "stm_samps")], overwrite=True)
+    aman.stm_cal.wrap("t_hk", t_hk, [(0, "stm_samps")], overwrite=True)
 
     valid_data = True
     if t_enc[-1] < aman.timestamps[-1]:
         print(
-            f"Invalid HK data. last t_enc: {t_enc[-1]}, "
-            f"last TOD timestamp: {aman.timestamps[-1]}"
+            f"Invalid HK data. last t_enc: {t_enc[-1]}, last TOD timestamp: {aman.timestamps[-1]}"
         )
         valid_data = False
     else:
         # Add timing against encoder to axis manager
-        aman.wrap(
-            "frac_timing",
-            np.array(frac_timing),
-            [(0, "samps")],
-            overwrite=True,
+        aman.stm_cal.wrap(
+            "frac_timing", np.array(frac_timing), [(0, "samps")], overwrite=True
         )
 
     return valid_data
 
 
-def get_chopping_status(aman):
-    # Get chopping frequency and timing
-    # aman: axis manager with aman.stm_ana field
+def get_chopping_status(aman, min_step_duration=10, penalty=100):
+    """
+    Get timing when the chopping speed changes. Those are saved in the axis manager as aman.stm_cal.t_chopping_change.
+    It also include two more timings. One is first timing when TOD starts(t=0).
+    The other is last timing when TOD ends or chopping starts to end, whichever comes first.
 
-    # Get chopping frequency vs time
-    xx0 = aman.stm_ana.t_enc[:-1]
-    xx1 = aman.stm_ana.t_enc[1:]
+    Args:
+        aman: axis manager with aman.stm_cal field
+        min_step_duration: Minimum duration to search for each chopping step.
+            The unit is in seconds but it should be an integer.
+            This is used to avoid small chopping speed fluctuations that are shorter than this duration.
+        penalty: Penalty value for change point detection.
+            This is used to control the sensitivity of change point detection.
+            A larger penalty will result in fewer detected change points.
+    """
+    # Get chopping frequency using the encoder data
+    xx0 = aman.stm_cal.t_enc[:-1]
+    xx1 = aman.stm_cal.t_enc[1:]
     x = (xx0 + xx1) / 2 - aman.timestamps[0]
-    y = 1 / (xx1 - xx0)
+    y = 1 / (xx1 - xx0)  # Chopping frequency
 
     x_min = int(x.min())
     x_max = int(min(x.max(), aman.timestamps[-1] - aman.timestamps[0]))
@@ -894,8 +403,8 @@ def get_chopping_status(aman):
     y_ave = np.array([np.nanmean(d) for d in data])
 
     # Get breakout points where the chopping speed changes
-    model1 = rpt.Pelt(model="l2", min_size=10).fit(y_ave)
-    bkps = model1.predict(pen=100)  # index +1
+    model1 = rpt.Pelt(model="l2", min_size=min_step_duration).fit(y_ave)
+    bkps = model1.predict(pen=penalty)  # index +1
 
     # Re-calculate the breakout points
     refined_bkps = []
@@ -916,72 +425,102 @@ def get_chopping_status(aman):
     # Add last point
     refined_bkps.append(x_ave.size)  # index +1
 
-    # Get average of chopping frequency
-    wait_t = 5
-    delta_t = 5  # 5s average
-    n_freq = len(refined_bkps)
-    chopping_freqs = []
-    for i_freq in range(n_freq):
-        if i_freq == 0:
-            i_min = 0
-        else:
-            i_min = refined_bkps[i_freq - 1] - 1 + wait_t
-
-        chopping_freqs.append(np.average(y_ave[i_min:i_min + delta_t]))
-
     t_chopping_change = x_ave[np.array(refined_bkps) - 1]
     t_chopping_change = np.concatenate([[0], t_chopping_change], 0)
 
-    aman.stm_ana.wrap("t_chopping_change", t_chopping_change, overwrite=True)
-    aman.stm_ana.wrap(
-        "chopping_freqs", np.array(chopping_freqs), overwrite=True
-    )
+    aman.stm_cal.wrap("t_chopping_change", t_chopping_change, overwrite=True)
 
 
-def get_timing_cut(aman, dt_gain=60, dt_timeconstant=10, dt_wait=9):
-    # Get timing range for analysis
+def get_timing_cut(aman, dt_gain=60, dt_timeconstant=10, dt_wait=9, dt_buffer=2):
+    """
+    Get timing range for analysis.
 
-    if len(aman.stm_ana.t_chopping_change) == 2:
+    Args:
+        aman: axis manager with aman.stm_cal field
+        dt_gain: Time duration for gain analysis.
+        dt_timeconstant: Time duration for time constant analysis from the time when chopping speed changes and dt_wait passed.
+        dt_wait: Waiting time after chopping speed changes to avoid chopper's acceleration time.
+        dt_buffer: Time buffer to avoid ringing by high-pass filter at the beginning of tod.
+    """
+    if len(aman.stm_cal.t_chopping_change) == 2:
         cal_type = "gain"
-    elif len(aman.stm_ana.t_chopping_change) > 2:
+    elif len(aman.stm_cal.t_chopping_change) > 2:
         cal_type = "gain_timeconstant"
     else:
-        ValueError("Chopping information is incorrect.")
+        raise ValueError("Chopping information is incorrect.")
 
     t_cuts = []
 
-    # 2 seconds to avoid ringing by high-pass filter
-    t_start = 2 + aman.stm_ana.t_chopping_change[0]
-    t_end = min(t_start + dt_gain, aman.stm_ana.t_chopping_change[1])
+    t_start = dt_buffer + aman.stm_cal.t_chopping_change[0]
+    t_end = min(t_start + dt_gain, aman.stm_cal.t_chopping_change[1])
     t_cuts.append((t_start, t_end))
 
     if cal_type == "gain_timeconstant":
-        for i in range(len(aman.stm_ana.t_chopping_change) - 1):
-            t_start = aman.stm_ana.t_chopping_change[i] + dt_wait
+        for i in range(len(aman.stm_cal.t_chopping_change) - 1):
+            t_start = aman.stm_cal.t_chopping_change[i] + dt_wait
             if i == 0:
-                # 2 seconds to avoid ringing by high-pass filter
-                t_start = 2 + aman.stm_ana.t_chopping_change[i]
+                t_start = (
+                    dt_buffer + aman.stm_cal.t_chopping_change[i]
+                )  # 2 seconds to avoid ringing by high-pass filter
             t_end = min(
-                t_start + dt_timeconstant,
-                aman.stm_ana.t_chopping_change[i + 1],
+                t_start + dt_timeconstant, aman.stm_cal.t_chopping_change[i + 1]
             )
             t_cuts.append((t_start, t_end))
 
-    if cal_type == "gain":
-        label_freqs = core.LabelAxis("freqs", ["f1_gain"])
-    else:
-        keys = ["f1_gain"]
-        for i in range(len(aman.stm_ana.t_chopping_change) - 1):
+    keys = ["f1_gain"]
+    if cal_type == "gain_timeconstant":
+        for i in range(len(aman.stm_cal.t_chopping_change) - 1):
             keys.append(f"f{int(i + 1)}")
-        label_freqs = core.LabelAxis("freqs", keys)
-    aman.stm_ana.add_axis(label_freqs)
+    label_freqs = core.LabelAxis("chopping_freq_key", keys)
+    aman.stm_cal.add_axis(label_freqs)
 
-    aman.stm_ana.wrap(
-        "t_cuts", np.array(t_cuts), [(0, "freqs")], overwrite=True
+    aman.stm_cal.wrap(
+        "t_cuts", np.array(t_cuts), [(0, "chopping_freq_key")], overwrite=True
+    )
+
+
+def get_chopping_freqs(aman):
+    """
+    Get chopping frequencies based on the timing cuts.
+    This chopping frequency will be used for analysis.
+
+    Args:
+        aman: axis manager with aman.stm_cal.t_cuts field
+    """
+    # Get chopping frequency using the encoder data
+    xx0 = aman.stm_cal.t_enc[:-1]
+    xx1 = aman.stm_cal.t_enc[1:]
+    x = (xx0 + xx1) / 2 - aman.timestamps[0]
+    y = 1 / (xx1 - xx0)  # Chopping frequency
+
+    # Get average of chopping frequency
+    chopping_freqs = []
+    for t_start, t_end in aman.stm_cal.t_cuts:
+        y_ave = y[(x >= t_start) & (x < t_end)]
+        if y_ave.size > 0:
+            chopping_freqs.append(np.average(y_ave))
+        else:
+            raise ValueError(
+                "No valid chopping frequency data available. Check the timing cuts aman.stm_cal.t_cuts."
+            )
+
+    aman.stm_cal.wrap(
+        "chopping_freqs",
+        np.array(chopping_freqs),
+        [(0, "chopping_freq_key")],
+        overwrite=True,
     )
 
 
 def get_signal_temp(aman, hkdata):
+    """
+    Get stimulator signal temperature at each chopping frequency.
+
+    Args:
+        aman: axis manager with aman.stm_cal field
+        hkdata: Housekeeping data including temperature data.
+    """
+
     position_keys = ["heater", "chopper_rear", "chopper_front", "air"]
     keys = [
         "stimulator-thermo.temperatures.Channel_0_T",
@@ -995,325 +534,434 @@ def get_signal_temp(aman, hkdata):
 
     for key, position_key in zip(keys, position_keys):
         x = hkdata.data[key][0] - aman.timestamps[0]
-        y = hkdata.data[key][1] + 273.15
+        y = hkdata.data[key][1] + 273.15  # Convert degrees from Celsius to Kelvin
 
-        for t_min, t_max in aman.stm_ana.t_cuts:
+        for t_min, t_max in aman.stm_cal.t_cuts:
             arr = y[(t_min <= x) & (x < t_max)]
             y_mean = np.mean(arr) if arr.size > 0 else np.nan
             temps[position_key].append(y_mean)
 
         temps[position_key] = np.array(temps[position_key])
 
-    temps["env"] = (
-        temps["chopper_rear"] + temps["chopper_front"] + temps["air"]
-    ) / 3
+    temps["env"] = (temps["chopper_rear"] + temps["chopper_front"] + temps["air"]) / 3
     position_keys.append("env")
 
     label_positions = core.LabelAxis("positions", position_keys)
-    aman.stm_ana.add_axis(label_positions)
-    arr = [x for x in temps.values()]
-    arr = np.array(arr)
+    aman.stm_cal.add_axis(label_positions)
+    arr = np.array(list(temps.values()))
 
-    aman.stm_ana.wrap(
-        "temps", arr, [(0, "positions"), (1, "freqs")], overwrite=True
+    aman.stm_cal.wrap(
+        "temps", arr, [(0, "positions"), (1, "chopping_freq_key")], overwrite=True
     )
 
 
-def filtering(aman, chopping_freqs, cal_type):
-    # filtering signal data
-    # aman: axis manager
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-    # chopping_freqs: dictionary of chopping frequencies
+def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
+    """
+    Initialize the axis manager with the specified type.
 
-    # Invert IIR filter
-    iirc_filter = tod_ops.filters.iir_filter(aman, invert=True)
-    signal_new = tod_ops.fourier_filter(
-        aman, iirc_filter, signal_name="signal"
-    )
-    aman.wrap(
-        "signal_iirc", signal_new, [(0, "dets"), (1, "samps")], overwrite=True
-    )
+    Args:
+        aman: axis manager
+        init_type: type of initialization. 'coadd' or 'timeconstant'
+        model: model for the fit
+        n_bins: # of bins for co-added data
+        make_iirc_coadd: whether to make co-added data with inverted IIR filter
+    """
+    if make_iirc_coadd:
+        filt_keys = ["iirc", "hpf", "lpf"]
+    else:
+        filt_keys = ["hpf", "lpf"]
 
-    # Make HPFed data
-    hpf_cutoff = 1
-    hpf = tod_ops.filters.high_pass_sine2(hpf_cutoff)
-    filtering__without_delay_filter(
-        aman, hpf, signal_name_pre="signal_iirc", signal_name_new="signal_hpf"
-    )
-
-    # Make LPFed data
-    cutoff_factor = 1.5
-    width_fraction = 1 / 5
-
-    if cal_type == "gain":
-        filter_cutoff = cutoff_factor * chopping_freqs["f1_gain"]
-        lpf = tod_ops.filters.low_pass_sine2(
-            filter_cutoff, filter_cutoff * width_fraction
-        )
-        filtering__without_delay_filter(
-            aman,
-            lpf,
-            signal_name_pre="signal_hpf",
-            signal_name_new="signal_lpf",
-        )
-
-    elif cal_type == "timeconstant":
-        for key, chopping_freq in chopping_freqs.items():
-            filter_cutoff = cutoff_factor * chopping_freq
-            lpf = tod_ops.filters.low_pass_sine2(
-                filter_cutoff, filter_cutoff * width_fraction
-            )
-            filtering__without_delay_filter(
-                aman,
-                lpf,
-                signal_name_pre="signal_hpf",
-                signal_name_new=f"signal_lpf_{key}",
-            )
-
+    if init_type == "coadd":
+        freq_keys = aman.stm_cal.chopping_freq_key.vals
+    elif init_type == "timeconstant":
+        freq_keys = aman.stm_cal.chopping_freq_key.vals
+        freq_keys = freq_keys[freq_keys != "f1_gain"]
     else:
         raise ValueError(
-            f"'{cal_type}' is a wrong type. Please specify 'gain' "
-            "or 'timeconstant'."
+            f"'{init_type}' is a wrong initialization type. Please specify 'coadd' or 'timeconstant'."
         )
 
-    filtering_params = {
-        "hpf_cutoff": hpf_cutoff,
-        "lpf_cutoff_factor": cutoff_factor,
-        "lpf_width_fraction": width_fraction,
-        "chopping_freqs": chopping_freqs,
-    }
+    if init_type == "coadd":
+        if n_bins is None:
+            raise ValueError("n_bins must be specified for coadd initialization.")
 
-    return filtering_params
+    def ensure_wrapped(parent_field, key, arr=None, axis=None):
+        if key not in parent_field:
+            if arr is None and axis is None:
+                parent_field.wrap(key, core.AxisManager(aman.dets))
+            elif arr is None:
+                parent_field.wrap(key, axis)
+            elif axis is None:
+                parent_field.wrap(key, arr, [(0, "dets")])
+            else:
+                parent_field.wrap(key, arr, axis)
+        return parent_field[key]
 
-
-def filtering__with_delay_filter(
-    aman, filter, signal_name_pre, signal_name_new
-):
-    # filtering signal data using the filter which has timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered
-    # signal_name_new: New name for filtered signal
-
-    signal_new = tod_ops.fourier_filter(
-        aman, filter, signal_name=signal_name_pre
-    )
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(
-        signal_name_new,
-        signal_new,
-        [(0, "dets"), (1, "samps")],
-        overwrite=True,
-    )
-
-    signal_new = tod_ops.fourier_filter(
-        aman, filter, signal_name=signal_name_new
-    )
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(
-        signal_name_new,
-        signal_new,
-        [(0, "dets"), (1, "samps")],
-        overwrite=True,
-    )
-
-
-def filtering__without_delay_filter(
-    aman, filter, signal_name_pre, signal_name_new
-):
-    # filtering signal data using the filter which doesn't have timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered
-    # signal_name_new: New name for filtered signal
-
-    signal_new = tod_ops.fourier_filter(
-        aman, filter, signal_name=signal_name_pre
-    )
-    aman.wrap(
-        signal_name_new,
-        signal_new,
-        [(0, "dets"), (1, "samps")],
-        overwrite=True,
-    )
-
-
-def get_dicts(cal_type):
-    # Get dictionaries for co-added data and fit result
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-
-    filt_keys = ["iirc", "hpf", "lpf"]
-
-    coadd_data = {}
-    fit_result = {}
-
-    if cal_type == "gain":
-        freq_keys = ["f1_gain"]
-        fit_keys = ["fit_coadd"]
-    elif cal_type == "timeconstant":
-        freq_keys = CHOPPING_FREQS.keys()
-        fit_keys = [
-            "fit_coadd",
-            "fit_amp",
-            "fit_phase__fix_tau",
-            "fit_phase__free",
-        ]
-    else:
-        ValueError(
-            f"'{cal_type}' is a wrong type. Please specify 'gain' "
-            "or 'timeconstant'."
+    if init_type == "coadd":
+        # Initalize axis manager for co-added data. Overwrite if already exists
+        ensure_wrapped(
+            aman.stm_cal,
+            "coadd_data",
+            axis=core.AxisManager(aman.dets, core.IndexAxis("stm_coadd_bins", n_bins)),
+        )
+        ensure_wrapped(
+            aman.stm_cal.coadd_data,
+            "x",
+            arr=np.full(n_bins, np.nan),
+            axis=[(0, "stm_coadd_bins")],
         )
 
-    # Initialize coadd_data dictionary
-    for filt_key in filt_keys:
-        coadd_data[filt_key] = {}
-
-        for freq_key in freq_keys:
-            coadd_data[filt_key][freq_key] = {}
-            for key in ["x", "y", "yerr"]:
-                coadd_data[filt_key][freq_key][key] = []
-
-    # Initialize fit_result dictionary
-    for fit_key in fit_keys:
-        fit_result[fit_key] = {}
         for filt_key in filt_keys:
-            if filt_key != "iirc":
-                if fit_key == "fit_coadd":
-                    fit_result[fit_key][filt_key] = {}
-                    for freq_key in freq_keys:
-                        fit_result[fit_key][filt_key][freq_key] = []
-                else:
-                    fit_result[fit_key][filt_key] = []
+            ensure_wrapped(aman.stm_cal.coadd_data, filt_key, axis=core.AxisManager())
 
-    return coadd_data, fit_result
+            for freq_key in freq_keys:
+                ensure_wrapped(
+                    aman.stm_cal.coadd_data[filt_key],
+                    freq_key,
+                    axis=core.AxisManager(
+                        aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
+                    ),
+                )
+
+                for key in ["y", "yerr"]:
+                    ensure_wrapped(
+                        aman.stm_cal.coadd_data[filt_key][freq_key],
+                        key,
+                        arr=np.full((aman.dets.count, n_bins), np.nan),
+                        axis=[(0, "dets"), (1, "stm_coadd_bins")],
+                    )
+
+        ensure_wrapped(
+            aman.stm_cal,
+            "filtering_params",
+            axis=core.AxisManager(aman.stm_cal.chopping_freq_key),
+        )
+        ensure_wrapped(
+            aman.stm_cal.filtering_params,
+            "filter_freqs",
+            arr=np.full(aman.stm_cal.chopping_freq_key.count, np.nan),
+            axis=[(0, "chopping_freq_key")],
+        )
+
+        # Initialize axis manager for fit results. Do not overwrite if already exists.
+        field = ensure_wrapped(aman.stm_cal, "fit_coadd")
+
+        for filt_key in filt_keys:
+            if filt_key == "iirc":
+                continue
+            ensure_wrapped(aman.stm_cal["fit_coadd"], filt_key)
+
+            for freq_key in freq_keys:
+                field = ensure_wrapped(
+                    aman.stm_cal["fit_coadd"][filt_key],
+                    freq_key,
+                    axis=core.AxisManager(
+                        aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
+                    ),
+                )
+
+                for key in ["chisqr", "redchi"]:
+                    ensure_wrapped(field, key, np.full(aman.dets.count, np.nan))
+                ensure_wrapped(
+                    field,
+                    "weight",
+                    arr=np.full((aman.dets.count, n_bins), np.nan),
+                    axis=[(0, "dets"), (1, "stm_coadd_bins")],
+                )
+
+                for key in model.param_names:
+                    if key == "t":
+                        continue
+                    ensure_wrapped(field, key, np.full(aman.dets.count, np.nan))
+                    ensure_wrapped(
+                        field, f"{key}_stderr", np.full(aman.dets.count, np.nan)
+                    )
+
+    if init_type == "timeconstant":
+        # Initialize axis manager for timeconstant fit results. Do not overwrite if already exists.  # noqa: E115
+        for fit_key in ["fit_amp", "fit_phase__fix_tau", "fit_phase__free"]:
+            ensure_wrapped(aman.stm_cal, fit_key)
+
+            for filt_key in filt_keys:
+                if filt_key == "iirc":
+                    continue
+
+                ndata_taufit = np.sum(aman.stm_cal.chopping_freq_key.vals != "f1_gain")
+
+                index_axis = core.IndexAxis("ndata_taufit", ndata_taufit)
+                field = ensure_wrapped(
+                    aman.stm_cal[fit_key],
+                    filt_key,
+                    axis=core.AxisManager(aman.dets, index_axis),
+                )
+
+                for key in ["chisqr", "redchi"]:
+                    ensure_wrapped(field, key, np.full(aman.dets.count, np.nan))
+                ensure_wrapped(
+                    field,
+                    "weight",
+                    arr=np.full(
+                        (
+                            aman.dets.count,
+                            ndata_taufit,
+                        ),
+                        np.nan,
+                    ),
+                    axis=[(0, "dets"), (1, "ndata_taufit")],
+                )
+
+                for key in model[fit_key].param_names:
+                    if key == "f":
+                        continue
+                    ensure_wrapped(field, key, np.full(aman.dets.count, np.nan))
+                    ensure_wrapped(
+                        field, f"{key}_stderr", np.full(aman.dets.count, np.nan)
+                    )
+                ensure_wrapped(
+                    field,
+                    "data",
+                    arr=np.full(
+                        (
+                            aman.dets.count,
+                            ndata_taufit,
+                        ),
+                        np.nan,
+                    ),
+                    axis=[(0, "dets"), (1, "ndata_taufit")],
+                )
 
 
-def fill_none(coadd_data=None, fit_result=None):
-    # Fill None for co-added data and fit result when there is no valid data
-    # for calculation.
-    # coadd_data: Dictionary for co-added data
-    # fit_result: List for fit result
+def filtering(
+    aman,
+    freq_key,
+    filter_freq,
+    hpf_cutoff=1,
+    hpf_width=2,
+    lpf_cutoff_factor=1.5,
+    lpf_width_fraction=1 / 5,
+    delete_tod=False,
+):
+    """
+    Filtering signal data.
 
-    if fit_result is not None:
-        for fit_key in fit_result.keys():
-            for filt_key in fit_result[fit_key].keys():
-                if isinstance(fit_result[fit_key][filt_key], list):
-                    fit_result[fit_key][filt_key].append(None)
-                else:
-                    for freq_key in fit_result[fit_key][filt_key].keys():
-                        fit_result[fit_key][filt_key][freq_key].append(None)
+    Args:
+        aman: axis manager
+        freq_key: key for the chopping frequency to be used for filtering
+        filter_freq: frequency to be used for low-pass filtering
+        hpf_cutoff: cutoff frequency for high-pass filter in Hz. Default is 1Hz.
+        hpf_width: full width of high-pass filter in Hz. Default is 2Hz.
+        lpf_cutoff_factor: cutoff frequency for low-pass filter is calculated by multiplying this factor and chopping frequency. Default is 1.5.
+        lpf_width_fraction: full width of low-pass filter is calculated by multiplying this factor and cutoff frequency. Default is 1/5.
+        delete_tod: whether to delete the filtered TOD data after processing. Default is False.
+    """
 
-    if coadd_data is not None:
-        for filt_key in coadd_data.keys():
-            for freq_key in coadd_data[filt_key].keys():
-                for key in coadd_data[filt_key][freq_key].keys():
-                    coadd_data[filt_key][freq_key][key].append(None)
+    # Define filters
+    iirc_filter = tod_ops.filters.iir_filter(aman, invert=True)
+    hpf = tod_ops.filters.high_pass_sine2(hpf_cutoff, hpf_width)
+    filter_cutoff = lpf_cutoff_factor * filter_freq
+    lpf = tod_ops.filters.low_pass_sine2(
+        filter_cutoff, filter_cutoff * lpf_width_fraction
+    )
+
+    # Invert IIR filter if requested.
+    if "iirc" in aman.stm_cal.coadd_data._fields:
+        if "signal_iirc" not in aman:
+            signal_new = tod_ops.fourier_filter(aman, iirc_filter, signal_name="signal")
+            aman.wrap("signal_iirc", signal_new, [(0, "dets"), (1, "samps")])
+
+    # Make HPFed data
+    if "signal_hpf" not in aman:
+        filters = tod_ops.filters.FilterChain([iirc_filter, hpf])
+        signal_new = tod_ops.fourier_filter(aman, filters, signal_name="signal")
+        aman.wrap("signal_hpf", signal_new, [(0, "dets"), (1, "samps")])
+
+    # Save memory
+    if delete_tod:
+        if "signal" in aman:
+            aman.move("signal", None)
+
+    # Make LPFed data
+    signal_new = tod_ops.fourier_filter(aman, lpf, signal_name="signal_hpf")
+    aman.wrap(
+        f"signal_lpf_{freq_key}",
+        signal_new,
+        [(0, "dets"), (1, "samps")],
+        overwrite=True,
+    )
+
+    # Fill filtering parameters to axis manager
+    aman.stm_cal.filtering_params.wrap("hpf_cutoff", hpf_cutoff, overwrite=True)
+    aman.stm_cal.filtering_params.wrap("hpf_width", hpf_width, overwrite=True)
+    aman.stm_cal.filtering_params.wrap(
+        "lpf_cutoff_factor", lpf_cutoff_factor, overwrite=True
+    )
+    aman.stm_cal.filtering_params.wrap(
+        "lpf_width_fraction", lpf_width_fraction, overwrite=True
+    )
+    aman.stm_cal.filtering_params.filter_freqs[
+        aman.stm_cal.chopping_freq_key.vals == freq_key
+    ] = filter_freq
 
 
-def get_coadd_data(aman, coadd_data, n_bins, det_mask):
-    # Making co-added data
-    # aman: axis manager of tod data, including timestamps and tod signal
-    # coadd_data: Dictionary for co-added data
-    # n_bins: # of bins for co-added data
-    # t_min: Minimum time for the data analysis
-    # t_max: Maximum time for the data analysis
+def get_coadd_data(aman, freq_key, n_bins, det_mask):
+    """
+    Making co-added data for specific frequency.
 
+    Args:
+        aman: axis manager of tod data, including timestamps and tod signal
+        freq_key: frequency key for the co-added data
+        n_bins: # of bins for co-added data
+        det_mask: boolean mask for the detectors to be co-added
+    """
     t0 = aman.timestamps[0]
     bins = np.linspace(0, 1 - 1 / n_bins, n_bins)
     x = bins + 1 / n_bins / 2
+    aman.stm_cal.coadd_data["x"] = x
+
+    filt_keys = [x for x in aman.stm_cal.coadd_data._fields if x != "x"]
 
     # Get cuts for co-addition
-    cuts = {}
-    for freq_key in coadd_data["hpf"].keys():
-        idx = np.where(aman.stm_ana.freqs.vals == freq_key)[0][0]
-        t_min, t_max = aman.stm_ana.t_cuts[idx]
+    idx = np.where(aman.stm_cal.chopping_freq_key.vals == freq_key)[0][0]
+    t_min, t_max = aman.stm_cal.t_cuts[idx]
 
-        cut1 = (t_min <= aman.timestamps - t0) & (aman.timestamps - t0 < t_max)
+    cut1 = (t_min <= aman.timestamps - t0) & (aman.timestamps - t0 < t_max)
 
-        cuts[freq_key] = []
-        for i_bin in range(n_bins):
-            cut2 = (i_bin / n_bins <= aman.frac_timing) & (
-                aman.frac_timing < (i_bin + 1) / n_bins
+    cuts = []
+    for i_bin in range(n_bins):
+        cut2 = (i_bin / n_bins <= aman.stm_cal.frac_timing) & (
+            aman.stm_cal.frac_timing < (i_bin + 1) / n_bins
+        )
+        cut = cut1 & cut2
+        cuts.append(cut)
+
+    # Calculate co-added data
+    for i_det, m in enumerate(det_mask):
+        if not m:
+            continue
+        if not aman.stm_cal.finite_data[i_det]:
+            continue
+
+        for filt_key in filt_keys:
+            if filt_key == "hpf" or filt_key == "iirc":
+                key = f"signal_{filt_key}"
+            else:
+                key = f"signal_lpf_{freq_key}"
+
+            data = [[] for _ in range(n_bins)]
+            for i_bin in range(n_bins):
+                data[int(i_bin)] = aman[key][i_det][cuts[i_bin]]
+
+            y = np.array(
+                [np.nanmean(d) if not np.isnan(d).all() else np.nan for d in data]
             )
-            cut = cut1 & cut2
-            cuts[freq_key].append(cut)
+            yerr = np.array(
+                [
+                    np.array(d).std(ddof=1) / np.sqrt(len(d))
+                    if len(d) > 0 and not np.isnan(d).all()
+                    else np.nan
+                    for d in data
+                ]
+            )
+
+            aman.stm_cal.coadd_data[filt_key][freq_key]["y"][i_det] = y
+            aman.stm_cal.coadd_data[filt_key][freq_key]["yerr"][i_det] = yerr
+
+
+def fit_coadd_data(aman, freq_key, det_mask, model, params_base):
+    """
+    Fit co-added data for each detector for a specific frequency.
+
+    Args:
+        aman: axis manager containing the coadded data
+        freq_key: frequency key for the co-added data to be fitted
+        det_mask: boolean mask for the detectors to be fitted
+        model: lmfit model for fitting
+        params_base: base parameters for fitting
+    """
 
     for i_det, m in enumerate(det_mask):
         if not m:
-            fill_none(coadd_data=coadd_data)
-            continue
-        if not np.isfinite(aman.signal[i_det]).all():
-            fill_none(coadd_data=coadd_data)
             continue
 
-        for filt_key in coadd_data.keys():
-            for freq_key in coadd_data["hpf"].keys():
-                if filt_key == "hpf" or filt_key == "iirc":
-                    key = f"signal_{filt_key}"
-                elif filt_key == "lpf":
-                    if freq_key == "f1_gain":
-                        key = "signal_lpf"
-                    else:
-                        key = f"signal_lpf_{freq_key}"
+        # Strange data check
+        if not aman.stm_cal.finite_data[i_det]:
+            continue
 
-                data = [[] for _ in range(n_bins)]
-                for i_bin in range(n_bins):
-                    data[int(i_bin)] = aman[key][i_det][cuts[freq_key][i_bin]]
+        # Fitting
+        for filt_key in [
+            x for x in aman.stm_cal.coadd_data._fields if x != "iirc" and x != "x"
+        ]:
+            params = params_base.copy()
 
-                y = np.array(
-                    [
-                        np.nanmean(d) if not np.isnan(d).all() else np.nan
-                        for d in data
-                    ]
-                )
-                yerr = np.array(
-                    [
-                        np.array(d).std(ddof=1) / np.sqrt(len(d))
-                        if len(d) > 0 and not np.isnan(d).all()
-                        else np.nan
-                        for d in data
-                    ]
-                )
+            x = aman.stm_cal.coadd_data["x"]
+            y = aman.stm_cal.coadd_data[filt_key][freq_key]["y"][i_det]
+            yerr = aman.stm_cal.coadd_data[filt_key][freq_key]["yerr"][i_det]
 
-                mask = np.isfinite(y)
-                xx = x[mask]
-                y = y[mask]
-                yerr = yerr[mask]
+            mask = np.isfinite(y)
+            x = x[mask]
+            y = y[mask]
+            yerr = yerr[mask]
 
-                if y.size == 0:
-                    xx, y, yerr = (None, None, None)
+            if y.size == 0:
+                continue
 
-                coadd_data[filt_key][freq_key]["x"].append(xx)
-                coadd_data[filt_key][freq_key]["y"].append(y)
-                coadd_data[filt_key][freq_key]["yerr"].append(yerr)
+            if filt_key == "lpf":
+                for i in range(1, 7):
+                    params[f"a{i}"].set(value=0, vary=False)
+                    params[f"t{i}"].set(value=0, vary=False)
+                result = model.fit(y, params, t=x, weights=1 / np.array(yerr))
+            else:
+                result = model.fit(y, params, t=x, weights=1 / np.array(yerr))
+
+            fill_result(
+                aman.stm_cal.fit_coadd[filt_key][freq_key], result=result, i_det=i_det
+            )
+
+
+def fill_result(field, result, i_det):
+    """
+    Fill lmfit result into axis manager.
+
+    Args:
+        field: field in the axis manager to fill data
+        result: lmfit result
+        i_det: detector index
+        fit_key: type of fit. 'fit_coadd', 'fit_amp', 'fit_phase__fix_tau', or 'fit_phase__free'
+    """
+    for key in result.params.keys():
+        field[key][i_det] = result.params[key].value
+        field[f"{key}_stderr"][i_det] = result.params[key].stderr
+        field["chisqr"][i_det] = result.chisqr
+        field["redchi"][i_det] = result.redchi
+
+    if "tau" in result.params.keys():
+        field["data"][i_det] = result.data
+    else:
+        field["weight"][i_det] = result.weights
 
 
 def get_fit_params(cal_type):
-    # Get fit parameters for fitting
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
+    """
+    Get fit parameters for fitting.
 
-    if cal_type == "gain":
+    Args:
+        cal_type: 'coadd' or 'timeconstant'. type of calibration
+
+    Return:
+        model: lmfit model for fitting
+        params_base: lmfit parameters for fitting
+    """
+    amps_init = [1e-3, 2e-4, 2e-4, 1e-4, 1e-4, 1e-5, 1e-5]
+
+    if cal_type == "coadd":
         model = lmfit.Model(func_sines)
 
         params_base = lmfit.Parameters()
-        params_base.add("a0", value=1e-3)
-        params_base.add("a1", value=2e-4)
-        params_base.add("a2", value=2e-4)
-        params_base.add("a3", value=1e-4)
-        params_base.add("a4", value=1e-4)
-        params_base.add("a5", value=1e-5)
-        params_base.add("a6", value=1e-5)
-        params_base.add("t0", value=0.5, min=0, max=1)
-        params_base.add("t1", value=0.5, min=0, max=1)
-        params_base.add("t2", value=0.5, min=0, max=1)
-        params_base.add("t3", value=0.5, min=0, max=1)
-        params_base.add("t4", value=0.5, min=0, max=1)
-        params_base.add("t5", value=0.5, min=0, max=1)
-        params_base.add("t6", value=0.5, min=0, max=1)
-
+        for i, a in enumerate(amps_init):
+            params_base.add(f"a{i}", value=a)
+            params_base.add(f"t{i}", value=0.5, min=0, max=1)
     elif cal_type == "timeconstant":
         model = {}
-        model["fit_coadd"] = lmfit.Model(func_sines)
         model["fit_amp"] = lmfit.Model(func_response_amplitude)
         model["fit_phase__fix_tau"] = lmfit.Model(
             func_response_phase_with_dt, independent_vars=["f"]
@@ -1323,894 +971,15 @@ def get_fit_params(cal_type):
         )
 
         params_base = {}
-        params_base["fit_coadd"] = lmfit.Parameters()
         params_base["fit_amp"] = lmfit.Parameters()
         params_base["fit_phase__fix_tau"] = lmfit.Parameters()
         params_base["fit_phase__free"] = lmfit.Parameters()
-        params_base["fit_coadd"].add("a0", value=1e-3)
-        params_base["fit_coadd"].add("a1", value=2e-4)
-        params_base["fit_coadd"].add("a2", value=2e-4)
-        params_base["fit_coadd"].add("a3", value=1e-4)
-        params_base["fit_coadd"].add("a4", value=1e-4)
-        params_base["fit_coadd"].add("a5", value=1e-5)
-        params_base["fit_coadd"].add("a6", value=1e-5)
-        params_base["fit_coadd"].add("t0", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t1", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t2", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t3", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t4", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t5", value=0.5, min=0, max=1)
-        params_base["fit_coadd"].add("t6", value=0.5, min=0, max=1)
         params_base["fit_amp"].add("a", value=1e-3, min=0, max=1)
         params_base["fit_amp"].add("tau", value=1e-3, min=0, max=1)
-        params_base["fit_phase__fix_tau"].add(
-            "theta_geo", value=0, min=-90, max=90
-        )
-        params_base["fit_phase__free"].add(
-            "theta_geo", value=0, min=-90, max=90
-        )
         params_base["fit_phase__fix_tau"].add("tau")
         params_base["fit_phase__free"].add("tau", value=1e-3, min=0, max=0.1)
-        params_base["fit_phase__fix_tau"].add(
-            "dt", value=0.125 * 1e-3, min=-3e-3, max=3e-3
-        )
-        params_base["fit_phase__free"].add(
-            "dt", value=0.125 * 1e-3, min=-3e-3, max=3e-3
-        )
+        for fit_key in ["fit_phase__fix_tau", "fit_phase__free"]:
+            params_base[fit_key].add("theta_geo", value=0, min=-90, max=90)
+            params_base[fit_key].add("dt", value=0.125 * 1e-3, min=-3e-3, max=3e-3)
 
     return model, params_base
-
-
-def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
-    # Define fitting function
-    #
-    # t: time or timing_frac of stimulator signal.
-
-    y = (
-        a0 * np.sin(1 * (t - t0) * 2 * np.pi)
-        + a1 * np.sin(2 * (t - t1) * 2 * np.pi)
-        + a2 * np.sin(3 * (t - t2) * 2 * np.pi)
-        + a3 * np.sin(4 * (t - t3) * 2 * np.pi)
-        + a4 * np.sin(5 * (t - t4) * 2 * np.pi)
-        + a5 * np.sin(6 * (t - t5) * 2 * np.pi)
-        + a6 * np.sin(7 * (t - t6) * 2 * np.pi)
-    )
-
-    return y
-
-
-def func_response_amplitude(f, tau, a):
-    # Detector response function of amplitude
-    #
-    # f: Chopping frequency
-    # tau: time constant of a detector in [s]
-    # a: Amplitude of sin function for '0' frequency signal
-
-    y = a / np.sqrt(1 + (2 * np.pi * f * tau) ** 2)
-    return y
-
-
-def func_response_phase(f, tau, theta_geo):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta_geo: Offset of phase delay [deg]
-    # theta: Phase delay of stimulator signal [deg]
-
-    theta = np.arctan(-2 * np.pi * f * tau) * (180 / np.pi) + theta_geo
-    return theta
-
-
-def func_response_phase_with_dt(f, tau, theta_geo, dt):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta: Phase delay of stimulator signal [deg]
-    # theta_geo: Offset of phase delay due to hardware effect, geo = geometry
-    # [deg]
-    # theta_dt: Offset of phase delay due to readout issue [deg],
-    # theta_dt*(pi/180) = -delta_t*2pi*f
-    # dt: Time difference due to wrong time stamps
-
-    theta_dt = -dt * 2 * np.pi * f * (180 / np.pi)
-    theta = (
-        np.arctan(-2 * np.pi * f * tau) * (180 / np.pi) + theta_geo + theta_dt
-    )
-    return theta
-
-
-def plot_hkdata(aman, hkdata, cal_type):
-
-    fig, axes = plt.subplot_mosaic(
-        [["A", "A"], ["B", "C"], ["D", "E"]], figsize=(10, 8)
-    )
-
-    t0 = aman.timestamps[0]
-
-    # Chopping freq with t_cuts
-    y = 1 / (aman.stm_ana.t_enc[1:] - aman.stm_ana.t_enc[:-1])
-    axes["A"].plot(aman.stm_ana.t_enc[:-1] - t0, y, label="Chopping_freq")
-    axes["A"].set_xlabel("Time [s]")
-    axes["A"].set_ylabel("Chopping frequency [Hz]")
-    axes["A"].vlines(
-        aman.timestamps[0] - t0,
-        ymin=min(y),
-        ymax=max(y),
-        linestyle="--",
-        color="black",
-        alpha=0.5,
-        label="TOD start",
-    )
-    axes["A"].vlines(
-        aman.timestamps[-1] - t0,
-        ymin=min(y),
-        ymax=max(y),
-        linestyle="-",
-        color="black",
-        alpha=0.5,
-        label="TOD end",
-    )
-
-    # Environmental temperature
-    data_temp = {}
-    for key, key_hk in [
-        ("heater", "stimulator-thermo.temperatures.Channel_0_T"),
-        ("chopper_rear", "stimulator-thermo.temperatures.Channel_4_T"),
-        ("chopper_front", "stimulator-thermo.temperatures.Channel_6_T"),
-        ("air", "stimulator-thermo.temperatures.Channel_5_T"),
-    ]:
-        data_temp[key] = {}
-        data_temp[key]["t"] = hkdata.data[key_hk][0] - t0
-        data_temp[key]["temp"] = hkdata.data[key_hk][1] + 273.15
-
-    for key in data_temp.keys():
-        if key != "heater":
-            axes["B"].plot(
-                data_temp[key]["t"], data_temp[key]["temp"], "-", label=key
-            )
-
-    idx = np.where(aman.stm_ana.positions.vals == "env")[0][0]
-    env_temps = aman.stm_ana.temps[idx]
-
-    axes["B"].set_ylim(env_temps[0] - 5, env_temps[0] + 5)
-    axes["B"].set_ylabel("Temperature [K]")
-    axes["B"].set_xlabel("Time [s]")
-
-    for key_freq, env_temp, (t_min, t_max) in zip(
-        aman.stm_ana.freqs.vals, env_temps, aman.stm_ana.t_cuts
-    ):
-        if cal_type == "gain":
-            if key_freq == "f1_gain":
-                axes["B"].hlines(
-                    env_temp, t_min, t_max, color="red", label="environment"
-                )
-        else:
-            if key_freq != "f1_gain":
-                if key_freq == "f1":
-                    axes["B"].hlines(
-                        env_temp,
-                        t_min,
-                        t_max,
-                        color="red",
-                        label="environment",
-                    )
-                else:
-                    axes["B"].hlines(env_temp, t_min, t_max, color="red")
-
-    # Heater temperature
-    axes["D"].plot(
-        data_temp["heater"]["t"],
-        data_temp["heater"]["temp"],
-        "-",
-        label="heater",
-    )
-    idx = np.where(aman.stm_ana.positions.vals == "heater")[0][0]
-    heater_temp = aman.stm_ana.temps[idx][0]
-    axes["D"].set_ylim(heater_temp - 5, heater_temp + 5)
-    axes["D"].set_ylabel("Temperature [K]")
-    axes["D"].set_xlabel("Time [s]")
-
-    # Encoder timing and stream timing
-    axes["C"].plot(
-        aman.stm_ana.t_enc - t0, aman.stm_ana.t_enc - aman.stm_ana.t_hk, "."
-    )
-    axes["C"].set_title("PTP_time - hk_time")
-    axes["C"].set_xlabel("t_enc - t0_stream [s]")
-    axes["C"].set_ylabel("t_enc - t_hk [s] (should be -0.1<t<0)")
-
-    # Plot timing cut area
-    for key_ax in ["A", "B", "D"]:
-        for key_freq, (t_min, t_max) in zip(
-            aman.stm_ana.freqs.vals, aman.stm_ana.t_cuts
-        ):
-            if cal_type == "gain":
-                if key_freq == "f1_gain":
-                    axes[key_ax].axvspan(
-                        t_min, t_max, alpha=0.3, label="used data"
-                    )
-            else:
-                if key_freq != "f1_gain":
-                    if key_freq == "f1":
-                        axes[key_ax].axvspan(
-                            t_min, t_max, alpha=0.3, label="used data"
-                        )
-                    else:
-                        axes[key_ax].axvspan(t_min, t_max, alpha=0.3)
-
-    # Misc
-    for key_ax in ["A", "B", "C", "D"]:
-        axes[key_ax].grid()
-    axes["A"].legend()
-    axes["B"].legend(loc="upper left", bbox_to_anchor=(1, 1))
-    axes["D"].legend(loc="upper left", bbox_to_anchor=(1, 1))
-
-    plt.tight_layout()
-
-
-def plot(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
-    # Make plot for one detector
-    # aman: axis manager
-    # data: co-added data for one detector
-    # result: fit result for one detector
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-
-    t0 = aman.timestamps[0]
-    ufm = _get_ufm_label(aman, i_det)
-
-    if cal_type == "gain":
-        fig, axes = plt.subplots(3, 2, figsize=(10, 8))
-        fig.suptitle(
-            f"Stimulator data, {ufm}, i_det: {i_det}, "
-            f"det_id: {aman.det_info.det_id[i_det]}"
-        )
-
-        i_y = 0
-        i_x = 0
-        y = aman.signal[i_det] - np.mean(aman.signal[i_det])
-        axes[i_y, i_x].plot(aman.timestamps - t0, y, label="Raw_data - mean")
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal_hpf[i_det], label="HPFed data"
-        )
-        axes[i_y, i_x].set_ylim(
-            min(y) - (max(y) - min(y)) * 0.1, max(y) + (max(y) - min(y)) * 0.1
-        )
-        axes[i_y, i_x].set_title(f"TOD data, i_det={i_det}")
-        axes[i_y, i_x].set_xlabel("time [s]")
-        axes[i_y, i_x].set_ylabel("TOD [pW]")
-        axes[i_y, i_x].legend()
-
-        i_y = 1
-        i_x = 0
-        x_min = 30
-        x_max = 30.5
-        i_x_min = int(aman.obs_info.sampling_rate * x_min)
-        i_x_max = int(aman.obs_info.sampling_rate * x_max)
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0,
-            aman.signal[i_det] - np.mean(aman.signal[i_det][i_x_min:i_x_max]),
-            label="Raw data - mean",
-        )
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0,
-            aman.signal_hpf[i_det],
-            label="HPFed data",
-            color="C1",
-        )
-        axes[i_y, i_x].set_title(f"TOD data, i_det={i_det}")
-        axes[i_y, i_x].set_xlabel("time [s]")
-        axes[i_y, i_x].set_ylabel("TOD [pW]")
-        axes[i_y, i_x].legend()
-        axes[i_y, i_x].set_ylim(
-            min(aman.signal_hpf[i_det][100:-100]),
-            max(aman.signal_hpf[i_det][100:-100]),
-        )
-        if ufm[0] == "M":
-            axes[i_y, i_x].set_ylim(-0.005, 0.005)
-        elif ufm[0] == "U":
-            axes[i_y, i_x].set_ylim(-0.02, 0.02)
-        axes[i_y, i_x].set_xlim(x_min, x_max)
-        i_y = 2
-        i_x = 0
-        f = np.arange(0, 10, 0.01)
-        axes[i_y, i_x].set_title("High Pass Filter")
-        axes[i_y, i_x].set_xlabel("Frequency [Hz]")
-        axes[i_y, i_x].set_ylabel("HPF")
-
-        i_y = 0
-        i_x = 1
-        x = coadd_data["iirc"]["f1_gain"]["x"][i_det]
-        y = coadd_data["iirc"]["f1_gain"]["y"][i_det]
-        yerr = coadd_data["iirc"]["f1_gain"]["yerr"][i_det]
-        axes[i_y, i_x].errorbar(x, y, yerr, fmt="o", capsize=5)
-        axes[i_y, i_x].set_title("Co-added signal: Raw data")
-        axes[i_y, i_x].set_xlabel("Timing (1 cycle)")
-        axes[i_y, i_x].set_ylabel("TOD ave [pW]")
-
-        i_y = 1
-        i_x = 1
-        x = coadd_data["hpf"]["f1_gain"]["x"][i_det]
-        y = coadd_data["hpf"]["f1_gain"]["y"][i_det]
-        yerr = coadd_data["hpf"]["f1_gain"]["yerr"][i_det]
-        axes[i_y, i_x].errorbar(
-            x, y, yerr, fmt="o", capsize=5, color="C1", zorder=0, label="HPFed"
-        )
-        axes[i_y, i_x].set_title(f"Co-added signal: Filtered data, {ufm}")
-
-        x = coadd_data["lpf"]["f1_gain"]["x"][i_det]
-        y = coadd_data["lpf"]["f1_gain"]["y"][i_det]
-        yerr = coadd_data["lpf"]["f1_gain"]["yerr"][i_det]
-        axes[i_y, i_x].errorbar(
-            x,
-            y,
-            yerr,
-            fmt="o",
-            capsize=5,
-            color="C2",
-            zorder=0,
-            label="(HPF+LPF)ed",
-        )
-        axes[i_y, i_x].set_xlabel("Timing (1 cycle)")
-        axes[i_y, i_x].set_ylabel("TOD ave [pW]")
-        axes[i_y, i_x].plot(
-            x,
-            fit_result["fit_coadd"]["hpf"]["f1_gain"][i_det].best_fit,
-            "-",
-            color="red",
-            zorder=1,
-        )
-        axes[i_y, i_x].plot(
-            x,
-            fit_result["fit_coadd"]["lpf"]["f1_gain"][i_det].best_fit,
-            "-",
-            color="green",
-            zorder=1,
-        )
-        y = fit_result["fit_coadd"]["hpf"]["f1_gain"][i_det].best_values[
-            "a0"
-        ] * np.sin(
-            (
-                x
-                - fit_result["fit_coadd"]["hpf"]["f1_gain"][i_det].best_values[
-                    "t0"
-                ]
-            )
-            * 2
-            * np.pi
-        )
-        axes[i_y, i_x].plot(
-            x,
-            y,
-            linestyle=(0, (2, 8)),
-            color="red",
-            zorder=1,
-            label=r"sin$\theta$ for HPF fit",
-        )
-        axes[i_y, i_x].legend()
-
-        i_y = 2
-        i_x = 1
-        axes[i_y, i_x].plot(
-            aman.stm_ana.t_enc[:-1] - t0,
-            1 / (aman.stm_ana.t_enc[1:] - aman.stm_ana.t_enc[:-1]),
-            label="y: chopping freq, t: encoder",
-        )
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal[i_det], label="TOD"
-        )
-        for key_freq, (t_min, t_max) in zip(
-            aman.stm_ana.freqs.vals, aman.stm_ana.t_cuts
-        ):
-            if key_freq == "f1_gain":
-                axes[i_y, i_x].axvspan(
-                    t_min, t_max, alpha=0.3, label="used data"
-                )
-        axes[i_y, i_x].set_title("Overplot")
-        axes[i_y, i_x].set_ylabel("Chopping frequency[Hz]")
-        axes[i_y, i_x].set_xlabel("TOD time [s]")
-        axes[i_y, i_x].legend()
-
-        i_y = 2
-        i_x = 0
-        hpf = tod_ops.filters.high_pass_sine2(filtering_params["hpf_cutoff"])
-        filter_cutoff = (
-            filtering_params["lpf_cutoff_factor"]
-            * filtering_params["chopping_freqs"]["f1_gain"]
-        )
-        lpf = tod_ops.filters.low_pass_sine2(
-            filter_cutoff,
-            filter_cutoff * filtering_params["lpf_width_fraction"],
-        )
-
-        x = np.arange(0, filter_cutoff * 1.2, 0.1)
-        y = np.full(x.shape[0], 1)
-        axes[i_y, i_x].plot(x, hpf(x, y), label="HPF", color="C1")
-        axes[i_y, i_x].plot(x, lpf(x, y), label="LPF", color="C2")
-        axes[i_y, i_x].legend()
-
-    elif cal_type == "timeconstant":
-        # Plot basic data
-        fig, axes = plt.subplots(9, 2, figsize=(10, 18))
-        fig.suptitle(
-            f"Stimulator data, i_det: {i_det}, "
-            f"det_id: {aman.det_info.det_id[i_det]}"
-        )
-
-        i_y = 0
-        i_x = 0
-        y = aman.signal[i_det] - np.mean(aman.signal[i_det])
-        axes[i_y, i_x].plot(aman.timestamps - t0, y, label="Raw_data - mean")
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal_hpf[i_det], label="HPFed data"
-        )
-        axes[i_y, i_x].set_ylim(
-            min(y) - (max(y) - min(y)) * 0.1, max(y) + (max(y) - min(y)) * 0.1
-        )
-        axes[i_y, i_x].set_title(f"TOD data, i_det={i_det}")
-        axes[i_y, i_x].set_xlabel("time [s]")
-        axes[i_y, i_x].set_ylabel("TOD [pW]")
-        axes[i_y, i_x].legend()
-
-        i_y = 0
-        i_x = 1
-        axes[i_y, i_x].plot(
-            aman.stm_ana.t_enc[:-1] - t0,
-            1 / (aman.stm_ana.t_enc[1:] - aman.stm_ana.t_enc[:-1]),
-            label="y: chopping freq, t: encoder",
-        )
-        axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal[i_det], label="TOD"
-        )
-        for key_freq, (t_min, t_max) in zip(
-            aman.stm_ana.freqs.vals, aman.stm_ana.t_cuts
-        ):
-            if key_freq != "f1_gain":
-                if key_freq == "f1":
-                    axes[i_y, i_x].axvspan(
-                        t_min, t_max, alpha=0.3, label="used data"
-                    )
-                else:
-                    axes[i_y, i_x].axvspan(t_min, t_max, alpha=0.3)
-        axes[i_y, i_x].set_title("Overplot")
-        axes[i_y, i_x].set_ylabel("Chopping frequency[Hz]")
-        axes[i_y, i_x].set_xlabel("TOD time [s]")
-        axes[i_y, i_x].legend()
-
-        i_y = 1
-        i_x = 0
-        f = fit_result["fit_amp"]["lpf"][i_det].userkws["f"]
-        # axes[i_y,i_x].errorbar(f,fit_result['fit_amp']['lpf'][i_det].data,fit_result['fit_amp']['lpf'][i_det].weights,fmt='o')
-        # No errorbar for first step analysis
-        axes[i_y, i_x].plot(f, fit_result["fit_amp"]["lpf"][i_det].data, "o")
-        tau_ms = (
-            fit_result["fit_amp"]["lpf"][i_det].best_values["tau"] * 1e3
-        )
-        axes[i_y, i_x].plot(
-            f,
-            fit_result["fit_amp"]["lpf"][i_det].best_fit,
-            "-",
-            color="red",
-            zorder=3,
-            label=rf"$\tau$= {tau_ms:.2f}ms",
-        )
-        axes[i_y, i_x].set_xlabel("Chopping freq [Hz]")
-        axes[i_y, i_x].set_ylabel("sin_theta amplitude [pW]")
-        axes[i_y, i_x].set_title("Amplitude fit")
-        axes[i_y, i_x].legend()
-
-        i_y = 1
-        i_x = 1
-        result = fit_result["fit_phase__free"]["lpf"][i_det]
-        f = result.userkws["f"]
-        # axes[i_y,i_x].errorbar(f,result.data,result.weights,fmt='o')
-        # No errorbar for first step analysis
-        axes[i_y, i_x].plot(f, result.data, "o")
-
-        result = fit_result["fit_phase__free"]["lpf"][i_det]
-        tau_ms = result.best_values["tau"] * 1e3
-        theta_geo = result.best_values["theta_geo"]
-        dt_ms = result.best_values["dt"] * 1e3
-        label = (
-            rf"$\tau$={tau_ms:.2f}ms, "
-            rf"$\theta_\text{{geo}}$={theta_geo:.0f}deg, "
-            rf"$\Delta t$={dt_ms:.2f}ms"
-        )
-        axes[i_y, i_x].plot(
-            f,
-            result.best_fit,
-            "-",
-            color="blue",
-            zorder=3,
-            label=label,
-        )
-        result = fit_result["fit_phase__fix_tau"]["lpf"][i_det]
-        tau_ms = result.best_values["tau"] * 1e3
-        theta_geo = result.best_values["theta_geo"]
-        dt_ms = result.best_values["dt"] * 1e3
-        label = (
-            rf"$\tau$={tau_ms:.2f}ms(fix), "
-            rf"$\theta_\text{{geo}}$={theta_geo:.0f}deg, "
-            rf"$\Delta t$={dt_ms:.2f}ms"
-        )
-        axes[i_y, i_x].plot(
-            f,
-            result.best_fit,
-            "-",
-            color="green",
-            zorder=3,
-            label=label,
-        )
-
-        axes[i_y, i_x].set_xlabel("Chopping freq [Hz]")
-        axes[i_y, i_x].set_ylabel("Phase delay [deg]")
-        axes[i_y, i_x].set_title("Phase fit")
-        axes[i_y, i_x].legend()
-
-        i_y = 1
-        for f_key in filtering_params["chopping_freqs"].keys():
-            i_y += 1
-
-            i_x = 0
-            idx = np.where(aman.stm_ana.freqs.vals == f_key)[0][0]
-            x_min = aman.stm_ana.t_cuts[idx][0]
-            x_max = x_min + 0.2
-            i_x_min = int(aman.obs_info.sampling_rate * x_min)
-            i_x_max = int(aman.obs_info.sampling_rate * x_max)
-            axes[i_y, i_x].plot(
-                aman.timestamps - t0,
-                aman.signal[i_det]
-                - np.mean(aman.signal[i_det][i_x_min:i_x_max]),
-                label="Raw data - mean",
-            )
-            axes[i_y, i_x].plot(
-                aman.timestamps - t0,
-                aman.signal_hpf[i_det],
-                label="HPFed data",
-                color="C1",
-            )
-            axes[i_y, i_x].set_title(
-                f"TOD data, i_det={i_det}, "
-                f"f={filtering_params['chopping_freqs'][f_key]}Hz"
-            )
-            axes[i_y, i_x].set_xlabel("time [s]")
-            axes[i_y, i_x].set_ylabel("TOD [pW]")
-            axes[i_y, i_x].legend()
-            axes[i_y, i_x].set_ylim(
-                min(aman.signal_hpf[i_det][100:-100]),
-                max(aman.signal_hpf[i_det][100:-100]),
-            )
-            axes[i_y, i_x].set_xlim(x_min, x_max)
-            if ufm[0] == "M":
-                axes[i_y, i_x].set_ylim(-0.005, 0.005)
-            elif ufm[0] == "U":
-                axes[i_y, i_x].set_ylim(-0.02, 0.02)
-            elif ufm[0] == "L":
-                axes[i_y, i_x].set_ylim(-0.005, 0.005)
-
-            i_x = 1
-            x = coadd_data["iirc"][f_key]["x"][i_det]
-            y = coadd_data["iirc"][f_key]["y"][i_det]
-            yerr = coadd_data["iirc"][f_key]["yerr"][i_det]
-            axes[i_y, i_x].errorbar(
-                x,
-                y - np.mean(y),
-                yerr,
-                fmt="o",
-                capsize=5,
-                label="IIRCed data - mean",
-            )
-            axes[i_y, i_x].set_title(
-                "Co-added signal, "
-                f"f={filtering_params['chopping_freqs'][f_key]}Hz"
-            )
-            axes[i_y, i_x].set_xlabel("Timing (1 cycle)")
-            axes[i_y, i_x].set_ylabel("TOD [pW]")
-
-            x = coadd_data["hpf"][f_key]["x"][i_det]
-            y = coadd_data["hpf"][f_key]["y"][i_det]
-            yerr = coadd_data["hpf"][f_key]["yerr"][i_det]
-            axes[i_y, i_x].errorbar(
-                x,
-                y,
-                yerr,
-                fmt="o",
-                capsize=3,
-                color="C1",
-                label="(IIRC+HPF)ed data",
-            )
-
-            x = coadd_data["lpf"][f_key]["x"][i_det]
-            y = coadd_data["lpf"][f_key]["y"][i_det]
-            yerr = coadd_data["lpf"][f_key]["yerr"][i_det]
-            axes[i_y, i_x].errorbar(
-                x,
-                y,
-                yerr,
-                fmt="o",
-                capsize=3,
-                color="C2",
-                label="(IIRC+HPF+LPF)ed data",
-            )
-
-            axes[i_y, i_x].plot(
-                x,
-                fit_result["fit_coadd"]["hpf"][f_key][i_det].best_fit,
-                "-",
-                color="red",
-                zorder=5,
-            )
-            axes[i_y, i_x].plot(
-                x,
-                fit_result["fit_coadd"]["lpf"][f_key][i_det].best_fit,
-                "-",
-                color="green",
-                zorder=5,
-            )
-            y = fit_result["fit_coadd"]["hpf"][f_key][i_det].best_values[
-                "a0"
-            ] * np.sin(
-                (
-                    x
-                    - fit_result["fit_coadd"]["hpf"][f_key][i_det].best_values[
-                        "t0"
-                    ]
-                )
-                * 2
-                * np.pi
-            )
-            axes[i_y, i_x].plot(
-                x,
-                y,
-                linestyle=(0, (2, 8)),
-                color="red",
-                zorder=1,
-                label=r"sin$\theta$ for HPF fit",
-            )
-            axes[i_y, i_x].legend()
-
-    else:
-        raise ValueError(
-            f"'{cal_type}' is a wrong type. Please specify 'gain' "
-            "or 'timeconstant'."
-        )
-
-    for i_y in range(len(axes)):
-        for i_x in range(len(axes[0])):
-            axes[i_y, i_x].grid()
-    plt.tight_layout()
-    return fig
-
-
-def fill_data(aman, coadd_data, fit_result, n_bins, cal_type):
-    # Fill co-added data and fit result to axis manager
-    # aman: axis manager
-    # coadd_data: co-added data
-    # fit_result: fit result
-    # n_bins: number of bins
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-
-    if "coadd_data" not in aman.stm_ana.keys():
-        bins = core.IndexAxis("bins", n_bins)
-        aman.stm_ana.wrap(
-            "coadd_data", core.AxisManager(aman._axes["dets"], bins)
-        )
-
-    # Fill co-added data to axis manager
-    for filt_key in coadd_data.keys():
-        if filt_key not in aman.stm_ana.coadd_data.keys():
-            aman.stm_ana.coadd_data.wrap(filt_key, core.AxisManager())
-
-        for freq_key in coadd_data[filt_key].keys():
-            if freq_key not in aman.stm_ana.coadd_data[filt_key].keys():
-                aman.stm_ana.coadd_data[filt_key].wrap(
-                    freq_key,
-                    core.AxisManager(
-                        aman._axes["dets"],
-                        aman.stm_ana.coadd_data._axes["bins"],
-                    ),
-                )
-
-            for key in coadd_data[filt_key][freq_key].keys():
-                arr = np.array(
-                    [
-                        x if x is not None else np.full(n_bins, np.nan)
-                        for x in coadd_data[filt_key][freq_key][key]
-                    ]
-                )
-                aman.stm_ana.coadd_data[filt_key][freq_key].wrap(
-                    f"{key}", arr, [(0, "dets"), (1, "bins")], overwrite=True
-                )
-
-    # Fill fit result to axis manager
-    for fit_key in fit_result.keys():
-        if fit_key not in aman.stm_ana.keys():
-            aman.stm_ana.wrap(fit_key, core.AxisManager(aman._axes["dets"]))
-
-        for filt_key in fit_result[fit_key].keys():
-            if fit_key == "fit_coadd":
-                if filt_key not in aman.stm_ana[fit_key].keys():
-                    aman.stm_ana[fit_key].wrap(
-                        filt_key, core.AxisManager(aman._axes["dets"])
-                    )
-                for freq_key in fit_result[fit_key][filt_key].keys():
-                    aman.stm_ana[fit_key][filt_key].wrap(
-                        freq_key,
-                        core.AxisManager(
-                            aman._axes["dets"],
-                            aman.stm_ana.coadd_data._axes["bins"],
-                        ),
-                        overwrite=True,
-                    )
-            else:
-                aman.stm_ana[fit_key].wrap(
-                    filt_key,
-                    core.AxisManager(
-                        aman._axes["dets"],
-                        core.IndexAxis(
-                            "ndata_taufit", len(coadd_data[filt_key].keys())
-                        ),
-                    ),
-                    overwrite=True,
-                )
-
-        for filt_key in fit_result[fit_key].keys():
-            if fit_key == "fit_coadd":
-                for freq_key in fit_result[fit_key][filt_key].keys():
-                    field = aman.stm_ana.fit_coadd[filt_key][freq_key]
-                    result = fit_result[fit_key][filt_key][freq_key]
-                    weight_axis = "bins"
-            else:
-                field = aman.stm_ana[fit_key][filt_key]
-                result = fit_result[fit_key][filt_key]
-                weight_axis = "ndata_taufit"
-
-            valid_result = [x for x in result if x is not None]
-            for key in valid_result[0].params.keys():
-                arr = np.array(
-                    [
-                        float(x.params[key].value) if x is not None else np.nan
-                        for x in result
-                    ]
-                )
-                field.wrap(key, arr, [(0, "dets")], overwrite=True)
-                arr = np.array(
-                    [
-                        x.params[key].stderr if x is not None else np.nan
-                        for x in result
-                    ]
-                )
-                arr = np.array(
-                    [
-                        float(x.params[key].stderr)
-                        if x is not None and x.params[key].stderr is not None
-                        else np.nan
-                        for x in result
-                    ]
-                )
-                field.wrap(f"{key}_stderr", arr, [(0, "dets")], overwrite=True)
-                arr = np.array(
-                    [
-                        float(x.chisqr) if x is not None else np.nan
-                        for x in result
-                    ]
-                )
-                field.wrap("chisqr", arr, [(0, "dets")], overwrite=True)
-                arr = np.array(
-                    [
-                        float(x.redchi) if x is not None else np.nan
-                        for x in result
-                    ]
-                )
-                field.wrap("redchi", arr, [(0, "dets")], overwrite=True)
-                # Time-constant fit does not use weights in the first pass.
-                if weight_axis == "bins":
-                    arr = np.array(
-                        [
-                            x.weights
-                            if x is not None
-                            else np.full(
-                                field._axes[weight_axis].count, np.nan
-                            )
-                            for x in result
-                        ]
-                    )
-                    arr = arr.astype(float)
-                    field.wrap(
-                        "weights",
-                        arr,
-                        [(0, "dets"), (1, weight_axis)],
-                        overwrite=True,
-                    )
-
-    # Fill result to aman.det_cal
-    if "det_cal" not in aman.keys():
-        aman.wrap("det_cal", core.AxisManager(aman._axes["dets"]))
-
-    if cal_type == "gain":
-        idx = np.where(aman.stm_ana.positions.vals == "heater")[0][0]
-        heater_temp = aman.stm_ana.temps[idx][0]
-        idx = np.where(aman.stm_ana.positions.vals == "env")[0][0]
-        env_temp = aman.stm_ana.temps[idx][0]
-
-        arr = np.array(
-            [
-                float(x.best_values["a0"]) if x is not None else np.nan
-                for x in fit_result["fit_coadd"]["lpf"]["f1_gain"]
-            ]
-        )
-        arr = abs(arr) * (750 / (heater_temp - env_temp))
-        aman.det_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
-    if cal_type == "timeconstant":
-        arr = np.array(
-            [
-                float(x.best_values["tau"]) if x is not None else np.nan
-                for x in fit_result["fit_amp"]["lpf"]
-            ]
-        )
-        aman.det_cal.wrap("stm_tau", arr, [(0, "dets")], overwrite=True)
-
-
-# Misc functions
-
-
-def s_open(theta):
-    # theta: 0 to pi/8
-    r1 = 70.5e-3  # Radius for chopper. chopper center to optical pipe center
-    r2 = 43e-3 / 2  # Radius of optical pipe
-    theta_1 = np.arcsin(r2 / r1)  # Angle at the border
-
-    if 0 <= theta and theta < theta_1:
-        phi1 = np.arcsin(-1 / r2 * np.sqrt(r2**2 - r1**2 * np.sin(theta) ** 2))
-        phi2 = np.arcsin(1 / r2 * np.sqrt(r2**2 - r1**2 * np.sin(theta) ** 2))
-        return (
-            np.pi * r2**2
-            + 2
-            * r1
-            * np.sin(theta)
-            * np.sqrt(r2**2 - r1**2 * np.sin(theta) ** 2)
-            - r2**2 / 2 * (1 / 2 * np.sin(2 * phi2) + phi2)
-            + r2**2 / 2 * (1 / 2 * np.sin(2 * phi1) + phi1)
-        )
-    elif theta < np.pi / 8:
-        return np.pi * r2**2
-    else:
-        return "error"
-
-
-def stm_signal_raytrace(temp_heater, temp_blackbody, theta):
-    # theta: 0 to pi/4, signal of half cycle
-    r2 = 43e-3 / 2  # Radius of optical pipe
-
-    if theta < np.pi / 8:
-        theta_tmp = theta
-    else:
-        theta_tmp = np.pi / 8 - (theta - np.pi / 8)
-
-    return (
-        s_open(theta_tmp) / (np.pi * r2**2) * (temp_heater - temp_blackbody)
-        + temp_blackbody
-    )
-
-
-def func_opening(frac_timing, a, c, timing0):
-    # frac_timing: list,0 to 1
-    # timing0: 0 to 1
-    # a: amplitude
-    # c: offset
-
-    theta_list = (frac_timing - timing0) * np.pi / 2  # 1 cycle = pi/2
-
-    y = []
-
-    for theta in theta_list:
-        if theta < 0:
-            theta = theta + np.pi / 2
-
-        if theta < np.pi / 4:
-            y.append(stm_signal_raytrace(1, 0, theta) * a + c)
-        else:
-            theta = theta - np.pi / 4
-            y.append(stm_signal_raytrace(0, 1, theta) * a + c)
-
-    return np.array(y)
