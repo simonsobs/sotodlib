@@ -178,7 +178,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         (Optional). Merge left and right scan flags as ``aman.flags.left_scan`` and ``aman.flags.right_scan`` if ``True``.
     overwrite : bool
         (Optional). Overwrite an existing flag in ``aman.flags`` with the same name.
-    t_buffer : float or tuple (float, float)
+    t_buffer : None or float or tuple (float, float)
         (Optional). Buffer time (in seconds) for flagging turnarounds in the ``scanspeed`` method.
         If a single float is provided, half of the value is applied to each side (before and after)
         of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
@@ -231,7 +231,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         buffer_before = np.deg2rad(buffer_before)
         buffer_after = np.deg2rad(buffer_after)
 
-        daz = np.diff(az, append=az[-1])
+        daz = np.gradient(az, append=az[-1])
         if buffer_before == 0 and buffer_after == 0:
             _ta_flag = np.logical_or(az < lo, az > hi)
         else:
@@ -352,11 +352,11 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             if "left_scan" in aman.flags:
                 aman.flags["left_scan"] = left_flag
             else :
-                aman.flags.wrap("left_scan", left_flag)
+                aman.flags.wrap("left_scan", left_flag, [(0, 'samps')])
             if "right_scan" in aman.flags:
                 aman.flags["right_scan"] = right_flag
             else :
-                aman.flags.wrap("right_scan", right_flag)
+                aman.flags.wrap("right_scan", right_flag, [(0, 'samps')])
 
     # merge turnaround flags
     if merge:
@@ -365,7 +365,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         elif name in aman.flags:
             aman.flags[name] = ta_flag
         else:
-            aman.flags.wrap(name, ta_flag)   
+            aman.flags.wrap(name, ta_flag, [(0, 'samps')])
 
     if merge_subscans:
         get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan)
