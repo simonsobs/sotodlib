@@ -16,6 +16,7 @@ from sotodlib.stimulator.stimulator import (
     get_hk,
     calc_gain,
     calc_timeconstant,
+    preprocessing,
 )
 
 _OBS_TYPES = ('gain', 'time_constant', 'gain_and_timeconstant')
@@ -126,15 +127,13 @@ def run(
             if hkdata is None:
                 hkdata = get_hk(hkdb_cfg, aman=tod)
 
-            if obs_type in ('gain', 'gain_and_timeconstant'):
-                if calc_gain(tod, hkdata) is False:
-                    raise RuntimeError(f'Invalid stimulator HK data for {obs_id}')
-            if obs_type in ('time_constant', 'gain_and_timeconstant'):
-                preprocess = obs_type != 'gain_and_timeconstant'
-                if calc_timeconstant(
-                    tod, hkdata, preprocess=preprocess
-                ) is False:
-                    raise RuntimeError(f'Invalid stimulator HK data for {obs_id}')
+            valid_gain, valid_timeconstant = preprocessing(tod, hkdata)
+
+            if valid_gain:
+                calc_gain(tod)
+
+            if valid_timeconstant:
+                calc_timeconstant(tod, idxs=None)
 
             chunk = core.AxisManager(meta_chunk.dets)
             if obs_type in ('gain', 'gain_and_timeconstant'):
