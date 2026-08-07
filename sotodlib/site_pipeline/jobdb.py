@@ -139,7 +139,7 @@ class Job(Base):
     visit_time = sqy.Column(sqy.Float, default=0.)
     visit_count = sqy.Column(sqy.Integer, default=0)
 
-    _tags = relationship("Tag", lazy='selectin', cascade='all')
+    _tags = relationship("Tag", lazy='joined', cascade='all')
 
     @property
     def tags(self):
