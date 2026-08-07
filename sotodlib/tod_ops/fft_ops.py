@@ -353,7 +353,7 @@ def calc_psd(
                 nperseg = int(2 ** (np.around(np.log2((stop - start) / 50.0))))
             kwargs["nperseg"] = nperseg
 
-        if kwargs["nperseg"] > max_samples:
+        if kwargs["nperseg"] > stop - start:
             nseg = 1
         else:
             nseg = int((stop - start) / kwargs["nperseg"])
