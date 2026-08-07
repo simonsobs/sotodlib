@@ -1079,8 +1079,10 @@ class AxisManager:
         axes_out = self.intersection_info(self, *amans)
 
         # Apply the axis-mismatch policy before modifying anything.
-        assert on_mismatch in (None, 'warn', 'error')
-        if on_mismatch is not None:
+        if on_mismatch is None:
+            on_mismatch = 'intersect'
+        assert on_mismatch in ('intersect', 'warn', 'error')
+        if on_mismatch in ('warn', 'error'):
             report = []
             for name, ax in axes_out.items():
                 for src, aman in [('self', self)] + [
