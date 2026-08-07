@@ -171,7 +171,7 @@ def calc_gain(aman):
     aman.stm_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
 
 
-def calc_timeconstant(aman, idxs=None, method="least_squares", fit_kws=None):
+def calc_timeconstant(aman, idxs=None, method="leastsq", fit_kws=None):
     """
     Calculate the time constant of the detectors and the readout delay.
 
