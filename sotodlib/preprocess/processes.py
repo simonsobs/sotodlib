@@ -87,13 +87,13 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dbc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, dbc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -157,13 +157,13 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, trend_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, trend_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -243,13 +243,13 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, glitch_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, glitch_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -375,13 +375,13 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, jump_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, jump_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -532,13 +532,13 @@ class NoiseRatio(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, calc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         else:
             proc_aman.wrap(self.save_name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -653,7 +653,7 @@ class CutBadDistribution(_Preprocess):
         super().__init__(step_cfgs)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -836,13 +836,13 @@ class Noise(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, noise):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, noise)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -948,7 +948,7 @@ class Calibrate(_Preprocess):
         return aman, proc_aman
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         keep = meta[self.select_cfgs['cut_array']] == 0
         if in_place:
@@ -1188,7 +1188,7 @@ class A2Stats(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, a2_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, a2_stats)
@@ -1357,7 +1357,7 @@ class AzSS(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, azss_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, azss_stats)
@@ -1393,7 +1393,7 @@ class AzSS(_Preprocess):
         return aman, proc_aman
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1528,7 +1528,7 @@ class FlagTurnarounds(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, turn_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, turn_aman)
@@ -1696,7 +1696,7 @@ class SSOFootprint(_Preprocess):
         return aman, proc_aman
         
     def save(self, proc_aman, sso_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, sso_aman)
@@ -1743,13 +1743,13 @@ class DarkDets(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dark_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, dark_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1806,13 +1806,13 @@ class LoadPremadeFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, source_aman)            
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1911,13 +1911,13 @@ class SourceFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, source_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
@@ -2014,7 +2014,7 @@ class HWPAngleModel(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, hwp_angle_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, hwp_angle_aman)
@@ -2146,7 +2146,7 @@ class DetcalNanCuts(_Preprocess):
         super().__init__(step_cfgs)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2255,13 +2255,13 @@ class PCARelCal(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, pca_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, pca_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2385,7 +2385,7 @@ class GetCommonMode(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, common_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, common_aman)
@@ -2469,13 +2469,13 @@ class PTPFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, ptp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, ptp_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2518,13 +2518,13 @@ class InvVarFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, inv_var_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, inv_var_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2576,13 +2576,13 @@ class EstimateT2P(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, t2p_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, t2p_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2678,7 +2678,7 @@ class SplitFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, split_flg_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, split_flg_aman)
@@ -2871,7 +2871,7 @@ class SubtractQUCommonMode(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, aman['qu_common_mode_coeffs'])
@@ -2956,13 +2956,13 @@ class FocalplaneNanFlags(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, fp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, fp_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -3173,7 +3173,7 @@ class AcuDropFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, flag_aman)
@@ -3210,7 +3210,7 @@ class SmurfGapsFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, flag_aman)
@@ -3248,7 +3248,7 @@ class GetTauHWP(_Preprocess):
         self.save(proc_aman, tau_hwp_aman)
 
     def save(self, proc_aman, tau_hwp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, tau_hwp_aman)
