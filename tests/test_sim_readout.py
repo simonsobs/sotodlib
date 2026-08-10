@@ -1,7 +1,7 @@
-# Copyright (c) 2023 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-"""Check functionality of the wiregrid simulation
+"""Check functionality of the readout simulation
 
 """
 

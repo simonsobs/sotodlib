@@ -172,7 +172,7 @@ class FlagManager(AxisManager):
             flags: List of flags to collapse together. Uses their names.
                    If flags is None then all flags are reduced
             method: How to collapse the data. Accepts 'union','intersect',
-                        or function.
+                    'except', or function.
             wrap: if True, add reduced flag to self
             new_flag: name of new flag, required if wrap is True
             remove_reduced: if True, remove all reduced flags from self
@@ -198,6 +198,8 @@ class FlagManager(AxisManager):
             op = lambda x, y: x+y
         elif method == 'intersect':
             op = lambda x, y: x*y
+        elif method == 'except':
+            op = lambda x, y: x*~y
         else:
             op = method
         out = reduce(op, to_reduce)
@@ -298,10 +300,10 @@ def flag_cut_select(flags, kind, invert=False):
 
     Args:
         flags (RangesMatrix): An instance of so3g.proj.RangesMatrix indicating flagged time ranges.
-        kind (str or float): One of the following:
+        kind (str or int/float): One of the following:
             - 'any': Select/cut detectors with any flagged samples.
             - 'all': Select/cut detectors with all samples flagged.
-            - float: A threshold ratio (0.0–1.0); selects/cuts detectors whose flagged ratio exceeds the threshold.
+            - int/float: A threshold ratio (0.0–1.0); selects/cuts detectors whose flagged ratio exceeds the threshold.
         intert (bool): default=False returns detectors to be excluded =True, detectors to be kept = False. If True, The logic is flipped.
 
     Returns:
@@ -318,7 +320,7 @@ def flag_cut_select(flags, kind, invert=False):
             return has_any_cuts(flags)
         elif kind == 'all':
             return has_all_cut(flags)
-        elif isinstance(kind, float):
+        elif isinstance(kind, (int, float)):
             return has_ratio_cuts(flags, ratio=kind)
         else:
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
@@ -327,7 +329,7 @@ def flag_cut_select(flags, kind, invert=False):
             return ~has_any_cuts(flags)
         elif kind == 'all':
             return ~has_all_cut(flags)
-        elif isinstance(kind, float):
+        elif isinstance(kind, (int, float)):
             return ~has_ratio_cuts(flags, ratio=kind)
         else:
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")

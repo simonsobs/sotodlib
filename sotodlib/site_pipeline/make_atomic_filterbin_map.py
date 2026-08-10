@@ -462,10 +462,11 @@ def main(
                     info['roll_angle'] = obs_infos[obslist[0][3]].roll_center
                     info['scan_speed'] = obs_infos[obslist[0][3]].scan_vel
                     info['scan_acc'] = obs_infos[obslist[0][3]].scan_accel
+                    info_list.append(info)
                 except (AttributeError, KeyError):
                     # if these are not in the obsdb then we get here and we skip
+                    info_list.append(info)
                     continue
-                info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
             run_list.append([obslist, shape, wcs, info_list, prefix, t, tag])

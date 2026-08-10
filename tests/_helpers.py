@@ -7,6 +7,7 @@ import os
 import datetime
 import shutil
 import tempfile
+import unittest
 
 import numpy as np
 import astropy.units as u
@@ -54,6 +55,10 @@ def mpi_multi():
         return False
 
 
+# Wrap a decorator for skipping tests when doing multi-process MPI.
+skip_if_mpi = unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
+
+
 def create_outdir(subdir=None, mpicomm=None):
     """Create the top level output directory and per-test subdir.
 
@@ -72,13 +77,11 @@ def create_outdir(subdir=None, mpicomm=None):
     if rank == 0:
         pwd = os.path.abspath(".")
         testdir = os.path.join(pwd, "sotodlib_test_output")
+        os.makedirs(testdir, exist_ok=True)
         retdir = testdir
         if subdir is not None:
             retdir = os.path.join(testdir, subdir)
-        if not os.path.isdir(testdir):
-            os.mkdir(testdir)
-        if not os.path.isdir(retdir):
-            os.mkdir(retdir)
+            os.makedirs(retdir, exist_ok=True)
     if mpicomm is not None:
         retdir = mpicomm.bcast(retdir, root=0)
     return retdir

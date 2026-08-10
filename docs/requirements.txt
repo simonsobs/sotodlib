@@ -17,6 +17,7 @@ so3g
 #
 astropy
 pixell
+numpy-quaternion
 
 # Before you add anything else to docs/requirements.txt, consider
 # adding it to the "missing" module list in conf.py.

@@ -29,10 +29,10 @@ jobs:
           - os: ubuntu-latest
             python: "3.13"
             pyshort: "313"
-          - os: macos-15
+          - os: macos-latest
             python: "3.10"
             pyshort: "310"
-          - os: macos-15
+          - os: macos-latest
             python: "3.13"
             pyshort: "313"
     steps:
@@ -49,8 +49,7 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade wheel
           python3 -m pip install so3g
-          python3 -m pip install pshmem
-          python3 -m pip install --pre toast
+          python3 -m pip install toast
 
       - name: Install OpenMPI for Tests
         if: runner.os == 'Linux'
@@ -61,7 +60,7 @@ jobs:
 
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vv .[tests]
+          python3 -m pip install -vv .[site_pipeline,tests]
 
       - name: Run Serial Tests
         run: |
@@ -71,7 +70,6 @@ jobs:
           pushd ./tests
           python3 -m pytest -s .
           popd
-
 
       - name: Run MPI Tests
         if: runner.os == 'Linux'

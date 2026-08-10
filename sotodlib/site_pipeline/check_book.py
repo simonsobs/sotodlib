@@ -122,7 +122,7 @@ def scan_book_dir(book_dir, logger, config, prep_obsfiledb=False):
     bs = check_book.BookScanner(book_dir, config, logger=logger)
 
     bs.go()
-    bs.report()
+    bs.report(concise=True)
 
     if len(bs.results['errors']):
         logger.error('Cannot register this obs due to errors.')

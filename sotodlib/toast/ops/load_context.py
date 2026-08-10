@@ -1,6 +1,7 @@
 # Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import copy
 import re
 import sqlite3
 import yaml
@@ -24,8 +25,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.ops.pipeline import Pipeline
-from toast.utils import Logger
+from toast.utils import Logger, replace_byte_arrays
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -135,13 +135,9 @@ class LoadContext(Operator):
         help="Path to DB for site housekeeping",
     )
 
-    hk_site_fields = List(
-        list(), help="Restrict loading to only these site fields"
-    )
+    hk_site_fields = List(list(), help="Restrict loading to only these site fields")
 
-    hk_site_aliases = Dict(
-        dict(), help="Optional convenience aliases for site fields"
-    )
+    hk_site_aliases = Dict(dict(), help="Optional convenience aliases for site fields")
 
     hk_platform_root = Unicode(
         None,
@@ -170,7 +166,7 @@ class LoadContext(Operator):
     )
 
     ignore_preprocess_archive = Bool(
-        False,
+        True,
         help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
@@ -199,7 +195,10 @@ class LoadContext(Operator):
     )
 
     ax_flags = List(
-        [],
+        [
+            ("smurfgaps_ufm_{det_info:wafer:array}", defaults.shared_mask_invalid),
+            ("acu_drops", defaults.shared_mask_invalid)
+        ],
         help="Tuples of (field, bit value) merged to shared_flags",
     )
 
@@ -232,10 +231,22 @@ class LoadContext(Operator):
         help="Field with boresight Roll",
     )
 
+    ax_boresight_angle = Unicode(
+        "ancil:boresight_enc",
+        allow_none=True,
+        help="Field with boresight rotation angle (included in roll)",
+    )
+
     ax_hwp_angle = Unicode(
         "hwp_angle",
         allow_none=True,
         help="Field with HWP angle",
+    )
+
+    ax_corotator_angle = Unicode(
+        "ancil:corotator_enc",
+        allow_none=True,
+        help="Field with corotator angle",
     )
 
     ax_pathsep = Unicode(
@@ -259,7 +270,7 @@ class LoadContext(Operator):
     telescope_name = Unicode("UNKNOWN", help="Name of the telescope")
 
     detset_key = Unicode(
-        None,
+        "pixel",
         allow_none=True,
         help="Column of the focalplane detector_data to use for data distribution",
     )
@@ -309,19 +320,19 @@ class LoadContext(Operator):
     )
 
     corotator_angle = Unicode(
-        None,
+        "corotator_angle",
         allow_none=True,
         help="Observation shared key for corotator_angle (if it is used)",
     )
 
     boresight_angle = Unicode(
-        None,
+        "boresight_angle",
         allow_none=True,
         help="Observation shared key for boresight rotation angle (if it is used)",
     )
 
     hwp_angle = Unicode(
-        None,
+        defaults.hwp_angle,
         allow_none=True,
         help="Observation shared key for HWP angle (if it is used)",
     )
@@ -329,6 +340,10 @@ class LoadContext(Operator):
     analytic_bandpass = Bool(False, help="Add analytic bandpass to each detector")
 
     bandwidth = Float(0.2, help="Fractional bandwith used in analytic bandpass")
+
+    daq_units = Bool(
+        False, help="If True, convert raw data to original int32 DAQ units"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -354,6 +369,10 @@ class LoadContext(Operator):
             if self.context_file is not None:
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
+
+        if self.daq_units and self.preprocess_config is not None:
+            msg = "Cannot convert raw signal to DAQ units if passing data through preprocessing"
+            raise RuntimeError(msg)
 
         # Build our detector selection dictionary.  Merge our explicit traits
         # with any pre-existing detector selection.
@@ -593,7 +612,7 @@ class LoadContext(Operator):
 
             # If we have an observation with a specific wafer, modify the detector
             # selection dictionary to include only that wafer.
-            obs_dets_select = dets_select
+            obs_dets_select = copy.deepcopy(dets_select)
             if obs_props[obindx]["wafer"] != "all":
                 if obs_dets_select is None:
                     obs_dets_select = dict()
@@ -635,8 +654,28 @@ class LoadContext(Operator):
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
 
+            # Report number of cut detectors
+            local_cut = np.count_nonzero(
+                [y for x, y in ob.local_detector_flags.items()]
+            )
+            if ob.comm.comm_group is None:
+                all_cut = local_cut
+            else:
+                all_cut = ob.comm.comm_group.gather(local_cut, root=0)
+                if ob.comm.group_rank == 0:
+                    tot_cut = np.sum(all_cut)
+                    msg = f"LoadContext {ob.name} {tot_cut} / "
+                    msg += f"{len(ob.all_detectors)} dets trimmed on read"
+                    log.debug(msg)
+
+            # Now that all metadata has been loaded, ensure that all byte strings
+            # are converted to unicode arrays.
+            ob._internal = replace_byte_arrays(ob._internal)
+
             # Optionally load housekeeping data
             if self.hk_site_root is not None or self.hk_platform_root is not None:
+                hk_timer = Timer()
+                hk_timer.start()
                 ob.hk = HKManager(
                     ob.comm.comm_group,
                     ob.shared[self.times].data,
@@ -648,6 +687,11 @@ class LoadContext(Operator):
                     plat_db=self.hk_platform_db,
                     plat_fields=self.hk_platform_fields,
                     plat_aliases=self.hk_platform_aliases,
+                )
+                log.debug_rank(
+                    f"LoadContext {obs_name} load House Keeping in",
+                    comm=comm.comm_group,
+                    timer=hk_timer,
                 )
 
             # Compute the boresight pointing and observatory position
@@ -708,6 +752,8 @@ class LoadContext(Operator):
         # hence one reader).
         if rank == 0:
             # Load metadata
+            msg = f"LoadContext {obs_name} metadata using dets_select={dets_select}"
+            log.debug(msg)
             ctx = open_context(context=self.context, context_file=self.context_file)
             meta = ctx.get_meta(session_name, dets=dets_select)
             if self.context_file is not None:
@@ -733,6 +779,30 @@ class LoadContext(Operator):
                 data=fp_cols[f"det_info{self.ax_pathsep}readout_id"].data,
             )
 
+            # If the det_id is included in the detector properties (i.e. detmatch
+            # was loaded), then also extract the pixel and band to include in the
+            # focalplane table.
+            det_id_key = f"det_info{self.ax_pathsep}det_id"
+            if det_id_key in fp_cols:
+                det_pat = re.compile(r".*_(.*)_(.*)[ABD]")
+                pixel_names = list()
+                band_names = list()
+                for d in fp_cols[det_id_key].data:
+                    mat = det_pat.match(d)
+                    if mat is None:
+                        msg = f"det_id '{d}' does not match expected regex {det_pat}"
+                        raise RuntimeError(msg)
+                    band_names.append(mat.group(1))
+                    pixel_names.append(mat.group(2))
+                fp_cols["pixel"] = Column(
+                    name="pixel",
+                    data=pixel_names,
+                )
+                fp_cols["band"] = Column(
+                    name="band",
+                    data=band_names,
+                )
+
             if self.analytic_bandpass:
                 # Add bandpass information to the focalplane
                 try:
@@ -741,7 +811,11 @@ class LoadContext(Operator):
                     band = fp_cols[
                         f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}bandpass"
                     ].data
-                freq = [float(b[1:]) for b in band]
+
+                fpat = re.compile(r"^f[\d]+$")
+                freq = [
+                    float(b[1:]) if fpat.match(b) is not None else 0.0 for b in band
+                ]
                 bandcenter = np.array(freq) * u.GHz
                 bandwidth = bandcenter * self.bandwidth
                 fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
@@ -977,7 +1051,6 @@ class LoadContext(Operator):
         ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
         ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
         ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
-        ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
         ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
 
         have_pointing = True
@@ -1017,24 +1090,6 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples, 4),
                 dtype=np.float64,
             )
-        if self.hwp_angle is not None and ax_hwp_angle is not None:
-            ob.shared.create_column(
-                self.hwp_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-        if self.boresight_angle is not None:
-            ob.shared.create_column(
-                self.boresight_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-        if self.corotator_angle is not None:
-            ob.shared.create_column(
-                self.corotator_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
         ob.shared.create_column(
             self.shared_flags,
             shape=(ob.n_local_samples,),
@@ -1052,9 +1107,14 @@ class LoadContext(Operator):
                 dtype=np.float64,
             )
         if ax_det_signal is not None:
-            ob.detdata.create(
-                self.det_data, dtype=np.float64, units=self.det_data_units
-            )
+            if self.daq_units:
+                ob.detdata.create(
+                    self.det_data, dtype=np.int32, units=u.dimensionless_unscaled
+                )
+            else:
+                ob.detdata.create(
+                    self.det_data, dtype=np.float64, units=self.det_data_units
+                )
             ob.detdata.create(self.det_flags, dtype=np.uint8)
 
         if meta is not None:
@@ -1132,6 +1192,8 @@ class LoadContext(Operator):
         ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
         ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
         ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+        ax_boresight_angle = ax_name_fp_subst(self.ax_boresight_angle, fp_array)
+        ax_corotator_angle = ax_name_fp_subst(self.ax_corotator_angle, fp_array)
         ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
         ax_flags = list()
         for axname, bit in self.ax_flags:
@@ -1149,6 +1211,10 @@ class LoadContext(Operator):
             shared_ax_to_obs[ax_boresight_roll] = self.roll
         if self.hwp_angle is not None and ax_hwp_angle is not None:
             shared_ax_to_obs[ax_hwp_angle] = self.hwp_angle
+        if self.boresight_angle is not None and ax_boresight_angle is not None:
+            shared_ax_to_obs[ax_boresight_angle] = self.boresight_angle
+        if self.corotator_angle is not None and ax_corotator_angle is not None:
+            shared_ax_to_obs[ax_corotator_angle] = self.corotator_angle
         shared_flag_invert = {x[0]: (x[1] < 0) for x in ax_flags}
         shared_flag_fields = {x[0]: abs(x[1]) for x in ax_flags}
         det_flag_invert = {x[0]: (x[1] < 0) for x in ax_det_flags}
@@ -1227,6 +1293,9 @@ class LoadContext(Operator):
         # this data, but we only set this from rank zero.  If there are
         # cut samples at the beginning and end, ensure that timestamps are
         # always valid.
+
+        # Some optional fields may not exist yet in the observation.  We create
+        # these on-demand if they are in the data.
         for shr_obs_name, shrbuf in shared_data.items():
             bf = shrbuf
             if shr_obs_name == self.times and restricted_samps != ob.n_local_samples:
@@ -1244,6 +1313,24 @@ class LoadContext(Operator):
                     bf[ax_shift + restricted_samps :] = shrbuf[-1] + dt * np.arange(
                         1, end_gap + 1, 1, dtype=np.float64
                     )
+            if shr_obs_name == self.hwp_angle:
+                ob.shared.create_column(
+                    self.hwp_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if shr_obs_name == self.boresight_angle:
+                ob.shared.create_column(
+                    self.boresight_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if shr_obs_name == self.corotator_angle:
+                ob.shared.create_column(
+                    self.corotator_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
             ob.shared[shr_obs_name].set(bf, fromrank=0)
 
         log.debug_rank(
@@ -1315,6 +1402,7 @@ class LoadContext(Operator):
                     is_flag=(mask is not None),
                     flag_invert=do_invert,
                     flag_mask=mask,
+                    daq_units=self.daq_units,
                 )
 
         # Original wafer data no longer needed.  AxisManager does not seem to

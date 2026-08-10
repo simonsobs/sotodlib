@@ -30,6 +30,7 @@ dependencies = [
   "lmfit",
   "flacarray>=0.3.4",
   "h5py",
+  "mapcat",
 ]
 dynamic=["version"]
 classifiers = [
@@ -51,12 +52,18 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
+  "sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
   "alphashape",
   "slack-sdk",
   "requests",
+  "tilemaker",
+  "GitPython",
+  "sqlmodel",
+  "pyinstrument",
+  "ruptures",
 ]
 tests = [
   "socs",
