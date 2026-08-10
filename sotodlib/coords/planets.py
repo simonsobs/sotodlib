@@ -51,6 +51,28 @@ def get_source_list_fromstr(target_source):
             return isource
     raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
+def match_fixed_source(source_name):
+    """Match source_name against a regular expression and if it has the
+    format 'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers,
+    then RA, Dec = xxx, yyy in degrees will be returned.
+    If it doesn't match, nans are returned as RA and Dec.
+
+    Args:
+        source_name (str): Name of fixed-position source
+    Return:
+        RA (float): Right Ascension of source in degrees
+        Dec (float): Declination of source in degrees
+        match (bool): Whether the source_name match with regular expression
+    """
+    m = re.match(
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
+    if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
+        ra, dec = float(m['ra_deg']), sign * float(m['dec_deg'])
+        return ra, dec, m
+    else:
+        return np.nan, np.nan, m
+
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
     such as a Solar System planet in equatorial coordinates.
@@ -129,6 +151,7 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     # Get reference elevation...
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
+    roll = np.median(tod.boresight.roll[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
     if isinstance(planet, (list, tuple)):
         _, ra, dec = planet
@@ -137,15 +160,15 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     else:
         planet = SlowSource.for_named_source(planet, t)
 
-    def scan_q_model(t, az, el, planet):
+    def scan_q_model(t, az, el, roll, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
-            t, az, el, weather='typical', site='so')
+           t, az, el, roll=roll, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
         return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q * q_xieta
 
     def distance(p):
         dt, daz = p
-        q, qnet = scan_q_model(t + dt, az + daz, el, planet)
+        q, qnet = scan_q_model(t + dt, az + daz, el, roll, planet)
         lon, lat, phi = so3g.proj.quat.decompose_lonlat(qnet)
         return 90 * coords.DEG - lat
 
@@ -155,7 +178,7 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     if warnflag != 0:
         logger.warning('Source-scan solver failed to converge or otherwise '
                        f'complained!  warnflag={warnflag}')
-    q, qnet = scan_q_model(t+p[0], az+p[1], el, planet)
+    q, qnet = scan_q_model(t+p[0], az+p[1], el, roll, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
     ra, dec = planet.pos(t+p[0])
     rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
@@ -227,8 +250,8 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
-                       n_modes=10, low_pass=None,
-                       wrap=None, edge_guard=None):
+                       n_modes=10, low_pass=None, wrap=None, 
+                       pca_wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -249,6 +272,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      pca_wrap (str): If specified, the PCA model modes and weights calculated for subtraction will be wrapped into tod[pca_wrap].
       edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
         Default is None. (Nothing happens.)
 
@@ -317,7 +341,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
         # Get PCA model and discard the source vectors.
         pca = tod_ops.pca.get_pca_model(
-            tod, signal=signal_pca, n_modes=n_modes)
+            tod, signal=signal_pca, n_modes=n_modes, wrap=pca_wrap)
         del signal_pca
 
         # Remove the PCA model.
@@ -335,7 +359,8 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
 
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
-        or fixed source specification.
+        or fixed source specification with a format 'Jxxx[+-pmn]yyy',
+        where xxx and yyy are decimal numbers of RA, Dec in degrees.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
@@ -380,10 +405,15 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
         except (ValueError, KeyError):
             pass
     else:
-        options = list(planets.names().values())
-        raise ValueError(
-            f'Failed to find a match for "{source_name}" in ephemeris: {options}'
-        )
+        ra, dec, m = match_fixed_source(source_name)
+        if m:
+            # convert from degrees to hours
+            target = skyfield_api.Star(ra_hours=ra/15., dec_degrees=dec)
+        else:
+            options = list(planets.names().values())
+            raise ValueError(
+                f'Failed to find a match for "{source_name}" in ephemeris: {options}'
+            )
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -426,14 +456,10 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
     """
     # Check against fixed-position template...
-    m = re.match(
-        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
+    ra, dec, m = match_fixed_source(source_name)
     if m:
-        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
-        ra, dec = float(m['ra_deg']) * \
-            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
-        return ra, dec, float('inf')
-    
+        return ra * coords.DEG, dec * coords.DEG, float('inf')
+
     # Derive from skyfield astrometric object
     planets, amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
@@ -493,7 +519,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # Sight line
     sight = so3g.proj.CelestialSightLine.az_el(
-        tod.timestamps, tod.boresight.az, tod.boresight.el,
+        tod.timestamps, tod.boresight.az, tod.boresight.el, roll=tod.boresight.roll,
         site='so', weather='typical')
 
     # One central detector
@@ -567,18 +593,27 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
       the center of the circle, all in degrees.
 
     """
-    if P is None:
-        logger.info('Getting Projection Matrix ...')
-        P, X = get_scan_P(tod, center_on, res=res, comps='T')
-        shape, wcs = tuple(P.geom)
-        if shape[0] * shape[1] > max_pix:
-            raise ValueError(f'Mask map too large: {shape}')
-
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
         # radius) in deg.  (Deprecated!)
         mask = [{'xyr': list(map(float, line.split()))}
                 for line in open(mask)]
+
+    if P is None:
+        x, y, r = mask['xyr']
+        shape = 3 * np.ceil(r * coords.DEG / res).astype(int)
+        # ensure odd dimensions
+        if shape % 2 == 0:
+            shape += 1
+        if shape**2 > max_pix:
+            raise ValueError(f'Mask map too large: {shape}')
+        logger.info('Getting Projection Matrix ...')
+        P, X = get_scan_P(tod, center_on, res=res, comps='T')
+
+        geom = enmap.geometry(np.array((0, 0)), shape=(shape, shape),
+                              proj='tan', res=(res, -res))
+        P.geom = enmap.Geometry(*geom)
+        shape, wcs = tuple(P.geom)
 
     mask_map = P.zeros()
     _add_to_mask(mask, mask_map)

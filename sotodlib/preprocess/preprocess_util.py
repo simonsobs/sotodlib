@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 from tqdm import tqdm
 from sotodlib.hwp import hwp_angle_model
+from sotodlib.coords import pointing_model
+from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
@@ -19,8 +21,7 @@ from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
 
 from .. import core
-
-from . import _Preprocess, Pipeline, processes
+from . import Pipeline
 
 
 class PreprocessErrors:
@@ -90,10 +91,10 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
     Arguments
     ---------
 
-    jdb : JobDB
-        The preprocessing jobdb class.
+    jdb : JobManager
+        The preprocessing jobdb.
     jclass : str
-        The job name.
+        The jobdb class name.
     db : ManifestDb or None
         Preprocessing database.
     run_list : list
@@ -150,7 +151,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
-                        j.tags["error"] = None
+                        for _t in j._tags:
+                            if _t.key == "error":
+                                _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
@@ -165,6 +168,35 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
 
     return run_list
 
+
+def reopen_failed_preproc_jobs(jdb, jclass, error=None):
+    """Helper function to re-open jobs that failed with particular errors
+    so that they can be re-run with the run_from_jobdb argument.
+
+    Arguments
+    ---------
+
+    jdb : JobManager or str
+        The preprocessing jobdb or a path to an existing jobdb file.
+    jclass : str
+        The jobdb class name.
+    error : str or None
+        The PreprocessError name to re-open. If None, re-open all failed jobs.
+    """
+    if isinstance(jdb, str):
+        if not os.path.isfile(jdb):
+            return
+        jdb = JobManager(sqlite_file=jdb)
+
+    failed_jobs = jdb.get_jobs(jclass=jclass, jstate=JState.failed)
+
+    for job in failed_jobs:
+        if job.tags['error'] == error or error is None:
+            with jdb.locked(job) as j:
+                j.jstate=JState.open
+                for _t in j._tags:
+                    if _t.key == "error":
+                        _t.value = None
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -497,6 +529,7 @@ def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
 
+
     Returns
     -------
     aman : core.AxisManager or None
@@ -563,6 +596,21 @@ def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
         meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
         meta_init.restrict('dets', meta_proc.dets.vals)
 
+    # Count number of stops
+    if stop_for_sims:
+        num_stops = 0
+        for process in configs_init["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        for process in configs_proc["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        logger.warning(
+            "Currently running with `stop_for_sims=True`. "
+            f"It will generate {num_stops} additional copies "
+            "of the data AxisManager with a higher memory usage."
+        )
+
     aman = context_init.get_obs(meta_init, no_signal=no_signal)
     logger.info("Running initial pipeline")
     pipe_init.run(aman, aman.preprocess, select=False)
@@ -581,11 +629,61 @@ def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
     return aman, full_aman
 
 
+def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
+    """
+    Run a Pipeline object, grouping steps based on
+    the flag `use_data_aman` in the configuration
+    file.
+    Arguments
+    ----------
+    pipe : Pipeline
+        Pipeline object to run.
+    aman : AxisManager
+        AxisManager to process.
+    run_last_step : bool
+        If True, will create a dict item containing the
+        AxisManager after run the full pipeline.
+    """
+    batch_idx = [
+        (step, process.name)
+        for step, process in enumerate(pipe)
+        if process.use_data_aman
+    ]
+    if batch_idx or run_last_step:
+        batch_idx = [(0, pipe[0].name)] + batch_idx
+        if run_last_step:
+            batch_idx += [(len(pipe), 'last')]
+        pipes = {}
+        for idx in range(len(batch_idx)-1):
+            start, start_name = batch_idx[idx]
+            end, end_name = batch_idx[idx+1]
+            # If asked to stop at the first process
+            # one needs to save the current state of
+            # the AxisManager
+            if end == 0:
+                pipes[end, end_name] = None
+            else:
+                pipes[end, end_name] = pipe[start:end]
+        out_amans = {}
+        loc_aman = aman.copy()
+        for (step, name), pipe in pipes.items():
+            if pipe is not None:
+                pipe.run(loc_aman, aman.preprocess, select=False)
+            out_amans[step, name] = loc_aman.copy()
+        return out_amans
+    else:
+        return {}
+
+
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
                                        t2ptemplate_aman=None,
                                        ignore_cfg_check=False):
+                                       ignore_cfg_check=False,
+                                       data_amans=None,
+                                       interpol=None,
+                                       apply_wobble=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -623,7 +721,21 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
-
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as
+        the config used to create the existing init db.
+    data_amans: dict (Optional)
+        A dictionary of AxisManagers with keys (step, process.name)
+        filled with AxisManager processed up to step-1. This is used
+        to pre-load all data AxisManager which could be required when
+        processing simulations (e.g. to provide a T2P template)
+    interpol: str
+        Optional. The sub-pixel interpolation to use in from_map
+    apply_wobble: bool
+        If true, apply pointing wobble to boreight pointing.
+        This only works when all detectors belong to a single wafer_slot
+        and bandpass. See `coords.helpers.get_deflected_sightline`.
+        Defaults to False.
     Returns
     -------
     aman : core.AxisManager or None
@@ -936,6 +1048,19 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
+            except Exception as e:
+                err_str = str(e)
+
+                if "destination object already exists" in err_str:
+                    # remove temp file it was copied but not deleted
+                    os.remove(outputs_grp['temp_file'])
+                else:
+                    errmsg = f"{type(e).__name__}: {e}"
+                    tb = ''.join(traceback.format_tb(e.__traceback__))
+                    logger.error(
+                        f"save_group_and_cleanup failed for {outputs_grp['temp_file']}:\n{errmsg}\n{tb}"
+                    )
+                    raise
     return errors
 
 
@@ -1293,7 +1418,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     return aman, out_dict_init, out_dict_proc, (None, None, None)
 
 
-def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False):
+def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False, db_manager=None):
     """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
@@ -1316,6 +1441,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
          A tuple containing the error from PreprocessError, an error message,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
+    out_meta : tuple
+        The tuple (obs_id, group).
     outputs : dict
         Dictionary including entries for the temporary h5 filename
         ('temp_file') and the obs_id group metadata and db entry (db_data).
@@ -1327,12 +1454,18 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     overwrite : bool
         Optional. Delete the entry in the archive file if it exists and
         replace it with the new entry.
+    db_manager : DbBatchManager, optional
+        External database batch manager for optimized operations.
+        If provided, uses the manager instead of creating individual connections.
     """
 
     if logger is None:
         logger = init_logger("preprocess")
 
     if out_dict is not None and os.path.isfile(out_dict['temp_file']):
+        obs_id, group = out_meta
+        logger.info(f"Adding future result to db for {obs_id}: {group}")
+
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
@@ -1361,11 +1494,18 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
                     for member in f_src[dts]:
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(out_dict['db_data'])) == 0:
-            db.add_entry(out_dict['db_data'], h5_path)
-        # make sure we close the db each time
-        db.conn.close()
+
+        if db_manager is not None:
+            # Use the batch manager
+            db_manager.add_entry(out_dict['db_data'], h5_path)
+        else:
+            # Use the original approach for backward compatibility
+            db = get_preprocess_db(configs, group_by, logger)
+            if len(db.inspect(out_dict['db_data'])) == 0:
+                db.add_entry(out_dict['db_data'], h5_path)
+            # make sure we close the db each time
+            db.conn.close()
+
         os.remove(src_file)
     elif (
         errors[0] == PreprocessErrors.LoadSuccess or
@@ -1403,6 +1543,8 @@ def get_pcfg_check_aman(pipe):
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], core.AxisManager())
                     for itm in memb[1].items():
                         pcfg_ref[f'{i}_{pp.name}'][memb[0]].wrap(itm[0], str(itm[1]))
+                elif not np.isscalar(memb[1]):
+                    pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], str(memb[1]))
                 else:
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], memb[1])
     return pcfg_ref

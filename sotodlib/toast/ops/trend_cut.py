@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2025 Simons Observatory.
+# Copyright (c) 2025-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
