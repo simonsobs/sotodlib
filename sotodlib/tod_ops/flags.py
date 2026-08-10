@@ -185,7 +185,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
         corresponding side.
     az_buffer : None or float or tuple (float, float)
-        (Optional). Buffer angle (in degree) for flagging turnarounds in the ``az`` method.
+        (Optional). Buffer angle (in degree) for flagging turnarounds.
         If a single float is provided, half of the value is applied to each side (before and after)
         of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
         corresponding side.
@@ -292,16 +292,32 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         _ta_flag = np.zeros(aman.samps.count, dtype=bool)
         _left_flag = np.zeros(aman.samps.count, dtype=bool)
         _right_flag = np.zeros(aman.samps.count, dtype=bool)
-        
+
         dt = np.mean(np.diff(aman.timestamps))
-        if t_buffer is None:
-            nbuffer_before, n_buffer_after = 0, 0
-        elif isinstance(t_buffer, tuple):
-            nbuffer_before, nbuffer_after = t_buffer
-            nbuffer_before = int(nbuffer_before/dt)
-            nbuffer_after = int(nbuffer_after/dt)
-        else:
-            nbuffer_before, nbuffer_after = int(t_buffer/dt//2), int(t_buffer/dt//2)
+        if (t_buffer is None) and (az_buffer is None):
+            nbuffer_before, nbuffer_after = 0, 0
+        if (t_buffer is not None) and (az_buffer is not None):
+            raise ValueError('Either t_buffer or az_buffer must be specified')
+        if t_buffer is not None:
+            if np.isscalar(t_buffer):
+                nbuffer_before = int(t_buffer/dt//2)
+                nbuffer_after = int(t_buffer/dt//2)
+            elif len(t_buffer) == 2:
+                t_buffer_before, t_buffer_after = t_buffer
+                nbuffer_before = int(t_buffer_before/dt)
+                nbuffer_after = int(t_buffer_after/dt)
+            else:
+                raise ValueError('Unsupported type of t_buffer')
+        if az_buffer is not None:
+            if np.isscalar(az_buffer):
+                nbuffer_before = int(np.deg2rad(az_buffer)/approx_daz//2)
+                nbuffer_after = int(np.deg2rad(az_buffer)/approx_daz//2)
+            elif len(az_buffer) == 2:
+                az_buffer_before, az_buffer_after = az_buffer
+                nbuffer_before = int(np.deg2rad(az_buffer_before)/approx_daz)
+                nbuffer_after = int(np.deg2rad(az_buffer_after)/approx_daz)
+            else:
+                raise ValueError('Unsupported type of az_buffer')
 
         for ip,p in enumerate(peaks[:-1]):
             _ta_flag[p-nbuffer_before:p+nbuffer_after] = True
