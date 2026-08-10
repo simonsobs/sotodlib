@@ -6,8 +6,13 @@ from sotodlib import core
 from sotodlib.tod_ops.flags import get_turnaround_flags
 
 
-def _make_aman_with_sinusoidal_scan(nsamps=8000, fs=200.0, scan_freq=0.05,
-                                    az_amp_deg=10.0, ndets=3):
+def _make_aman_with_sinusoidal_scan(
+    nsamps=8000,
+    fs=200,
+    scan_freq=0.05,
+    az_amp_deg=20.,
+    ndets=3
+):
     """
     Build a minimal AxisManager whose ``boresight.az`` is a smooth
     sinusoid — 2 * scan_freq * duration full cycles, so it contains
@@ -19,7 +24,7 @@ def _make_aman_with_sinusoidal_scan(nsamps=8000, fs=200.0, scan_freq=0.05,
         core.OffsetAxis('samps', nsamps),
     )
     t = np.arange(nsamps) / fs
-    aman.wrap('timestamps', t + 1e9, [(0, 'samps')])
+    aman.wrap('timestamps', t, [(0, 'samps')])
 
     boresight = core.AxisManager(core.OffsetAxis('samps', nsamps))
     az_rad = np.deg2rad(az_amp_deg) * np.sin(2 * np.pi * scan_freq * t)
@@ -67,53 +72,56 @@ class TestGetTurnaroundFlags(unittest.TestCase):
 
     def test_300_scanspeed_scalar_vs_tuple_buffer(self):
         """Scalar t_buffer=X gives the same result as tuple (X/2, X/2)."""
-        aman1 = _make_aman_with_sinusoidal_scan()
-        aman2 = _make_aman_with_sinusoidal_scan()
+        aman = _make_aman_with_sinusoidal_scan()
         ta1, *_ = get_turnaround_flags(
-            aman1, method='scanspeed', t_buffer=2.0,
+            aman, method='scanspeed', t_buffer=2.0, az_buffer=None,
             merge=False, merge_lr=False, merge_subscans=False)
         ta2, *_ = get_turnaround_flags(
-            aman2, method='scanspeed', t_buffer=(1.0, 1.0),
+            aman, method='scanspeed', t_buffer=(1.0, 1.0), az_buffer=None,
+            merge=False, merge_lr=False, merge_subscans=False)
+        np.testing.assert_array_equal(ta1.mask(), ta2.mask())
+        ta1, *_ = get_turnaround_flags(
+            aman, method='scanspeed', t_buffer=None, az_buffer=2.0,
+            merge=False, merge_lr=False, merge_subscans=False)
+        ta2, *_ = get_turnaround_flags(
+            aman, method='scanspeed', t_buffer=None, az_buffer=(1.0, 1.0),
             merge=False, merge_lr=False, merge_subscans=False)
         np.testing.assert_array_equal(ta1.mask(), ta2.mask())
 
     def test_310_scanspeed_asymmetric_buffer_widens_one_side(self):
         """A larger t_after than t_before produces asymmetric flag around peaks."""
-        aman_sym = _make_aman_with_sinusoidal_scan()
-        aman_asy = _make_aman_with_sinusoidal_scan()
+        aman = _make_aman_with_sinusoidal_scan()
         # Symmetric (0.5 s each side)
         ta_sym, *_ = get_turnaround_flags(
-            aman_sym, method='scanspeed', t_buffer=(0.5, 0.5),
+            aman, method='scanspeed', t_buffer=(0.5, 0.5),
             merge=False, merge_lr=False, merge_subscans=False)
         # Asymmetric: 0.1 s before, 1.0 s after -> more samples after peak
         ta_asy, *_ = get_turnaround_flags(
-            aman_asy, method='scanspeed', t_buffer=(0.1, 1.0),
+            aman, method='scanspeed', t_buffer=(0.1, 1.0),
             merge=False, merge_lr=False, merge_subscans=False)
         # Total number of flagged samples differs
         self.assertNotEqual(ta_sym.mask().sum(), ta_asy.mask().sum())
 
     def test_400_az_buffer_extends_flag(self):
         """Non-zero az_buffer flags more samples than no buffer."""
-        aman1 = _make_aman_with_sinusoidal_scan()
-        aman2 = _make_aman_with_sinusoidal_scan()
+        aman = _make_aman_with_sinusoidal_scan()
         ta_none, *_ = get_turnaround_flags(
-            aman1, method='az', qlim=1, az_buffer=None,
+            aman, method='az', qlim=1, az_buffer=None,
             merge=False, merge_lr=False, merge_subscans=False)
         ta_buf, *_ = get_turnaround_flags(
-            aman2, method='az', qlim=1, az_buffer=1.0,
+            aman, method='az', qlim=1, az_buffer=1.0,
             merge=False, merge_lr=False, merge_subscans=False)
         self.assertGreater(ta_buf.mask().sum(), ta_none.mask().sum())
 
     def test_410_az_buffer_asymmetric_differs(self):
         """Asymmetric az_buffer produces different flag than symmetric of the same total."""
-        aman1 = _make_aman_with_sinusoidal_scan()
-        aman2 = _make_aman_with_sinusoidal_scan()
+        aman = _make_aman_with_sinusoidal_scan()
         b = 1.0   # 1 deg total (each side 0.5)
         ta_sym, *_ = get_turnaround_flags(
-            aman1, method='az', az_buffer=b,
+            aman, method='az', az_buffer=b,
             merge=False, merge_lr=False, merge_subscans=False)
         ta_asym, *_ = get_turnaround_flags(
-            aman2, method='az', az_buffer=(0.0, b),   # buffer only after
+            aman, method='az', az_buffer=(0.0, b),   # buffer only after
             merge=False, merge_lr=False, merge_subscans=False)
         self.assertNotEqual(ta_sym.mask().sum(), ta_asym.mask().sum())
 
