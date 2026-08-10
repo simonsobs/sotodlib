@@ -335,6 +335,26 @@ def flag_cut_select(flags, kind, invert=False):
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
 
 
+def flag_array_to_ranges_matrix(arr, ranges):
+    """Extend a 1D flag array into a 2D RangesMatrix by duplicating each entry
+    using a Ranges object for the columns axis. Useful for adding samps entries
+    to a 1D per-detector flag array.
+
+    Args:
+        arr (list or np.array): 1D flag array.
+        ranges (int or Ranges):  If int, create a Ranges object of length
+        ranges.  If ranges is a Ranges object, use it directly for duplicating
+        the flag array over.
+    Returns:
+        RangesMatrix: The output RangesMatrix.
+    """
+    if isinstance(ranges, int):
+        ranges = Ranges(ranges)
+    return RangesMatrix(
+        [Ranges.ones_like(ranges) if Y else Ranges.zeros_like(ranges) for Y in arr]
+    )
+
+
 def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):
     """Convert a csr sparse array into a ranges matrix
     
