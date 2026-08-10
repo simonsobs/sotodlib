@@ -264,7 +264,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         # cut on fraction of TOD flagged
         keep = keep & flag_cut_select(
             proc_aman[self.glitch_name].glitch_flags,
-            self.select_cfgs["max_t_frac"],
+            self.select_cfgs.get("max_t_frac", 1.0),
         )
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
