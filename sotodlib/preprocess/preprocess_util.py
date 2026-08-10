@@ -493,7 +493,7 @@ def load_and_preprocess_det_select(meta, pipe):
 def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
                         dets=None, meta=None, no_signal=None, logger=None,
                         return_full_aman=False, init_only=False,
-                        ignore_cfg_check=False):
+                        ignore_cfg_check=False, stop_for_sims=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -528,7 +528,11 @@ def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
-
+    stop_for_sims: bool
+        Optinal. If True, will stop before each step of the pipeline
+        with the flag `use_data_aman` set to True. The intended use is
+        to prepare all necessary data products that cannot be stored in
+        the preprocessing database, to process simulations.
 
     Returns
     -------
