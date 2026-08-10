@@ -157,7 +157,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           update_delay: Optional[int] = None,
           tags: Optional[str] = None,
           planet_obs: bool = False,
-          verbosity: Optional[int] = None,
+          verbosity: int = 0,
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
@@ -238,7 +238,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             if db is not None and not overwrite:
                 x = db.inspect({'obs:obs_id': obs_id})
                 if x is not None and len(x) != 0 and len(x) != len(groups):
-                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    try:
+                        [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    except Exception as e:
+                        logger.error(f"filtering of {groups} for {obs_id} with entry {x} failed with {e}")
+                        raise
+
 
             for group in groups:
                 if 'NC' not in group:
@@ -463,7 +468,7 @@ def main(configs: str,
          update_delay: Optional[int] = None,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
-         verbosity: Optional[int] = None,
+         verbosity: int = 0,
          nproc: int = 4,
          compress: bool = False,
          run_from_jobdb: bool = False,

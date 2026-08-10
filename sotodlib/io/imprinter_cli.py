@@ -19,6 +19,7 @@ import numpy as np
 import datetime as dt
 from typing import Optional
 
+import sotodlib.io.bookbinder as bbinder
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
 
@@ -212,6 +213,8 @@ class DuplicateAncillaryData(BookError):
     def report_error(self):
         return f"{self.book.bid} has duplicate ancillary data"
 
+
+
 class NoMountData(BookError):
     @staticmethod
     def has_error(book):
@@ -242,7 +245,11 @@ class DroppedMountData(BookError):
     def fix_book(self):
         if self.dropped is None:
             self.report_error()
-
+        if self.dropped < 0:
+            raise ValueError(
+                f"Could not parse dropped sample duration for {self.book.bid}"
+                " cannot repair book."
+            )
         if self.book.type == 'obs':
             if self.dropped > self.max_drop_time_to_fix:
                 print(f"ACU readout dropped for {self.dropped} seconds. Autofixing"
@@ -259,7 +266,10 @@ class DroppedMountData(BookError):
 
     def report_error(self):
         pattern = r"dropped\s*\[(.*?)\]\s*samples over\s*\[(.*?)\]"
-        m = re.search(pattern, self.book.message.split("\n")[-2])
+        m = re.search(pattern, self.book.message, re.DOTALL)
+        if m is None:
+            self.dropped = -999
+            return f"{self.book.bid} has ACU dropout (could not parse drop duration)"
         self.dropped = sum([float(x) for x in m.group(2).split()])
         return (
             f"{self.book.bid} has the ACU dropping out {len(m.group(2).split())} time(s) "
@@ -337,11 +347,36 @@ class BadTimeSamples(BookError):
         if np.all([x<=self.max_drops_to_fix for x in self.dropped.values()]):
             utils.set_book_rebind(self.imprint, self.book)        
             self.imprint.bind_book(self.book, allow_bad_timing=True,)
+        
+        ## if any observations are over the limit, double check it's not a 
+        ## SMURF database error 
+        dropped_oids = [k for k,x in self.dropped.items() 
+                        if x>self.max_drops_to_fix]
+        g3session, SMURF = self.imprint.get_g3tsmurf_session(
+            return_archive=True
+        )
+        for oid in dropped_oids:
+            print(f"Updating Level 2 observations for {oid}")
+            obs = SMURF.get_observation(oid, g3session)
+            SMURF.update_observation_files(obs, g3session, force=True)
+
+        utils.set_book_rebind(self.imprint, self.book)
+        try:
+            self.imprint.bind_book(self.book)
+        except bbinder.BadTimeSamples as err:
+            print(f"New error message is {err}")
+        
+        print(self.report_error())
+        if sum([x>self.max_drops_to_fix for x in self.dropped.values()])==0:
+            print("problem solved!")
+            return
+
         ## if all our dropped values are more than the limit. Don't Bind
-        elif np.all([x>self.max_drops_to_fix for x in self.dropped.values()]):
+        if np.all([x>self.max_drops_to_fix for x in self.dropped.values()]):
             print(f"All obs_ids have more than {self.max_drops_to_fix}"
                    " will not bind book")
             utils.set_book_wont_bind(self.imprint, self.book)
+        
         ## if only some of the observations have dropped timing. remove them
         else:
             remove_oid = [k for k,x in self.dropped.items() 
@@ -360,6 +395,85 @@ class BadTimeSamples(BookError):
                 msg += l + "\n"
         return msg
 
+class NonMonotonicAncillaryTimes(BookError):
+    fields_to_fix = {
+        "acu.acu_status.Azimuth_mode": 5,
+    }
+    n_samps = None
+    field_dropped = None
+
+    @staticmethod
+    def has_error(book):
+        return "NonMonotonicAncillaryTimes" in book.message
+
+    def report_error(self):
+        field_match = re.search(r'Times from (\S+) have (\d+) samples', self.book.message)
+        if not field_match:
+            raise ValueError(
+                f"Message for {self.book.bid} was not parsed correctly for "
+                "non-monotonic ancillary times"
+            )
+        self.field_dropped = field_match.group(1)
+        self.n_samps = int(field_match.group(2))
+        return (
+            f"{self.book.bid} has non-monotonic ancillary times: "
+            f"{self.field_dropped}: {self.n_samps}"
+        )
+
+    def fix_book(self):
+        if self.field_dropped is None or self.n_samps is None:
+            self.report_error()
+        if self.field_dropped is None or self.n_samps is None:
+            raise ValueError(
+                f"Message for {self.book.bid} was not parsed correctly for "
+                "non-monotonic ancillary times"
+            )
+        max_samps = self.fields_to_fix.get( self.field_dropped )
+        if max_samps is None:
+            print(f"Cannot fix book with non-monotonic field {self.field_dropped}")
+            return
+        if self.n_samps>max_samps:
+            print(
+                f"Cannot fix book with non-monotonic field {self.field_dropped} having"
+                f" flipped more than {max_samps} samples"
+            )
+            return
+        print(f"Binding book {self.book.bid} without requiring monotonic times")
+        utils.set_book_rebind(self.imprint, self.book)
+        self.imprint.bind_book(self.book, require_monotonic_times=False,)
+
+class TimingCounterError(BookError):
+    @staticmethod
+    def has_error(book):
+        return "TimingCounterError" in book.message
+    
+    def report_error(self):
+        return  f"{self.book.bid} has bad counter statistics"
+    
+    def fix_book(self):
+        g3session, SMURF = self.imprint.get_g3tsmurf_session(
+            return_archive=True
+        )
+
+        obsdb = self.imprint.get_g3tsmurf_obs_for_book(self.book)
+        for obs_id, obs in obsdb.items():
+            ## if this was tagged correctly at level 2, ready to bind
+            if "bad" == obs.tag.split(',')[1]:
+                continue
+            # otherwise, try and tag it correctly
+            print(f"Updating level 2 files and observation for {obs_id}")
+            for db_file in obs.files:
+                SMURF.add_file(db_file.name, g3session, overwrite=True)
+            SMURF.update_observation_files(obs, g3session, force=True)
+            assert "bad" == obs.tag.split(',')[1], "level 2 file is not reporting bad counters"
+
+        # bad timing books can't be multiwafer
+        books = utils.split_book_by_obs(self.imprint, self.book)
+        for book in books:
+            print(f"Binding book {book.bid} allowing bad timing")
+            utils.set_book_rebind(self.imprint, book)
+            self.imprint.bind_book(book, allow_bad_timing=True,)
+
 AUTOFIX_ERRORS = [
     SecondFail,
     BookDirHasFiles,
@@ -373,6 +487,8 @@ AUTOFIX_ERRORS = [
     TimingSystemOff,
     FileTooLargeError,
     BadTimeSamples,
+    NonMonotonicAncillaryTimes,
+    TimingCounterError,
 ]
 
 def process_book_failure(
@@ -421,6 +537,8 @@ def autofix_failed_books(
             Books.start <= dt.datetime.utcfromtimestamp(max_ctime),
         )
     failed = failed.all()
+    if len(failed) == 0:
+        print("No Failed Books!!")
     for book in failed:
         success = process_book_failure(
             imprint, book, 
