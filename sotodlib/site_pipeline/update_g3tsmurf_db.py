@@ -9,6 +9,7 @@ import argparse
 import logging
 from sqlalchemy import or_
 from typing import Optional
+from pathlib import Path
 
 
 from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
