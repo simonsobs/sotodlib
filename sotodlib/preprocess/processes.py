@@ -2135,31 +2135,51 @@ class DetcalNanCuts(_Preprocess):
     Example config file entry::
 
       - name: "detcal_nan_cuts"
-        select:
+        calc:
             fields: [tau_eff, phase_to_pW]
+        save: True
+        select: True
     """
     name = 'detcal_nan_cuts'
 
     def __init__(self, step_cfgs):
-        self.save_name = None
+        self.save_name = "det_cal_nan_flags"
 
         super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            return aman, proc_aman
+        msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(aman, **self.calc_cfgs)
+        det_cal_aman = core.AxisManager(aman.dets, aman.samps)
+        det_cal_aman.wrap('det_cal_nans', msk_det_cal, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, det_cal_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, det_cal_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.save_name, det_cal_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-
-        select_fields = self.select_cfgs.get("fields")
-
-        keep = np.ones(meta.dets.count, dtype=bool)
-        for field in select_fields:
-            keep &= ~np.isnan(meta.det_cal[field])
-        if in_place:
-            meta.restrict('dets', meta.dets.vals[keep])
+        if self.save_name in proc_aman:
+            keep = ~has_all_cut(proc_aman[self.save_name].det_cal_nans)
+        # backwards compatibility
         else:
-            return keep
+            fields = self.select_cfgs.get("fields")
+            msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(
+                meta, fields=fields, merge=False, overwrite=False)
+            keep = ~has_all_cut(msk_det_cal)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
+
 
 class PCARelCal(_Preprocess):
     """

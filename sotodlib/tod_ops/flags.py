@@ -15,6 +15,9 @@ from .. import coords
 from . import filters
 from . import fourier_filter 
 
+from ..core.flagman import flag_array_to_ranges_matrix
+
+
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_range=None,
                        phase_to_pW=None, merge=True, overwrite=True,
@@ -94,9 +97,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
-        x = Ranges(aman.samps.count)
-        mskexp = RangesMatrix([Ranges.ones_like(x) if Y
-                            else Ranges.zeros_like(x) for Y in msk])
+        mskexp = flag_array_to_ranges_matrix(
+            msk, aman.samps.count
+        )
         msk_aman = core.AxisManager(aman.dets, aman.samps)
         msk_aman.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
     else:
@@ -143,8 +146,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         
         for range in ranges:
             msk = ~(np.all([range], axis=0))
-            msks.append(RangesMatrix([Ranges.ones_like(x) if Y
-                                      else Ranges.zeros_like(x) for Y in msk]))
+            msks.append(flag_array_to_ranges_matrix(msk, aman.samps.count))
 
         for i, msk in enumerate(msks):
             if 'samps' in aman:
@@ -155,7 +157,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
-                         merge=True, merge_lr=True, overwrite=True, 
+                         merge=True, merge_lr=True, overwrite=True,
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
@@ -619,10 +621,10 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
         If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
     """
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
-    x = Ranges(aman.samps.count)
-    mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
-                                else Ranges.zeros_like(x) for Y in darks])
-    
+    mskdarks = flag_array_to_ranges_matrix(
+        darks, aman.samps.count
+    )
+
     if merge:
         if dark_flags_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {dark_flags_name} already exists in aman.flags")
@@ -711,9 +713,9 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
                 det_mask[ptps_full >= np.max(ptps)] = False
             else:
                 det_mask[ptps_full <= np.min(ptps)] = False
-    x = Ranges(aman.samps.count)
-    mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
-                             else Ranges.ones_like(x) for Y in det_mask])
+    mskptps = flag_array_to_ranges_matrix(
+        det_mask, aman.samps.count
+    )
     if merge:
         if ptp_flag_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {ptp_flag_name} already exists in aman.flags")
@@ -757,9 +759,9 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
     ivar = 1.0/np.var(aman[signal_name], axis=-1)
     sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
     det_mask = ivar > np.median(ivar) + nsigma*sigma
-    x = Ranges(aman.samps.count)
-    mskinvar = RangesMatrix([Ranges.ones_like(x) if Y
-                             else Ranges.zeros_like(x) for Y in det_mask])
+    mskinvar = flag_array_to_ranges_matrix(
+        det_mask, aman.samps.count
+    )
     if merge:
         if inv_var_flag_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {inv_var_flag_name} already exists in aman.flags")
@@ -990,11 +992,15 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
 def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
     """
     Generate flags for invalid detectors in the focal plane.
-        The tod.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Axismanager containing the focal plane AxisManager.
     merge : bool
-        If true, merges the generated flag into aman.
+        If True, merges the generated flag into aman.
     overwrite : bool
-        If true, write over flag. If false, don't.
+        If True, write over flag. If False, don't.
     invalid_flags_name : str
         Name of flag to add to aman.flags if merge is True.
 
@@ -1007,9 +1013,10 @@ def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='f
     xi_nan = np.isnan(aman.focal_plane.xi)
     eta_nan = np.isnan(aman.focal_plane.eta)
     gamma_nan = np.isnan(aman.focal_plane.gamma)
-    x = Ranges(aman.samps.count)
     flag_invalid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) != 0
-    msk_invalid_fp = RangesMatrix([Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_fp])
+    msk_invalid_fp = flag_array_to_ranges_matrix(
+        flag_invalid_fp, aman.samps.count
+    )
     
     if merge:
         if invalid_flags_name in aman.flags and not overwrite:
@@ -1020,6 +1027,50 @@ def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='f
             aman.flags.wrap(invalid_flags_name, msk_invalid_fp, [(0, 'dets'), (1, 'samps')])
 
     return msk_invalid_fp
+
+
+def get_det_cal_nan_flags(aman, fields, merge=False, overwrite=False, invalid_flags_name="det_cal_nan_flags"):
+    """
+    Generate flags for invalid det_cal parameters.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager containing the det_cal AxisManager.
+    fields : list[str]
+        List of fields in det_cal to check for NaNs.
+    merge : bool
+        If True, merges the generated flag into aman.
+    overwrite : bool
+        If True, write over flag. If False, don't.
+    invalid_flags_name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    msk_invalid_det_cal : RangesMatrix
+        RangesMatrix of invalid detectors in det_cal.
+    """
+
+    flag_invalid_det_cal = np.any(
+        [np.isnan(getattr(aman.det_cal, field)) for field in fields],
+        axis=0,
+    )
+
+    msk_invalid_det_cal = flag_array_to_ranges_matrix(
+        flag_invalid_det_cal, aman.samps.count
+    )
+
+    if merge:
+        if invalid_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {invalid_flags_name} already exists in aman.flags")
+        if invalid_flags_name in aman.flags:
+            aman.flags[invalid_flags_name] = msk_invalid_det_cal
+        else:
+            aman.flags.wrap(invalid_flags_name, msk_invalid_det_cal, [(0, 'dets'), (1, 'samps')])
+
+    return msk_invalid_det_cal
+
 
 def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     """
