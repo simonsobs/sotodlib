@@ -419,9 +419,10 @@ def _operator_arrays(tod, operator):
     if "n_dets_fit" in operator and operator.n_dets_fit != tod.dets.count:
         logger.warning(
             "Nmat operator was fit on %d detectors but is being applied to "
-            "%d; the stored mode vectors are no longer orthonormal over this "
-            "subset and the operator is only approximate. Refit, or keep the "
-            "detector selection consistent between the model and the target.",
+            "%d. Restricting D and V gives the marginal covariance of the "
+            "subset under the fitted model, which is well defined, but it is "
+            "not the same operator as one fit on the subset directly. Refit "
+            "if the two are meant to match.",
             int(operator.n_dets_fit), tod.dets.count,
         )
     sigma = np.concatenate([operator.sigma_Q, operator.sigma_U])
