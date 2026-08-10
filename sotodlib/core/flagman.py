@@ -74,6 +74,7 @@ class FlagManager(AxisManager):
         
         if len(axis_map)==1 and axis_map[0][1]==self._dets_name:
             ### Change detector flags to RangesMatrix in the backend
+            data = flag_to_ranges_matrix(data, self.samps.count)
             x = Ranges(self.samps.count)
             data = RangesMatrix([Ranges.ones_like(x) if Y 
                                  else Ranges.zeros_like(x) for Y in data])
@@ -333,6 +334,25 @@ def flag_cut_select(flags, kind, invert=False):
             return ~has_ratio_cuts(flags, ratio=kind)
         else:
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
+
+
+def flag_to_ranges_matrix(arr, ranges):
+    """Convert a 1D flag array to a RangesMatrix by duplicating
+    along entries along the second axis.
+
+    Args:
+        arr (list or np.array): 1D flag array.
+        ranges (int or Ranges):  If int, create a Ranges object of length
+        ranges.  If ranges is a Ranges object, use it directly for duplicating
+        the flag array over.
+    Returns:
+        RangesMatrix: The output RangesMatrix.
+    """
+    if isinstance(ranges, int):
+        ranges = Ranges(ranges)
+    return RangesMatrix(
+        [Ranges.ones_like(ranges) if Y else Ranges.zeros_like(ranges) for Y in arr]
+    )
 
 
 def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):

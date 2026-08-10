@@ -2137,6 +2137,8 @@ class DetcalNanCuts(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            return aman, proc_aman
         msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(aman, **self.calc_cfgs)
         det_cal_aman = core.AxisManager(aman.dets, aman.samps)
         det_cal_aman.wrap('det_cal_nans', msk_det_cal, [(0, 'dets'), (1, 'samps')])
@@ -2154,7 +2156,14 @@ class DetcalNanCuts(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~has_all_cut(proc_aman[self.save_name].det_cal_nans)
+        if self.save_name in proc_aman:
+            keep = ~has_all_cut(proc_aman[self.save_name].det_cal_nans)
+        # backwards compatibility
+        else:
+            fields = self.select_cfgs.get("fields")
+            msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(
+                meta, fields=fields, merge=False, overwrite=False)
+            keep = ~has_all_cut(msk_det_cal)
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
