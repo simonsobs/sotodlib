@@ -20,7 +20,7 @@ from ..core.flagman import flag_to_ranges_matrix
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_range=None,
-                       phase_to_pW=None, merge=False, overwrite=False,
+                       phase_to_pW=None, merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
