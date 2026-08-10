@@ -400,6 +400,11 @@ def fit_joint_qu_nmat_operator(
     op.wrap("fmax", float(freqs[band_hi - 1]))
     op.wrap("profile_diagonal_floor", float(profile_diagonal_floor))
     op.wrap("nsamp", int(nsamp))
+    # Number of detectors the modes were fit over. A stored operator that is
+    # later restricted to fewer detectors, e.g. when reloaded from an archive
+    # alongside a differently cut observation, no longer has orthonormal mode
+    # vectors, so record this to detect it at apply time.
+    op.wrap("n_dets_fit", int(ndet))
     return op
 
 
@@ -410,6 +415,14 @@ def _operator_arrays(tod, operator):
         raise ValueError(
             "operator and tod detector axes differ; the stored Nmat operator "
             "is only valid for the detector set it was fit on"
+        )
+    if "n_dets_fit" in operator and operator.n_dets_fit != tod.dets.count:
+        logger.warning(
+            "Nmat operator was fit on %d detectors but is being applied to "
+            "%d; the stored mode vectors are no longer orthonormal over this "
+            "subset and the operator is only approximate. Refit, or keep the "
+            "detector selection consistent between the model and the target.",
+            int(operator.n_dets_fit), tod.dets.count,
         )
     sigma = np.concatenate([operator.sigma_Q, operator.sigma_U])
     valid = np.concatenate([operator.valid_Q, operator.valid_U]).astype(bool)

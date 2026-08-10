@@ -297,3 +297,22 @@ def test_marchenko_pastur_threshold_validation():
     assert threshold2 == threshold
     assert_allclose(lambda_plus, lambda_plus_expected)
     assert threshold > lambda_plus
+
+
+def test_operator_warns_when_dets_were_restricted(caplog):
+    """A reloaded operator restricted to fewer dets must not pass silently."""
+    tod = make_joint_tod(ndet=6)
+    add_common_mode(tod, amplitude=30)
+    operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(tod, **FIT_KWARGS)
+
+    keep = tod.dets.vals[:4]
+    tod_cut = tod.restrict("dets", keep, in_place=False)
+    op_cut = operator.restrict("dets", keep, in_place=False)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="sotodlib.tod_ops.nmat_filter"):
+        tod_ops.nmat_filter.apply_joint_qu_nmat_operator(
+            tod_cut, op_cut, in_place=False
+        )
+    assert "fit on 6 detectors" in caplog.text
+    assert "applied to 4" in caplog.text
