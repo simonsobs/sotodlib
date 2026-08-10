@@ -15,7 +15,7 @@ from .. import coords
 from . import filters
 from . import fourier_filter 
 
-from ..core.flagman import flag_to_ranges_matrix
+from ..core.flagman import flag_array_to_ranges_matrix
 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
@@ -97,7 +97,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
-        mskexp = flag_to_ranges_matrix(
+        mskexp = flag_array_to_ranges_matrix(
             msk, aman.samps.count
         )
         msk_aman = core.AxisManager(aman.dets, aman.samps)
@@ -146,7 +146,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         
         for range in ranges:
             msk = ~(np.all([range], axis=0))
-            msks.append(flag_to_ranges_matrix(msk, aman.samps.count))
+            msks.append(flag_array_to_ranges_matrix(msk, aman.samps.count))
 
         for i, msk in enumerate(msks):
             if 'samps' in aman:
@@ -621,7 +621,7 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
         If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
     """
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
-    mskdarks = flag_to_ranges_matrix(
+    mskdarks = flag_array_to_ranges_matrix(
         darks, aman.samps.count
     )
 
@@ -713,7 +713,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
                 det_mask[ptps_full >= np.max(ptps)] = False
             else:
                 det_mask[ptps_full <= np.min(ptps)] = False
-    mskptps = flag_to_ranges_matrix(
+    mskptps = flag_array_to_ranges_matrix(
         det_mask, aman.samps.count
     )
     if merge:
@@ -759,7 +759,7 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
     ivar = 1.0/np.var(aman[signal_name], axis=-1)
     sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
     det_mask = ivar > np.median(ivar) + nsigma*sigma
-    mskinvar = flag_to_ranges_matrix(
+    mskinvar = flag_array_to_ranges_matrix(
         det_mask, aman.samps.count
     )
     if merge:
@@ -1014,7 +1014,7 @@ def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='f
     eta_nan = np.isnan(aman.focal_plane.eta)
     gamma_nan = np.isnan(aman.focal_plane.gamma)
     flag_invalid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) != 0
-    msk_invalid_fp = flag_to_ranges_matrix(
+    msk_invalid_fp = flag_array_to_ranges_matrix(
         flag_invalid_fp, aman.samps.count
     )
     
@@ -1057,7 +1057,7 @@ def get_det_cal_nan_flags(aman, fields, merge=False, overwrite=False, invalid_fl
         axis=0,
     )
 
-    msk_invalid_det_cal = flag_to_ranges_matrix(
+    msk_invalid_det_cal = flag_array_to_ranges_matrix(
         flag_invalid_det_cal, aman.samps.count
     )
 

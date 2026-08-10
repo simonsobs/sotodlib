@@ -335,9 +335,10 @@ def flag_cut_select(flags, kind, invert=False):
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
 
 
-def flag_to_ranges_matrix(arr, ranges):
-    """Convert a 1D flag array to a RangesMatrix by duplicating
-    along entries along the second axis.
+def flag_array_to_ranges_matrix(arr, ranges):
+    """Extend a 1D flag array into a 2D RangesMatrix by duplicating each entry
+    using a Ranges object for the columns axis. Useful for adding samps entries
+    to a 1D per-detector flag array.
 
     Args:
         arr (list or np.array): 1D flag array.
