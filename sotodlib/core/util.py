@@ -17,12 +17,13 @@ class H5ContextManager:
     Class to open an HDF5 file with retry logic on file locking.  This class
     can be used either as a context manager or as a regular function.
 
-    If the file is opened for writing (mode "a", "w", "r+", or "w-"), then
-    a temporary file is created in the same directory as the original and the
-    contents of the original are copied to that before modification.  The
-    temporary file is intentionally chosen to be the same suffix name (it
-    does not use the tempfile module).  This way if multiple processes are
-    trying to update the file, their access will be serialized.
+    If the file is opened for writing (mode "a", "w", "r+", or "w-"), and the
+    environment variable SOTODLIB_HDF5_ATOMIC_UPDATE is set, then a temporary
+    file is created in the same directory as the original and the contents of
+    the original are copied to that before modification.  The temporary file is
+    intentionally chosen to be the same suffix name (it does not use the tempfile
+    module).  This way if multiple processes are trying to update the file, their
+    access will be serialized.
 
     After the context manager exits, the temp file is atomically moved into
     place with the name of the original.  Any processes with the original
@@ -72,6 +73,8 @@ class H5ContextManager:
         if self.delay < 0:
             raise RuntimeError("delay should be a positive number of seconds")
 
+        self.atomic_update = os.getenv("SOTODLIB_HDF5_ATOMIC_UPDATE") is not None
+
     def _check_file_for_mode(self):
         if self.mode in {"r", "r+"}:
             # File should already exist
@@ -94,13 +97,19 @@ class H5ContextManager:
                     # No tempfile needed
                     self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
                 elif self.mode == "a" or self.mode == "r+":
-                    # Copy the existing file to a temp location for modification
-                    if os.path.isfile(self.filename):
-                        shutil.copy(self.filename, temp_path)
-                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
+                    if self.atomic_update:
+                        # Copy the existing file to a temp location for modification
+                        if os.path.isfile(self.filename):
+                            shutil.copy(self.filename, temp_path)
+                        self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
+                    else:
+                        self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
                 else:
                     # Writing and truncating
-                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
+                    if self.atomic_update:
+                        self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
+                    else:
+                        self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
                 return self.f
             except BlockingIOError as e:
                 # If the file is locked, retry opening it after a delay

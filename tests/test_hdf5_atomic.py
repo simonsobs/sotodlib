@@ -112,9 +112,26 @@ class HDF5AtomicTest(TestCase):
         # after it is renamed with the original name.  Meanwhile, the reading process
         # has an open handle to the original inode, which is unmodified and not
         # deleted until it is closed.
+
+        # Set the env variable to enable atomic updating
+        os.environ["SOTODLIB_HDF5_ATOMIC_UPDATE"] = "True"
         opts = [
             "--test_dir",
             self.outdir,
         ]
         ret = inode_main(opts=opts)
         self.assertEqual(ret, 0)
+
+    def test_non_atomic_update(self):
+        # Test the same case as in test_inode_replace above but with atomic updating disabled,
+        # such that the original file is expected to be modified in place by the multiple writers
+        # even when a reader has it open.
+
+        # Ensure the atomic update env variable is unset
+        os.environ.pop("SOTODLIB_HDF5_ATOMIC_UPDATE", None)
+        opts = [
+            "--test_dir",
+            self.outdir,
+        ]
+        ret = inode_main(opts=opts)
+        self.assertEqual(ret, 1)
