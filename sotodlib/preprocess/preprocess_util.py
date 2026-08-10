@@ -613,18 +613,43 @@ def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
 
     aman = context_init.get_obs(meta_init, no_signal=no_signal)
     logger.info("Running initial pipeline")
-    pipe_init.run(aman, aman.preprocess, select=False)
-
-    if init_only:
-        return aman, full_aman
+    if stop_for_sims:
+        out_amans_init = run_pipeline_stepgroups(
+            pipe_init,
+            aman,
+            run_last_step=not(init_only)
+        )
+        if init_only:
+            return out_amans_init, full_aman
+    else:
+        pipe_init.run(aman, aman.preprocess, select=False)
+        if init_only:
+            return aman, full_aman
 
     if configs_proc is not None:
         logger.info("Running dependent pipeline")
 
+        if stop_for_sims:
+            aman = out_amans_init[(len(pipe_init), 'last')]
+
         if 'valid_data' in aman.preprocess:
             aman.preprocess.move('valid_data', None)
+
         aman.preprocess.merge(meta_proc.preprocess)
-        pipe_proc.run(aman, aman.preprocess, select=False)
+
+        if stop_for_sims:
+            out_amans = run_pipeline_stepgroups(
+                pipe_proc,
+                out_amans_init[(len(pipe_init), 'last')],
+            )
+            out_amans.update({
+                (step, name): out_amans_init[(step, name)]
+                for (step, name) in out_amans_init
+                if name != 'last'
+            })
+            return out_amans, full_aman
+        else:
+            pipe_proc.run(aman, aman.preprocess, select=False)
 
     return aman, full_aman
 
@@ -678,8 +703,6 @@ def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
-                                       t2ptemplate_aman=None,
-                                       ignore_cfg_check=False):
                                        ignore_cfg_check=False,
                                        data_amans=None,
                                        interpol=None,
@@ -715,12 +738,6 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only : bool
         Optional. Whether or not to run the dependent pipeline.
-    t2ptemplate_aman : AxisManager
-        Optional. AxisManager to use as a template for t2p leakage
-        deprojection.
-    ignore_cfg_check : bool
-        If True, do not attempt to validate that configs_init is the same as
-        the config used to create the existing init db.
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
@@ -783,7 +800,20 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         meta_init.restrict('dets', meta_proc.dets.vals)
 
         aman = context_init.get_obs(meta_proc, no_signal=True)
+        pointing_model.apply_pointing_model(aman)
         aman = hwp_angle_model.apply_hwp_angle_model(aman)
+        if "wiregrid_cal" in aman.det_info:
+            logger.info(f"gamma from wiregrid_cal")
+            aman.move(
+                name="det_info.wiregrid_cal.gamma",
+                new_name="focal_plane.gamma"
+            )
+        logger.info("Reading in simulated map")
+        if apply_wobble and ("wobble_params" in aman):
+            logger.info("Apply pointing wobble")
+            sight = get_deflected_sightline(aman)
+        else:
+            sight = None
         aman.move("signal", None)
 
         logger.info("Reading in simulated map")
@@ -795,31 +825,12 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         if init_only:
             return aman
 
-        if t2ptemplate_aman is not None:
-            # Replace Q,U with simulated timestreams
-            t2ptemplate_aman.wrap("demodQ", aman.demodQ,
-                                  [(0, 'dets'), (1, 'samps')],
-                                  overwrite=True)
-            t2ptemplate_aman.wrap("demodU", aman.demodU,
-                                  [(0, 'dets'), (1, 'samps')],
-                                  overwrite=True)
-
-            t2p_aman = t2pleakage.get_t2p_coeffs(
-                t2ptemplate_aman,
-                merge_stats=False
-            )
-            t2pleakage.subtract_t2p(
-                aman,
-                t2p_aman,
-                T_signal=t2ptemplate_aman.dsT
-            )
-
         logger.info("Running dependent pipeline")
         proc_aman = context_proc.get_meta(obs_id, meta=aman)
         if 'valid_data' in aman.preprocess:
             aman.preprocess.move('valid_data', None)
         aman.preprocess.merge(proc_aman.preprocess)
-        pipe_proc.run(aman, aman.preprocess, sim=True)
+        pipe_proc.run(aman, aman.preprocess, sim=True, data_amans=data_amans)
 
         return aman
     else:
@@ -1111,7 +1122,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          save_proc_aman=True, compress=False,
                          skip_missing=False, ignore_cfg_check=False):
     """
-    This function is expected to receive a single obs_id, and dets dictionary.
+    This is the main driver function for preprocessing a single obs_id and dets pair
+    for single or two layers. It expects to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
     config files. It accepts either one or two config strings or dicts representing
     an initial and a dependent pipeline stage. If the preprocess database entry for
@@ -1276,7 +1288,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 logger.info(f"Loading and applying preprocessing for both dbs on {obs_id}:{group}")
                 aman, _ = load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                              configs_proc=configs_proc, logger=logger)
+                                              configs_proc=configs_proc, logger=logger,
+                                              ignore_cfg_check=ignore_cfg_check)
                 logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
                 return aman, None, None, (PreprocessErrors.LoadSuccess, None, None)
             except Exception as e:
