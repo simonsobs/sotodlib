@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
+from scipy.ndimage import uniform_filter1d
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
 try:
@@ -155,8 +156,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
-                         merge=True, merge_lr=True, overwrite=True, 
-                         t_buffer=2., az_buffer=None,
+                         merge=True, merge_lr=True, overwrite=True,
+                         t_buffer=2., az_buffer=None, smooth_seconds=0.5,
                          kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
@@ -188,6 +189,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         If a single float is provided, half of the value is applied to each side (before and after)
         of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
         corresponding side.
+    smooth_seconds : float
+        Time window in seconds to smooth the azimuth data before differentiating, in the ``az`` method.
     kernel_size : int
         (Optional). Size of the step-wise matched filter kernel used in ``scanspeed`` method.
     peak_threshold : float
@@ -231,7 +234,13 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         buffer_before = np.deg2rad(buffer_before)
         buffer_after = np.deg2rad(buffer_after)
 
-        daz = np.gradient(az, append=az[-1])
+        if smooth_seconds > 0:
+            dt = np.median(np.diff(aman.timestamps))
+            window = int(round(smooth_seconds / dt))
+            az_smooth = uniform_filter1d(az, size=window, mode='nearest')
+        else:
+            az_smooth = az
+        daz = np.gradient(az_smooth)
         if buffer_before == 0 and buffer_after == 0:
             _ta_flag = np.logical_or(az < lo, az > hi)
         else:
