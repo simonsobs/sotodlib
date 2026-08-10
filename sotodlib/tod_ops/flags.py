@@ -157,7 +157,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
-                         merge=True, merge_lr=True, overwrite=True,
+                         merge=False, merge_lr=False, overwrite=False,
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
@@ -326,7 +326,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             aman.flags.wrap(name, ta_flag)   
 
     if merge_subscans:
-        get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan)
+        get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan, overwrite=True)
 
     if method == 'az':
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
