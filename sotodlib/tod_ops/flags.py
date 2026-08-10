@@ -157,7 +157,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
-                         merge=False, merge_lr=False, overwrite=False,
+                         merge=True, merge_lr=True, overwrite=True,
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
                          truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
@@ -326,7 +326,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             aman.flags.wrap(name, ta_flag)   
 
     if merge_subscans:
-        get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan, overwrite=True)
+        get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan)
 
     if method == 'az':
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
@@ -344,7 +344,7 @@ def get_glitch_flags(aman,
                      buffer=200,
                      detrend=None,
                      signal_name=None,
-                     merge=False,
+                     merge=True,
                      overwrite=False,
                      name="glitches",
                      full_output=False,
@@ -475,8 +475,8 @@ def get_trending_flags(aman,
                        max_samples=500,
                        signal=None,
                        timestamps=None,
-                       merge=False,
-                       overwrite=False,
+                       merge=True,
+                       overwrite=True,
                        name="trends",
                        full_output=False):
     """
@@ -595,7 +595,7 @@ def get_trending_flags(aman,
 
     return cut
 
-def get_dark_dets(aman, merge=False, overwrite=False, dark_flags_name='darks'):
+def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
     """
     Identify and flag dark detectors in the given aman object.
 
@@ -635,7 +635,7 @@ def get_dark_dets(aman, merge=False, overwrite=False, dark_flags_name='darks'):
 
     return mskdarks
 
-def get_source_flags(aman, merge=False, overwrite=False, source_flags_name=None,
+def get_source_flags(aman, merge=True, overwrite=True, source_flags_name=None,
                      mask=None, center_on=None, res=None, max_pix=None):
 
     if res:
@@ -772,7 +772,7 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
 
     return mskinvar
 
-def get_subscans(aman, flags=None, merge=False, include_turnarounds=False, overwrite=False):
+def get_subscans(aman, flags=None, merge=True, include_turnarounds=False, overwrite=True):
     """
     Returns an axis manager with information about subscans.
     This includes direction and a ranges matrix (subscans samps)
@@ -989,7 +989,7 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
     info_aman = wrap_stats(aman, name, stats_arr, stat_names, merge)
     return info_aman
 
-def get_focalplane_flags(aman, merge=False, overwrite=False, invalid_flags_name='fp_flags'):
+def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
     """
     Generate flags for invalid detectors in the focal plane.
 
@@ -1029,7 +1029,7 @@ def get_focalplane_flags(aman, merge=False, overwrite=False, invalid_flags_name=
     return msk_invalid_fp
 
 
-def get_det_cal_nan_flags(aman, fields, merge=True, overwrite=True, invalid_flags_name="det_cal_nan_flags"):
+def get_det_cal_nan_flags(aman, fields, merge=False, overwrite=False, invalid_flags_name="det_cal_nan_flags"):
     """
     Generate flags for invalid det_cal parameters.
 
@@ -1195,7 +1195,7 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
     return noisy_subscan_flags, ~noisy_detector_flags
 
 
-def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=False):
+def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
     """
     smurfgaps flags indicates the samples of each stream_id where the
     lost frames are filled in the bookbinding process.
