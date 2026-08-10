@@ -194,16 +194,16 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
-    go to `get_glitch_flags` 
+    go to `get_glitch_flags`
 
-    Saves retsults in proc_aman under the "glitches" field.
+    Saves results in proc_aman under the "glitches" field.
 
-    Data section should define either a glitch significant "sig_glitch" and a maximum
-    number of glitches "max_n_glitch" and/or a maximum fraction of the TOD samples that is
-    allowed to be flagged by glitches.
+    Data selection should define a glitch significant "sig_glitch" and a maximum
+    number of glitches "max_n_glitch" and a maximum fraction of the TOD samples
+    max_t_frac that is allowed to be flagged by glitches.
 
     Example configuration block::
-        
+
       - name: "glitches"
         glitch_name: "my_glitches"
         calc:
@@ -235,36 +235,37 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
-        ) 
+        )
         aman.wrap(self.glitch_name, glitch_aman)
         self.save(proc_aman, glitch_aman)
         if self.calc_cfgs.get('save_plot', False):
             flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
         return aman, proc_aman
-    
+
     def save(self, proc_aman, glitch_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, glitch_aman)
- 
+
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        if "sig_glitch" in self.select_cfgs and "max_n_glitch" in self.select_cfgs:
-            flag = sparse_to_ranges_matrix(
-                proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
-            )
-            n_cut = count_cuts(flag)
-            keep = n_cut <= self.select_cfgs["max_n_glitch"]
-        else:
-            keep = np.ones(proc_aman.dets.count, dtype=bool)
 
-        if "max_t_frac" in self.select_cfgs:
-            above_ratios = has_ratio_cuts(proc_aman[self.glitch_name].glitch_flags, self.select_cfgs["max_t_frac"])
-            keep = keep & ~above_ratios
+        # cut on number of glitches above S/N threshold
+        flag = sparse_to_ranges_matrix(
+            proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
+        )
+        n_cut = count_cuts(flag)
+        keep = n_cut <= self.select_cfgs["max_n_glitch"]
+
+        # cut on fraction of TOD flagged
+        keep = keep & flag_cut_select(
+            proc_aman[self.glitch_name].glitch_flags,
+            self.select_cfgs["max_t_frac"],
+        )
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
