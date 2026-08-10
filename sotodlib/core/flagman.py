@@ -74,7 +74,6 @@ class FlagManager(AxisManager):
         
         if len(axis_map)==1 and axis_map[0][1]==self._dets_name:
             ### Change detector flags to RangesMatrix in the backend
-            data = flag_to_ranges_matrix(data, self.samps.count)
             x = Ranges(self.samps.count)
             data = RangesMatrix([Ranges.ones_like(x) if Y 
                                  else Ranges.zeros_like(x) for Y in data])
