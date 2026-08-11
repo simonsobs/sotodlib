@@ -371,6 +371,7 @@ def model_sat_v2(params, az, el, roll):
         Corrects for "collimation error".
       - enc_offset_{az,el,boresight}: Encoder offsets, in Radians.
         Sign convention: True = Encoder + Offset
+        Sign convention: enc_offset_az = TPoint's IA*-1
       - base_tilt_{cos,sin}: Base tilt coefficients, in radians.
       - harmonic_el_{cos,sin}: 1st order elevation correction, Rad  (HECA2, HESA2)
       - harmonic_2az_{cos,sin}: 2nd order azimuth correction, Rad  (HACA2, HASA2)
@@ -396,7 +397,7 @@ def model_sat_v2(params, az, el, roll):
     az_orig = az.copy()
 
     # Construct offsetted encoders.
-    az = az + params['enc_offset_az']
+    az = az + params['enc_offset_az']  
     el = el + params['enc_offset_el']
     roll = roll - params['enc_offset_boresight']
 
@@ -408,18 +409,18 @@ def model_sat_v2(params, az, el, roll):
     dAz_wobble = (params['acec'] * np.cos(az)
                 - params['aces'] * np.sin(az)
                 )
-    dAz_wobble_2 = (params['harmonic_2az_cos'] * np.cos(2 * az)
-                  + params['harmonic_2az_sin'] * np.sin(2 * az)
+    dAz_wobble_2 = (- params['harmonic_2az_cos'] * np.cos(2 * az)
+                    + params['harmonic_2az_sin'] * np.sin(2 * az)
                   )
     npae_pivot = 60 * DEG
     dAz_npae = params['npae'] * (np.tan(el) - np.tan(npae_pivot))
 
     #Apply Elevation wobble
-    dEl_wobble = (params['harmonic_el_cos'] * np.cos(az)
-                + params['harmonic_el_sin'] * np.sin(az)
+    dEl_wobble = (- params['harmonic_el_cos'] * np.cos(az)
+                  + params['harmonic_el_sin'] * np.sin(az)
                 )
     dEl_wobble_2 = (params['harmonic_2el_cos'] * np.cos(2 * az)
-                  + params['harmonic_2el_sin'] * np.sin(2 * az)
+                  - params['harmonic_2el_sin'] * np.sin(2 * az)
                   )
 
     az += dAz_wobble + dAz_wobble_2 + dAz_npae
