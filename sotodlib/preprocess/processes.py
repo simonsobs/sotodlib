@@ -2414,6 +2414,10 @@ class JointQUNmatFilter(_Preprocess):
           nmat_model: "nmat_qu"
           psd_scale: 1.0
 
+    Setting ``use_data_aman: True`` instead fits the operator directly from the
+    supplied real-data AxisManager rather than reloading a stored one, with the
+    fit parameters given under ``process.fit``.
+
     See sotodlib.tod_ops.nmat_filter.apply_joint_qu_nmat_operator.
     """
     name = "joint_qu_nmat_filter"
@@ -2427,15 +2431,32 @@ class JointQUNmatFilter(_Preprocess):
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         cfgs = dict(self.process_cfgs)
         model_name = cfgs.pop("nmat_model", "nmat_qu")
-        if model_name not in proc_aman:
-            raise KeyError(
-                f"Nmat operator {model_name!r} not found in proc_aman; "
-                "run joint_qu_nmat_model first, or point nmat_model at the "
-                "name it was saved under"
+        fit_cfgs = cfgs.pop("fit", None)
+
+        if self.use_data_aman:
+            model_aman = data_aman if data_aman is not None else aman
+            logger.info(
+                "Fitting the Nmat operator from the supplied AxisManager "
+                "(%d detectors)", model_aman.dets.count
             )
+            operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+                model_aman,
+                signal_Q=self.signal_Q,
+                signal_U=self.signal_U,
+                **(fit_cfgs or {}),
+            )
+        else:
+            if model_name not in proc_aman:
+                raise KeyError(
+                    f"Nmat operator {model_name!r} not found in proc_aman; "
+                    "run joint_qu_nmat_model first, or point nmat_model at "
+                    "the name it was saved under"
+                )
+            operator = proc_aman[model_name]
+
         tod_ops.nmat_filter.apply_joint_qu_nmat_operator(
             aman,
-            proc_aman[model_name],
+            operator,
             signal_Q=self.signal_Q,
             signal_U=self.signal_U,
             in_place=True,

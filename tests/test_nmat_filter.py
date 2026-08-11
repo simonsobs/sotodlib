@@ -316,3 +316,34 @@ def test_operator_warns_when_dets_were_restricted(caplog):
         )
     assert "fit on 6 detectors" in caplog.text
     assert "applied to 4" in caplog.text
+
+
+def test_filter_step_can_fit_from_data_aman():
+    """use_data_aman fits from the supplied AxisManager instead of reloading."""
+    tod = make_joint_tod(ndet=4, nsamp=2048)
+    model_tod = make_joint_tod(ndet=4, nsamp=2048, seed=99)
+    add_common_mode(model_tod, amplitude=30, freq_hz=0.3)
+    add_common_mode(tod, amplitude=10, freq_hz=0.3)
+    proc_aman = core.AxisManager(tod.dets, tod.samps)
+
+    pipe = Pipeline([{
+        "name": "joint_qu_nmat_filter",
+        "skip_on_sim": False,
+        "use_data_aman": True,
+        "process": {
+            "fit": {
+                "fmin": 0.1,
+                "fmax": 1.0,
+                "noise_band": [2.0, 8.0],
+                "bin_width_hz": 0.5,
+                "mode_selection": "fixed",
+                "n_modes": 1,
+            },
+            "psd_scale": 1.0,
+        },
+    }])
+
+    before = tod.demodQ.copy()
+    # proc_aman holds no operator: the live fit must be what is used
+    tod, _ = pipe[0].process(tod, proc_aman, sim=True, data_aman=model_tod)
+    assert not np.allclose(tod.demodQ, before)
