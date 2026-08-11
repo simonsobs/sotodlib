@@ -125,6 +125,19 @@ class TestGetTurnaroundFlags(unittest.TestCase):
             merge=False, merge_lr=False, merge_subscans=False)
         self.assertNotEqual(ta_sym.mask().sum(), ta_asym.mask().sum())
 
+    def test_500_scanspeed_truncate(self):
+        """Truncate unstable scan in scanspeed method"""
+        nsamps = 8000
+        aman = _make_aman_with_sinusoidal_scan(nsamps=nsamps, scan_freq=0.05)
+        _aman = _make_aman_with_sinusoidal_scan(nsamps=nsamps, scan_freq=0.20)
+        # inject faster scan at the beginning
+        # the results are merged correctly and truccated
+        aman.boresight.az[:50] = _aman.boresight.az[:50]
+        _ = get_turnaround_flags(
+            aman, method='scanspeed', truncate=True,
+            merge=True, merge_lr=True, merge_subscans=True)
+        self.assertTrue(aman.samps.count < nsamps)
+
 
 if __name__ == '__main__':
     unittest.main()

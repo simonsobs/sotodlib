@@ -1506,20 +1506,14 @@ class FlagTurnarounds(_Preprocess):
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
             self.calc_cfgs['method'] = 'scanspeed'
-        elif not('method' in self.calc_cfgs):
+        elif 'method' not in self.calc_cfgs:
             self.calc_cfgs['method'] = 'scanspeed'
 
-        if self.calc_cfgs['method'] == 'scanspeed':
-            ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            calc_aman = core.AxisManager(aman.dets, aman.samps)
-            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
-            calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-
-        if self.calc_cfgs['method'] == 'az':
-            ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            calc_aman = core.AxisManager(aman.dets, aman.samps)
-            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+        ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+        calc_aman = core.AxisManager(aman.dets, aman.samps)
+        calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+        calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+        calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
             calc_aman.wrap('subscan_info', aman.subscan_info)

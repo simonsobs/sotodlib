@@ -232,7 +232,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         elif len(az_buffer) == 2:
             buffer_before, buffer_after = az_buffer
         else:
-            raise ValueError
+            raise ValueError('Unsupported type of az_buffer')
         buffer_before = np.deg2rad(buffer_before)
         buffer_after = np.deg2rad(buffer_after)
 
@@ -247,10 +247,10 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             _ta_flag = np.logical_or(az < lo, az > hi)
         else:
             # top/bottom turnarounds, approaching/leaving
-            top_appr = (daz > 0) & (az > hi - buffer_before)
-            top_leav = (daz < 0) & (az > hi - buffer_after)
-            bot_appr = (daz < 0) & (az < lo + buffer_before)
-            bot_leav = (daz > 0) & (az < lo + buffer_after)
+            top_appr = (daz >= 0) & (az > hi - buffer_before)
+            top_leav = (daz <= 0) & (az > hi - buffer_after)
+            bot_appr = (daz <= 0) & (az < lo + buffer_before)
+            bot_leav = (daz >= 0) & (az < lo + buffer_after)
             _ta_flag = top_appr | top_leav | bot_appr | bot_leav
 
         _right_flag = (daz > 0) & ~_ta_flag
@@ -299,7 +299,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         if (t_buffer is None) and (az_buffer is None):
             nbuffer_before, nbuffer_after = 0, 0
         if (t_buffer is not None) and (az_buffer is not None):
-            raise ValueError('Either t_buffer or az_buffer must be specified')
+            raise ValueError('Only t_buffer or az_buffer can be specified, not both.')
         if t_buffer is not None:
             if np.isscalar(t_buffer):
                 nbuffer_before = int(t_buffer/dt//2)
@@ -368,6 +368,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             valid_i_start, valid_i_end = np.where(~_truncate_flag)[0][0], np.where(~_truncate_flag)[0][-1]
             aman.restrict('samps', (aman.samps.offset + valid_i_start, aman.samps.offset+valid_i_end))
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
+            left_flag = Ranges.from_bitmask(_left_flag[valid_slice])
+            right_flag = Ranges.from_bitmask(_right_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
 
