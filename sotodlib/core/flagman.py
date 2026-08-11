@@ -300,10 +300,10 @@ def flag_cut_select(flags, kind, invert=False):
 
     Args:
         flags (RangesMatrix): An instance of so3g.proj.RangesMatrix indicating flagged time ranges.
-        kind (str or float): One of the following:
+        kind (str or int/float): One of the following:
             - 'any': Select/cut detectors with any flagged samples.
             - 'all': Select/cut detectors with all samples flagged.
-            - float: A threshold ratio (0.0–1.0); selects/cuts detectors whose flagged ratio exceeds the threshold.
+            - int/float: A threshold ratio (0.0–1.0); selects/cuts detectors whose flagged ratio exceeds the threshold.
         intert (bool): default=False returns detectors to be excluded =True, detectors to be kept = False. If True, The logic is flipped.
 
     Returns:
@@ -320,7 +320,7 @@ def flag_cut_select(flags, kind, invert=False):
             return has_any_cuts(flags)
         elif kind == 'all':
             return has_all_cut(flags)
-        elif isinstance(kind, float):
+        elif isinstance(kind, (int, float)):
             return has_ratio_cuts(flags, ratio=kind)
         else:
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
@@ -329,10 +329,30 @@ def flag_cut_select(flags, kind, invert=False):
             return ~has_any_cuts(flags)
         elif kind == 'all':
             return ~has_all_cut(flags)
-        elif isinstance(kind, float):
+        elif isinstance(kind, (int, float)):
             return ~has_ratio_cuts(flags, ratio=kind)
         else:
             raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
+
+
+def flag_array_to_ranges_matrix(arr, ranges):
+    """Extend a 1D flag array into a 2D RangesMatrix by duplicating each entry
+    using a Ranges object for the columns axis. Useful for adding samps entries
+    to a 1D per-detector flag array.
+
+    Args:
+        arr (list or np.array): 1D flag array.
+        ranges (int or Ranges):  If int, create a Ranges object of length
+        ranges.  If ranges is a Ranges object, use it directly for duplicating
+        the flag array over.
+    Returns:
+        RangesMatrix: The output RangesMatrix.
+    """
+    if isinstance(ranges, int):
+        ranges = Ranges(ranges)
+    return RangesMatrix(
+        [Ranges.ones_like(ranges) if Y else Ranges.zeros_like(ranges) for Y in arr]
+    )
 
 
 def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):

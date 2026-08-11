@@ -13,7 +13,8 @@ from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
-                                   count_cuts, flag_cut_select,
+                                   count_cuts, has_ratio_cuts,
+                                   flag_cut_select,
                                    sparse_to_ranges_matrix)
 
 from sotodlib.preprocess import preprocess_util as pp_util
@@ -86,13 +87,13 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dbc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, dbc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -156,13 +157,13 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, trend_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, trend_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -193,15 +194,16 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
-    go to `get_glitch_flags` 
+    go to `get_glitch_flags`
 
-    Saves retsults in proc_aman under the "glitches" field.
+    Saves results in proc_aman under the "glitches" field.
 
-    Data section should define a glitch significant "sig_glitch" and a maximum
-    number of glitches "max_n_glitch."
+    Data selection should define a glitch significance "sig_glitch", a maximum
+    number of glitches "max_n_glitch", and a maximum fraction of TOD samples
+    "max_t_frac" that is allowed to be flagged by glitches.
 
     Example configuration block::
-        
+
       - name: "glitches"
         glitch_name: "my_glitches"
         calc:
@@ -217,6 +219,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         select:
           max_n_glitch: 10
           sig_glitch: 10
+          max_t_frac: 0.1
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
@@ -232,29 +235,37 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
-        ) 
+        )
         aman.wrap(self.glitch_name, glitch_aman)
         self.save(proc_aman, glitch_aman)
         if self.calc_cfgs.get('save_plot', False):
             flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
         return aman, proc_aman
-    
+
     def save(self, proc_aman, glitch_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, glitch_aman)
- 
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
+
+        # cut on number of glitches above S/N threshold
         flag = sparse_to_ranges_matrix(
             proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
+
+        # cut on fraction of TOD flagged
+        keep = keep & flag_cut_select(
+            proc_aman[self.glitch_name].glitch_flags,
+            self.select_cfgs.get("max_t_frac", 1.0),
+        )
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -364,13 +375,13 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, jump_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, jump_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -521,13 +532,13 @@ class NoiseRatio(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, calc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         else:
             proc_aman.wrap(self.save_name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -642,7 +653,7 @@ class CutBadDistribution(_Preprocess):
         super().__init__(step_cfgs)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -825,13 +836,13 @@ class Noise(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, noise):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, noise)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -937,7 +948,7 @@ class Calibrate(_Preprocess):
         return aman, proc_aman
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         keep = meta[self.select_cfgs['cut_array']] == 0
         if in_place:
@@ -1177,7 +1188,7 @@ class A2Stats(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, a2_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, a2_stats)
@@ -1346,7 +1357,7 @@ class AzSS(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, azss_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, azss_stats)
@@ -1382,7 +1393,7 @@ class AzSS(_Preprocess):
         return aman, proc_aman
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1517,7 +1528,7 @@ class FlagTurnarounds(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, turn_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, turn_aman)
@@ -1685,7 +1696,7 @@ class SSOFootprint(_Preprocess):
         return aman, proc_aman
         
     def save(self, proc_aman, sso_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, sso_aman)
@@ -1732,13 +1743,13 @@ class DarkDets(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dark_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, dark_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1795,13 +1806,13 @@ class LoadPremadeFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, source_aman)            
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1900,13 +1911,13 @@ class SourceFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, source_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
@@ -2003,7 +2014,7 @@ class HWPAngleModel(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, hwp_angle_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, hwp_angle_aman)
@@ -2124,31 +2135,51 @@ class DetcalNanCuts(_Preprocess):
     Example config file entry::
 
       - name: "detcal_nan_cuts"
-        select:
+        calc:
             fields: [tau_eff, phase_to_pW]
+        save: True
+        select: True
     """
     name = 'detcal_nan_cuts'
 
     def __init__(self, step_cfgs):
-        self.save_name = None
+        self.save_name = "det_cal_nan_flags"
 
         super().__init__(step_cfgs)
 
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            return aman, proc_aman
+        msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(aman, **self.calc_cfgs)
+        det_cal_aman = core.AxisManager(aman.dets, aman.samps)
+        det_cal_aman.wrap('det_cal_nans', msk_det_cal, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, det_cal_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, det_cal_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.save_name, det_cal_aman)
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-
-        select_fields = self.select_cfgs.get("fields")
-
-        keep = np.ones(meta.dets.count, dtype=bool)
-        for field in select_fields:
-            keep &= ~np.isnan(meta.det_cal[field])
-        if in_place:
-            meta.restrict('dets', meta.dets.vals[keep])
+        if self.save_name in proc_aman:
+            keep = ~has_all_cut(proc_aman[self.save_name].det_cal_nans)
+        # backwards compatibility
         else:
-            return keep
+            fields = self.select_cfgs.get("fields")
+            msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(
+                meta, fields=fields, merge=False, overwrite=False)
+            keep = ~has_all_cut(msk_det_cal)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
+
 
 class PCARelCal(_Preprocess):
     """
@@ -2244,13 +2275,13 @@ class PCARelCal(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, pca_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, pca_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2374,7 +2405,7 @@ class GetCommonMode(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, common_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, common_aman)
@@ -2458,13 +2489,13 @@ class PTPFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, ptp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, ptp_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2507,13 +2538,13 @@ class InvVarFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, inv_var_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, inv_var_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2565,13 +2596,13 @@ class EstimateT2P(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, t2p_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, t2p_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2667,7 +2698,7 @@ class SplitFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, split_flg_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, split_flg_aman)
@@ -2860,7 +2891,7 @@ class SubtractQUCommonMode(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, aman['qu_common_mode_coeffs'])
@@ -2945,13 +2976,13 @@ class FocalplaneNanFlags(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, fp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, fp_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -3033,13 +3064,13 @@ class BadSubscanFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, calc_aman, name): 
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -3162,7 +3193,7 @@ class AcuDropFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, flag_aman)
@@ -3199,7 +3230,7 @@ class SmurfGapsFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, flag_aman)
@@ -3237,7 +3268,7 @@ class GetTauHWP(_Preprocess):
         self.save(proc_aman, tau_hwp_aman)
 
     def save(self, proc_aman, tau_hwp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.save_name, tau_hwp_aman)
