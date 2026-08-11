@@ -1,6 +1,7 @@
 # Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import os
 import numpy as np
 import toast.rng
 from astropy import units as u
@@ -10,8 +11,34 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer, Timer
 from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
+import jbolo.jbolo_funcs as jf
+from jbolo.utils import load_sim
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
+
+# JBolo sims to use
+JBOLO_MODELS = {
+    'SAT_MF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_MF.yaml"),
+    'SAT_UHF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_UHF.yaml"),
+    'LAT_LF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_LF.yaml"),
+    'LAT_MF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_MF.yaml"),
+    'LAT_UHF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_UHF.yaml")
+}
+
+JBOLO_CHANNELS = {
+    "SAT_f030" : "LF_1",
+    "SAT_f040" : "LF_2",
+    "SAT_f090" : "MF_1",
+    "SAT_f150" : "MF_2",
+    "SAT_f230" : "UHF_1",
+    "SAT_f290" : "UHF_2",
+    "LAT_f030" : "LF_1",
+    "LAT_f040" : "LF_2",
+    "LAT_f090" : "MF_1",
+    "LAT_f150" : "MF_2",
+    "LAT_f230" : "UHF_1",
+    "LAT_f290" : "UHF_2"
+}
 
 # https://github.com/simonsobs/bolocalc-so-model/blob/master/V3r7/V3r7_Baseline
 # Total optical power in pW
@@ -181,7 +208,7 @@ class SimMuMUXCrosstalk(Operator):
 
         return Phi0
 
-    def _evaluate_dPhi0dT(self, obs, signal, detectors, rows, Phi0):
+    def _evaluate_dPhi0dT(self, obs, signal, detectors, rows, Phi0, pwv, elevation):
         """ Estimate how the SQUID phase in each detector changes
         with the sky temperature
         """
@@ -206,10 +233,20 @@ class SimMuMUXCrosstalk(Operator):
             #import pdb
             #pdb.set_trace()
             median_signal = np.median(signal[row][good])
-            P_opt = P_OPT[band] * 1e-12  # W
-            P_atm_ref = P_ATM[band] * 1e-12  # W
-            efficiency = ETA_ATM[band]
-            P_sat = P_SAT[band] * 1e-12  # W
+
+            # Compute detector properties using JBolo
+            jbolo_channel = JBOLO_CHANNELS[band]
+            jbolo_model   = JBOLO_MODELS[band[:4] + jbolo_channel.split('_')[0]]
+            jsim = load_sim(jbolo_model)
+            jsim['sources']['atmosphere']['elevation'] = elevation # Degrees
+            jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
+            jf.run_optics(jsim)
+            jf.run_bolos(jsim)
+            P_opt = sim['outputs'][jbolo_channel]['P_opt'] # W
+            P_atm_ref = sim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
+            efficiency = sim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
+            P_sat = sim['outputs'][jbolo_channel]['P_sat'] # W
+
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
@@ -229,6 +266,12 @@ class SimMuMUXCrosstalk(Operator):
         if detectors is not None:
             raise RuntimeError(
                 "SimMuMUXCrosstalk cannot be run on subsets of detectors"
+            )
+
+        # Check for JBOLO data path
+        if not 'JBOLO_PATH' in os.environ.keys() or not 'JBOLO_MODELS_PATH' in os.environ.keys():
+            raise RuntimeError(
+                "Cannot calculate detector parameters -- no JBolo models available"
             )
 
         for obs in data.obs:
@@ -267,9 +310,13 @@ class SimMuMUXCrosstalk(Operator):
             input_data = det_data.data.copy() * det_scale
             output_data = det_data.data  # just a reference
 
+            # Get observation parameters for dPhi0dT calculation
+            pwv = obs.telescope.site.weather.pwv.to_value(u.um)
+            el  = obs["scan_el"].to_value(u.degree)
+
             Phi0 = self._draw_Phi0(temp_obs, focalplane, detectors)
             dPhi0dT = self._evaluate_dPhi0dT(
-                temp_obs, input_data, detectors, rows, Phi0
+                temp_obs, input_data, detectors, rows, Phi0, pwv, el
             )
 
             # For each detector-detector pair:
