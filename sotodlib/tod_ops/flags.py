@@ -184,12 +184,12 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     t_buffer : None or float or tuple (float, float)
         (Optional). Buffer time (in seconds) for flagging turnarounds in the ``scanspeed`` method.
         If a single float is provided, half of the value is applied to each side (before and after)
-        of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
+        of the turnarounds. If a tuple ``(before, after)`` is provided, each value is applied to the
         corresponding side.
     az_buffer : None or float or tuple (float, float)
         (Optional). Buffer angle (in degree) for flagging turnarounds.
         If a single float is provided, half of the value is applied to each side (before and after)
-        of the turnarounds. If a tuple `(before, after)`` is provided, each value is applied to the
+        of the turnarounds. If a tuple ``(before, after)`` is provided, each value is applied to the
         corresponding side.
     smooth_seconds : float
         Time window in seconds to smooth the azimuth data before differentiating, in the ``az`` method.

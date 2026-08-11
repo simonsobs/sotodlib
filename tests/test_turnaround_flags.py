@@ -131,7 +131,7 @@ class TestGetTurnaroundFlags(unittest.TestCase):
         aman = _make_aman_with_sinusoidal_scan(nsamps=nsamps, scan_freq=0.05)
         _aman = _make_aman_with_sinusoidal_scan(nsamps=nsamps, scan_freq=0.20)
         # inject faster scan at the beginning
-        # the results are merged correctly and truccated
+        # the results are merged correctly and truncated
         aman.boresight.az[:50] = _aman.boresight.az[:50]
         _ = get_turnaround_flags(
             aman, method='scanspeed', truncate=True,
