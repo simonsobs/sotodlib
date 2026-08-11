@@ -14,7 +14,7 @@ import numpy as np
 from .core import Hardware
 
 
-def sim_detectors_toast(hw, tele, tube_slots=None):
+def sim_detectors_toast(hw, tele, tube_slots=None, verbose=False):
     """Update hardware model with simulated detector positions.
 
     Given a Hardware model, generate all detector properties for the specified
@@ -40,7 +40,7 @@ def sim_detectors_toast(hw, tele, tube_slots=None):
         raise RuntimeError(msg)
 
     sotoast.sim_focalplane.sim_telescope_detectors(
-        hw, tele, tube_slots=tube_slots,
+        hw, tele, tube_slots=tube_slots, verbose=verbose
     )
 
 
