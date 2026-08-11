@@ -105,8 +105,8 @@ def _check_init_jobdb(
 
     Arguments
     ----------
-    jdb : JobDB
-        JobDB instance.
+    jdb : JobManager
+        A preprocesing jobdb.
     init_db : ManifestDb or None
         Init preproc database.
     init_jobs_map : dict
@@ -186,7 +186,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           update_delay: Optional[int] = None,
           tags: Optional[str] = None,
           planet_obs: bool = False,
-          verbosity: Optional[int] = None,
+          verbosity: int = 0,
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
@@ -515,7 +515,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         n_groups_fail += 1
 
         if n_groups_fail > 0:
-            raise RuntimeError(f"preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
+            raise RuntimeError(f"multilayer_preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
                                f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
     logger.info("multilayer_preprocess_tod is done")
 
@@ -613,7 +613,7 @@ def main(configs_init: str,
          update_delay: Optional[int] = None,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
-         verbosity: Optional[int] = None,
+         verbosity: int = 0,
          compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,

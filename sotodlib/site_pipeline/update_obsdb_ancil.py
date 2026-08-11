@@ -18,6 +18,7 @@ import yaml
 
 from sotodlib import core
 from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.update_obsdb import main as uodb_main
 from sotodlib.io import ancil
 
 
@@ -160,6 +161,7 @@ def get_parser(parser=None):
                 help="""
                 Restrict processing to items falling between the
                 two provided unix timestamps.""")
+        if '--time-range' in args or '--lookback-days' in args:
             p.add_argument(
                 '--lookback-days', type=float,
                 help="""
@@ -185,6 +187,13 @@ def get_parser(parser=None):
     update-base-data.""")
 
     add_args(p, '--config-file', '--dataset', '--time-range')
+    p.add_argument('--redo', action='store_true')
+
+    p = sps.add_parser('update-books', help="""
+    Update obsdb *and* obsfiledb by scanning data directories for new
+    books. This calls site_pipeline.update_obsdb.""")
+
+    add_args(p, '--config-file', '--lookback-days')
     p.add_argument('--redo', action='store_true')
 
     p = sps.add_parser('import-records', help="""Prepare the
@@ -236,7 +245,7 @@ def main(
         redo : Optional[bool]=None,
         compare : Optional[bool]=None,
         job_name : Optional[str]=None,
-        _chain_count: Optional[int]=0,
+        chain_count: Optional[int]=0,
 ):
     """Entry point for CLI or job runner.  Some parameters are only
     used by some commands.
@@ -249,7 +258,7 @@ def main(
         logger.handlers[0].setLevel(logging.DEBUG)
 
     # Try to prevent job loops...
-    assert _chain_count < 16
+    assert chain_count < 16
 
     if time_range is None:
         if lookback_days is not None:
@@ -267,6 +276,10 @@ def main(
         update_obsdb(config_file, datasets=dataset,
                      time_range=time_range, redo=redo,
                      verbose=verbose)
+
+    elif command == 'update-books':
+        uodb_main(config_file, recency=lookback_days,
+                  fastwalk=True, overwrite=redo)
 
     elif command == 'import-records':
         import_records(config_file)
@@ -329,7 +342,7 @@ def main(
             carry_fail = step_cfg.pop('carry_fail', False)
             soldier_on = ignore_fail or carry_fail
             try:
-                main(**step_cfg, _chain_count=_chain_count+1)
+                main(**step_cfg, chain_count=chain_count+1)
             except Exception as e:
                 logger.error(f"Error on step {step}")
                 if soldier_on:
