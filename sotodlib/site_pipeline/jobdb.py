@@ -88,9 +88,11 @@ import sys
 
 
 __all__ = ['JobLockedError',
+           'JobUnlockError',
            'JobNotLockedError',
            'JobNotOwnedError',
            'JobNotUniqueError',
+           'JobNotDeletedError',
            'JState',
            'Job',
            'Tag',
@@ -98,6 +100,10 @@ __all__ = ['JobLockedError',
 
 
 class JobLockedError(Exception):
+    pass
+
+
+class JobUnlockError(Exception):
     pass
 
 
@@ -110,6 +116,10 @@ class JobNotOwnedError(Exception):
 
 
 class JobNotUniqueError(Exception):
+    pass
+
+
+class JobNotDeletedError(Exception):
     pass
 
 
@@ -304,60 +314,108 @@ class JobManager:
             [session.expunge(j) for j in jobs]
         return jobs
 
-    def lock(self, job_ids, owner=None, force=False):
-        """Lock one or more Jobs record by id.  If a Job is already locked,
-        a JobLockedError is raised.
+    def lock(self, job_ids, owner=None, force=False, count=None):
+        """Lock one or more Job records by ID or Job object.
 
-        Returns the Job object(s) that has been expunged from the database
-        session.  If a single job id is input one Job will be returned,
-        otherwise a list of Jobs will be returned.  The object attributes can
-        be modified, but won't be written back to the database unless the
-        object is merged into a new session.
+        Jobs that are already locked are skipped unless ``force=True``.
 
+        Args:
+          job_ids (int, Job, or list): A Job ID, Job object, or a list of Job
+            IDs and/or Job objects to lock.
+          owner (str, None): Override the ``lock_owner`` value. If None, an
+            owner string is generated automatically.
+          force (bool): If True, lock jobs regardless of whether they are
+            already locked.
+          count (int, None): The maximum number of Jobs to lock. If specified,
+            up to ``count`` unlocked Jobs will be locked. If None, all
+            available Jobs will be locked.
+
+        Returns:
+          Job or list of Job: A single Job if a single Job ID/object was
+            input, otherwise a list of Jobs. Jobs that could not be locked
+            are not returned. The returned Job objects are detached from
+            the database session.
         """
         if owner is None:
             owner = self._lockstr()
 
         now = time.time()
 
-        if isinstance(job_ids, int):
+        single_input = isinstance(job_ids, (int, Job))
+
+        if single_input:
             job_ids = [job_ids]
 
-        job_ids = [(j.id if isinstance(j, Job) else j) for j in job_ids]
+        job_ids = [
+            job.id if isinstance(job, Job) else job
+            for job in job_ids
+        ]
+
+        if not all(isinstance(job_id, int) for job_id in job_ids):
+            raise TypeError(
+                "job_ids must be an int, Job, or a list of ints/Jobs."
+            )
+
+        if count is not None:
+            if not isinstance(count, int) or count < 1:
+                raise ValueError(
+                    "count must be a positive integer or None."
+                )
 
         with self.session_scope() as session:
-            q = session.query(Job).filter(Job.id.in_(job_ids))
+            q = (
+                session.query(Job)
+                .filter(Job.id.in_(job_ids))
+                .order_by(Job.id)
+            )
 
             if not force:
                 q = q.filter(Job.lock == None)
+                q = q.with_for_update(skip_locked=True)
 
-            n = q.update(
-                {Job.lock: now, Job.lock_owner: owner},
-                synchronize_session=False
-            )
+            if count is not None:
+                q = q.limit(count)
 
-            session.commit()
+            candidates = q.all()
+            candidate_ids = [job.id for job in candidates]
 
-        with self.session_scope() as session:
-            jobs = (
-                session.query(Job)
-                .filter(Job.id.in_(job_ids))
-                .all()
-            )
+            if candidate_ids:
+                session.query(Job).filter(
+                    Job.id.in_(candidate_ids)
+                ).update(
+                    {
+                        Job.lock: now,
+                        Job.lock_owner: owner,
+                    },
+                    synchronize_session=False,
+                )
+
+                jobs = (
+                    session.query(Job)
+                    .populate_existing()
+                    .filter(
+                        Job.id.in_(candidate_ids),
+                        Job.lock == now,
+                        Job.lock_owner == owner,
+                    )
+                    .all()
+                )
+            else:
+                jobs = []
 
             for job in jobs:
                 session.expunge(job)
 
-        locked_jobs = [j for j in jobs if j.lock_owner == owner]
+            session.commit()
 
-        if n !=len(job_ids) or len(locked_jobs) != len(job_ids):
-            raise JobLockedError()
+        if single_input:
+            return jobs[0] if jobs else None
 
-        return locked_jobs[0] if len(locked_jobs) == 1 else locked_jobs
+        return jobs
 
     def unlock(self, jobs, merge=True):
         """Unlock one or more jobs."""
-        if not isinstance(jobs, (list, tuple, set)):
+        if isinstance(jobs, (int, Job)):
             jobs = [jobs]
 
         job_ids = []
@@ -367,8 +425,12 @@ class JobManager:
             if isinstance(j, Job):
                 job_ids.append(j.id)
                 job_objs.append(j)
-            else:
+            elif isinstance(j, int):
                 job_ids.append(j)
+            else:
+                raise TypeError(
+                    "jobs must be an int, Job, or a list of ints/Jobs."
+                )
 
         if not merge or not job_objs:
             with self.session_scope() as session:
@@ -379,6 +441,8 @@ class JobManager:
                 session.commit()
 
         else:
+            failures = []
+
             with self.session_scope() as session:
                 db_jobs = (
                     session.query(Job)
@@ -389,19 +453,39 @@ class JobManager:
                 db_map = {j.id: j for j in db_jobs}
 
                 for job in job_objs:
-                    j1 = db_map[job.id]
+                    try:
+                        j1 = db_map[job.id]
 
-                    if j1.lock_owner is None:
-                        raise JobNotLockedError()
+                        if j1.lock_owner is None:
+                            raise JobNotLockedError()
 
-                    if j1.lock_owner != job.lock_owner:
-                        raise JobNotOwnedError()
+                        if j1.lock_owner != job.lock_owner:
+                            raise JobNotOwnedError()
 
-                    job.lock = None
-                    job.lock_owner = None
-                    session.merge(job)
+                        job.lock = None
+                        job.lock_owner = None
+                        session.merge(job)
+
+                    except Exception as e:
+                        failures.append((job, e))
 
                 session.commit()
+
+            if failures:
+                not_locked = sum(
+                    isinstance(e, JobNotLockedError)
+                    for _, e in failures
+                )
+                not_owned = sum(
+                    isinstance(e, JobNotOwnedError)
+                    for _, e in failures
+                )
+
+                raise JobUnlockError(
+                    f"{len(failures)} jobs failed to unlock: "
+                    f"{not_locked} not locked, "
+                    f"{not_owned} not owned."
+                )
 
     def clear_locks(self, jobs=None):
         if jobs is None:
@@ -432,65 +516,83 @@ class JobManager:
             session.commit()
 
         if n != len(job_ids):
-            raise JobLockedError()
+            raise JobNotDeletedError()
 
     @contextmanager
     def locked(self, jobs, count=None, owner=None):
-        """Context Manager to grant exclusive access to one or more
-        Jobs.  Job records are marked as locked, and this process may
-        freely work on the jobs and alter the job data.  When execution
-        leaves the context, the Jobs will be marked as unlocked.  Note
-        the _database_ is only explicitly locked while this lock is
-        being acquired and released.  In between, other entities can
-        do other database stuff.
+        """Context manager to grant exclusive access to one or more Jobs.
+        Jobs are selected and locked atomically by ``self.lock()``. Jobs that are
+        already locked by another process are skipped. The locked Job objects are
+        yielded to the caller, and are automatically unlocked when execution leaves
+        the context.
+
+        The database is only explicitly locked while the Jobs are being acquired
+        and released. Between acquisition and release, other entities may freely
+        access the database.
 
         Args:
-          job (int, Job, or list): The Job to lock, or list of Jobs
-            from which to try to draw lockable ones.
-          count (int, None): The number of jobs to lock.  If specified
-            as an integer, a list of up to that many jobs will be
-            yielded.  If None, then a single job will be locked and
-            yielded directly (if possible), otherwise None is yielded.
-          owner (str): Override lock_owner string.
+            jobs (int, Job, or list): A Job ID, Job object, or a list of Job IDs
+                and/or Job objects from which to try to draw lockable Jobs.
+
+            count (int, None): The maximum number of Jobs to lock. If specified,
+                up to ``count`` unlocked Jobs will be yielded as a list. If None,
+                at most one Job will be locked and yielded directly. For a scalar
+                ``jobs`` input, a single Job is returned (or None if it could not
+                be locked). For a list input with ``count=None``, a single Job is
+                also yielded directly.
+
+            owner (str, None): Override the ``lock_owner`` value used when locking
+                the Jobs. If None, an owner string is generated automatically.
+
+        Yields:
+            Job, list of Job, or None:
+                If ``count`` is None, a single Job is yielded if one could be
+                locked, otherwise None.
+
+                If ``count`` is specified, a list containing up to ``count`` Jobs
+                is yielded. Jobs that are already locked by another process are
+                skipped.
 
         Notes:
-          If the job argument is a list, the function will try to
-          yield one of the jobs from the list, skipping any that are
-          locked by another session.  If no unlocked jobs are
-          available, the usual exception will be raised or else a None
-          yielded, as per none_if_locked argument.
-
+            If ``jobs`` is a list, Jobs are considered in the order provided.
+            Only unlocked Jobs are selected. Lock acquisition is performed by
+            ``self.lock()`` using a single database transaction, so concurrent
+            callers can safely compete for Jobs without acquiring the same Job.
+            All Jobs successfully locked by this context manager are automatically
+            unlocked when execution leaves the context, including when an exception
+            is raised inside the context.
         """
         if owner is None:
             owner = self._lockstr()
 
-        if isinstance(jobs, (int, Job)):
+        single_input = isinstance(jobs, (int, Job))
+
+        if single_input:
             jobs = [jobs]
 
-        job_ids = [j.id if isinstance(j, Job) else j for j in jobs]
+        job_ids = [
+            job.id if isinstance(job, Job) else job
+            for job in jobs
+        ]
 
+        limit = 1 if count is None else count
         locked = []
 
         try:
-            with self.session_scope() as session:
-                unlocked_ids = {
-                    j.id for j in session.query(Job.id)
-                    .filter(Job.id.in_(job_ids), Job.lock == None)
-                }
+            locked = self.lock(
+                job_ids,
+                owner=owner,
+                force=False,
+                count=limit,
+            )
 
-            selected = []
-            limit = count if count is not None else 1
+            if isinstance(locked, Job):
+                locked = [locked]
 
-            for jid in job_ids:
-                if jid in unlocked_ids:
-                    selected.append(jid)
-                if len(selected) >= limit:
-                    break
-
-            if selected:
-                locked = self.lock(selected, owner=owner)
-
-            yield locked
+            if count is None:
+                yield locked[0] if locked else None
+            else:
+                yield locked
 
         finally:
             if locked:
