@@ -201,7 +201,7 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
             except AttributeError as e:
                 print("Focal Plane object has no attribute \'xe_fit_err\'. Will apply default zeros.")
                 tot_xe = np.zeros_like(weights)
-            tot_xe_err.append(tot_xe)               
+            tot_xe_err.append(tot_xe)
             data = ufm.avg_fp if which_data == "raw" else ufm.transformed
             obs_dets_fits.append(data)
             obs_index.append(np.repeat(i, len(ufm.weights)))
@@ -232,14 +232,14 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     #obs_index needs to be last or change index on culling/sizing masks below.
     # det_ids also needs to be 5th, or change index on ds_det_ids below
     data_group = [obs_dets_fits, det_boresight, weights_dets,
-                  all_nom_det_array, tot_xe_err, all_det_ids, 
+                  all_nom_det_array, tot_xe_err, all_det_ids,
                   ot_list, obs_index] #obs_index needs to be last.
-    
+
     weights_dets[weights_dets < config.get("weight_cutoff")] = 0.0
     obs_dets_fits[np.where(weights_dets == 0)] = np.nan
     obs_dets_fits[np.where(tot_xe_err > config.get("xe_fit_max_cutoff", 12))] = np.nan
-    #mask = ~np.isnan(weights_dets)  
-    mask = ~np.isnan(obs_dets_fits[:,0]) # won't plot excluded dets with bad pointing fits 
+    #mask = ~np.isnan(weights_dets)
+    mask = ~np.isnan(obs_dets_fits[:,0]) # won't plot excluded dets with bad pointing fits
     if not no_downsample:
         # Reduce detector counts for computation
         if band is not None:
@@ -263,7 +263,7 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     ds_det_ids = data_group[5]
     det_ufm = np.array([d.decode('utf-8').split('_')[0].lower() for d in ds_det_ids])
     det_wafer = np.array([ufm_list.index(d) for d in det_ufm])
-    
+
     return (filelist, *data_group, det_ufm, det_wafer)
 
 
@@ -342,10 +342,10 @@ def build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample
             [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
             (1, "samps")],
         )
-        aman.wrap("radial", np.sqrt(aman.nominal_xieta_locs[0] ** 2 
+        aman.wrap("radial", np.sqrt(aman.nominal_xieta_locs[0] ** 2
                                     + aman.nominal_xieta_locs[1] ** 2) / DEG,[(0, "samps")])
         aman.wrap("det_ufm", det_ufm, [(0, "samps")])
-        aman.wrap("det_wafer", det_wafer, [(0, "samps")]) 
+        aman.wrap("det_wafer", det_wafer, [(0, "samps")])
         aman.wrap("weights", weights_dets, [(0, "samps")])
         aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
         aman.wrap("obs_index", obs_index, [(0, "samps")])
@@ -604,13 +604,6 @@ def get_full_correlation_matrix(lmfit_result, epoch_params):
 def analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, params):
     full_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=False, return_all_dets=True)
     ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
-    #xi_nom, eta_nom = full_aman.nominal_xieta_locs[0], full_aman.nominal_xieta_locs[1]
-    #full_aman.wrap("radial", np.sqrt(xi_nom ** 2 + eta_nom ** 2) / DEG, [(0, "samps")])
-    #det_ufms = np.array([d.decode('utf-8').split('_')[0].lower() for d in full_aman.det_ids])
-    #full_aman.wrap("det_ufm", det_ufms, [(0, "samps")])
-    #full_aman.wrap("det_wafer", 
-    #               np.array([ufm_list.index(d) for d in det_ufms]),
-    #               [(0, "samps")])
     # Apply model to data.
     xieta_model = config.get("xieta_model", "measured")
     (full_modeled, full_residuals, rms, _ 
@@ -779,7 +772,7 @@ def main(config_path: str):
         logger.info("Will test initial_parameters against pointing data.")
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
-            fpt_timestamp = epoch["fp_template_timestamp"]    
+            fpt_timestamp = epoch["fp_template_timestamp"]
             test_params, epochs = _init_fit_params(config, epochs)
             logger.info("Using these parameters to test pointing: ")
             for p in test_params:
@@ -1021,7 +1014,7 @@ def main(config_path: str):
                 logger.info("Mean & Median masked resid %f, %f arcmin" %(np.nanmean(fit_residuals_i1), np.nanmedian(fit_residuals_i1)))
                 epoch["solver_aman"].weights[bad_fit_inds] = 0.0
             epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
-            
+
         if tot_bad == 0:
             logger.info("No bad points found so not running second fit!")
     if tot_bad > 0:
@@ -1179,7 +1172,7 @@ def main(config_path: str):
             test_params = epoch["solver_aman"].pointing_model
             if "ot_float_aman" in epoch["solver_aman"]._assignments:
                 test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
-                
+
             full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
@@ -2323,8 +2316,7 @@ class ModelFitsPlotter:
         plt.grid(False) # Grid usually looks messy on masked heatmaps
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_correlation_matrix{tag}.png", dpi=350)
-            plt.close()    
-
+            plt.close()
 
 ############
 

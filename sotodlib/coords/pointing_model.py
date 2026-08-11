@@ -397,7 +397,7 @@ def model_sat_v2(params, az, el, roll):
     az_orig = az.copy()
 
     # Construct offsetted encoders.
-    az = az + params['enc_offset_az']  
+    az = az + params['enc_offset_az']
     el = el + params['enc_offset_el']
     roll = roll - params['enc_offset_boresight']
 

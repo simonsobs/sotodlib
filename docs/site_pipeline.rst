@@ -1088,10 +1088,10 @@ The first block are mandatory entries. The second block are optional.
     # Create optional expression definitions if parameters are correlated.
     # Note, independent params are given epoch's name as suffix inside code.
     epochs:
-      - begin_timerange: 1700000000 
-        end_timerange: 1770569999 
+      - begin_timerange: 1700000000
+        end_timerange: 1770569999
         fp_template_timestamp: 1750000000 # determine correct val with ffp_path's .h5
-        name: satp2_epoch_1  
+        name: satp2_epoch_1
         indep_list: ['enc_offset_az']  #optional
       - begin_timerange: 1770570000
         end_timerange: 2000000000
@@ -1099,20 +1099,20 @@ The first block are mandatory entries. The second block are optional.
         name: satp2_epoch_2  #
         indep_list: ['enc_offset_az'] #optional
         param_expr:
-          enc_offset_az_satp2_epoch_2: 'enc_offset_az_satp2_epoch_1 + radians(3.86)' 
+          enc_offset_az_satp2_epoch_2: 'enc_offset_az_satp2_epoch_1 + radians(3.86)'
 
     # Optional configuration parameters
-    
+
     # Any additional tag to append on results directory as subfolder
     append: ""
     save_output: True  # Save fit info to an h5 file. Save model as db.sqlite.
-    # Exclude full or partial timestamps in obs_ids e.g. bad PWV or bad timing. 
+    # Exclude full or partial timestamps in obs_ids e.g. bad PWV or bad timing.
     skip_tags:
       - "_1713" #bad timing satp1
       - "1716423951" #Just a very bad fit satp1
 
     # Select some subset of the observations. Indexes on obs in per_obs focal_plane.h5
-    use_these_files:   #{None or list e.g. [0,1,18,20,21,22,30]} 
+    use_these_files:   #{None or list e.g. [0,1,18,20,21,22,30]}
     # Select parameters to fix in the minimization routine.
     # See comments for which to fix for different SAT platforms.
     fixed_params:
@@ -1127,7 +1127,7 @@ The first block are mandatory entries. The second block are optional.
     # If not specified, defaults from coords/pointing_model.py..
     initial_params:
       enc_offset_az: -0.06 # (radians)
-      enc_offset_el:  0.001 
+      enc_offset_el:  0.001
 
     just_test_params: False  #If True, makes analysis plots with initial_params
     # "xieta_model" decides which parameter space the fitting occurs in.
@@ -1142,14 +1142,14 @@ The first block are mandatory entries. The second block are optional.
     # Each method gives slightly different results. "measured" is default. "template" is friendlier with some plotting methods.
     xieta_model: measured # {template, measured}
     # Specify preferred lmfit method. Friendly with most options. Defaults to leastsq
-    fit_method: leastsq  
-    second_fit_method:   #For iterated fits. Default same as fit_method. 
-    # Specify choice of data to use in fitter. 
+    fit_method: leastsq
+    second_fit_method:   #For iterated fits. Default same as fit_method.
+    # Specify choice of data to use in fitter.
     # "detector":
     # "ufm_center": avgd ufm center location (as solved from per-obs finalize_focal_plane)
     fit_type: detector # {detector, ufm_center}
-    # Define a weight cutoff for fitting routine. 
-    # typical per-detector cutoff is above 0.97-0.98 for SAT 
+    # Define a weight cutoff for fitting routine.
+    # typical per-detector cutoff is above 0.97-0.98 for SAT
     # typical per-obs cutoff 0.2 for SAT
     weight_cutoff: 0.97
 
@@ -1159,7 +1159,7 @@ The first block are mandatory entries. The second block are optional.
     cull_dets:  # Select downsample factor. Default None
     # Define xieta fit error cutoff for fitting routine. (In arc seconds)
     # If xieta fit errors not in input data, XE errs are set to 0, and no data is cut here.
-    xe_fit_max_cutoff: 12   # Default=12. 
+    xe_fit_max_cutoff: 12   # Default=12.
     # Select data type to use as pointing data. (for per-detector fits)
     # "ffp" - takes focal planes fitted/shifted/stretched to match moon/planet observations
     # "raw" - takes raw moon/planet detector fits.
@@ -1174,15 +1174,12 @@ The first block are mandatory entries. The second block are optional.
     iterate_cutoff: None # or arcmin
 
     # Diagnostic Plotting Options
-    make_plots: True 
+    make_plots: True
     plotlims: 25  # will set plot lims in arcmin on some diagnostic plots.
     # Full analysis plots loads all dets from non skipped obs that pass weight/xi-eta error cuts.
-    # Only ignores downsampling, band selection, wafer selections. 
+    # Only ignores downsampling, band selection, wafer selections.
     # Averages residuals per wafer and per observation.
-    make_full_analysis_plots: True 
-    
-
-
+    make_full_analysis_plots: True
 
 
 Output file format
