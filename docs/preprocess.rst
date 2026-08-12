@@ -59,8 +59,6 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.load_and_preprocess
 
-.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess
-
 .. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess_sim
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.preproc_or_load_group
@@ -160,13 +158,13 @@ processing pipeline would look like::
           process:
             method: "linear"
             count: 10
-        
+
         - name: "calibrate"
           process:
             kind: "single_value"
             ## phase_to_pA: 9e6/(2*np.pi)
             val: 1432394.4878270582
-        
+
         - name: "psd"
           process:
             detrend: False

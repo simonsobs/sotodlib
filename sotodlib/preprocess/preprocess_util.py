@@ -471,54 +471,29 @@ def swap_archive(config, fpath):
     return tc
 
 
-def load_preprocess_det_select(obs_id, configs, context=None,
-                               dets=None, meta=None, logger=None):
-    """Loads the metadata information for the Observation and runs through any
-    data selection specified by the Preprocessing Pipeline.
-
-    Arguments
-    ----------
-    obs_id : multiple
-        Passed to `context.get_obs` to load AxisManager, see Notes for
-        `context.get_obs`
-    configs : string or dictionary
-        Config file or loaded config directory
-    context : core.Context
-        The Context file to use.
-    dets : dict
-        Dets to restrict on from info in det_info. See context.get_meta.
-    meta : AxisManager
-        Contains supporting metadata to use for loading.
-        Can be pre-restricted in any way. See context.get_meta.
-    logger : PythonLogger
-        Optional. Logger object.  If None, a new logger
-        is created.
-
-    Returns
-    -------
-    list
-        Restricted list of detector vals.
+def load_and_preprocess_det_select(meta, pipe):
     """
+    Helper function to accumulate det selections from a preprocessing pipeline.
+    """
+    if (
+        'valid_data' in meta.preprocess and
+        isinstance(meta.preprocess.valid_data, core.AxisManager)
+       ):
+        keep_all = has_any_cuts(meta.preprocess.valid_data.valid_data)
+    else:
+      keep_all = np.ones(meta.dets.count,dtype=bool)
+      for process in pipe[:]:
+          keep = process.select(meta, in_place=False)
+          if isinstance(keep, np.ndarray):
+              keep_all &= keep
 
-    if logger is None:
-        logger = init_logger("preprocess")
-
-    configs, context = get_preprocess_context(configs, context)
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-
-    if meta is None:
-        meta = context.get_meta(obs_id, dets=dets)
-    logger.info("Restricting detectors on all processes")
-    keep_all = np.ones(meta.dets.count,dtype=bool)
-    for process in pipe[:]:
-        keep = process.select(meta, in_place=False)
-        if isinstance(keep, np.ndarray):
-            keep_all &= keep
-    return meta.dets.vals[keep_all]
+    return keep_all
 
 
-def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None, logger=None, return_full_aman=False):
+def load_and_preprocess(obs_id, configs_init, configs_proc=None, context=None,
+                        dets=None, meta=None, no_signal=None, logger=None,
+                        return_full_aman=False, init_only=False,
+                        ignore_cfg_check=False, stop_for_sims=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -548,6 +523,16 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     return_full_aman : bool
         Optional. Return unrestricted axis manager alongside restricted aman
         if True, otherwise return None.
+    init_only : bool
+        Optional. Whether or not to run the dependent pipeline.
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as
+        the config used to create the existing init db.
+    stop_for_sims: bool
+        Optinal. If True, will stop before each step of the pipeline
+        with the flag `use_data_aman` set to True. The intended use is
+        to prepare all necessary data products that cannot be stored in
+        the preprocessing database, to process simulations.
 
     Returns
     -------
@@ -563,94 +548,57 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     if logger is None:
         logger = init_logger("preprocess")
 
-    configs, context = get_preprocess_context(configs, context)
-    meta = context.get_meta(obs_id, dets=dets, meta=meta)
+    configs_init, context_init = get_preprocess_context(configs_init)
+    meta_init = context_init.get_meta(obs_id, dets=dets, meta=meta)
+    group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
+
+    if meta_init.dets.count == 0:
+        logger.warn(f"No detectors in init db for obs {obs_id}")
+        return None
 
     if return_full_aman:
-        full_aman = meta.preprocess.copy()
+        full_aman = meta_init.preprocess.copy()
     else:
         full_aman = None
 
-    if (
-        'valid_data' in meta.preprocess and
-        isinstance(meta.preprocess.valid_data, core.AxisManager)
-       ):
-        keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
-        meta.restrict("dets", keep)
-    else:
-        det_vals = load_preprocess_det_select(obs_id, configs=configs, context=context,
-                                              dets=dets, meta=meta, logger=logger)
-        meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
+    if configs_proc is not None:
+        configs_proc, context_proc = get_preprocess_context(configs_proc)
+        meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
+        group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
 
-    if meta.dets.count == 0:
-        logger.info(f"No detectors left after cuts in obs {obs_id}")
-        return None
-    else:
-        pipe = Pipeline(configs["process_pipe"], logger=logger)
-        aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess, select=False)
-        return aman, full_aman
+        if (group_by_init != group_by_proc).any():
+            raise ValueError('init and proc groups do not match')
 
+        if meta_proc.dets.count == 0:
+            logger.warn(f"No detectors in proc db for obs {obs_id}")
+            return None
 
-def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
-                                   dets=None, meta=None, no_signal=None,
-                                   logger=None, init_only=False,
-                                   ignore_cfg_check=False,
-                                   stop_for_sims=False):
-    """Loads the saved information from the preprocessing pipeline from a
-    reference and a dependent database and runs the processing section of
-    the pipeline for each.
+        if return_full_aman:
+            if 'valid_data' in full_aman:
+                full_aman.move('valid_data', None)
+            full_aman.merge(meta_proc.preprocess.copy())
 
-    Assumes preprocess_tod and multilayer_preprocess_tod have already been run
-    on the requested observation.
+    pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
+    if configs_proc is not None and not ignore_cfg_check:
+        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+        cfg_check = check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                                    logger=logger)
+        if not cfg_check:
+            raise ValueError('Dependency check between configs failed.')
 
-    Arguments
-    ----------
-    obs_id : multiple
-        Passed to `context.get_obs` to load AxisManager, see Notes for
-        `context.get_obs`
-    configs_init : string or dictionary
-        Config file or loaded config directory
-    configs_proc : string or dictionary
-        Second config file or loaded config dictionary to load
-        dependent databases generated using multilayer_preprocess_tod.py.
-    dets : dict
-        Dets to restrict on from info in det_info. See context.get_meta.
-    meta : AxisManager
-        Contains supporting metadata to use for loading.
-        Can be pre-restricted in any way. See context.get_meta.
-    no_signal : bool
-        If True, signal will be set to None.
-        This is a way to get the axes and pointing info without
-        the (large) TOD blob.  Not all loaders may support this.
-    logger : PythonLogger
-        Optional. Logger object or None will generate a new one.
-    init_only : bool
-        Optional. If True, do not run the dependent pipeline.
-    ignore_cfg_check : bool
-        If True, do not attempt to validate that configs_init is the same as
-        the config used to create the existing init db.
-    stop_for_sims: bool
-        Optinal. If True, will stop before each step of the pipeline
-        with the flag `use_data_aman` set to True. The intended use is
-        to prepare all necessary data products that cannot be stored in
-        the preprocessing database, to process simulations.
+    logger.info("Restricting detectors on all init pipeline processes")
+    keep_all = load_and_preprocess_det_select(meta_init, pipe_init)
+    meta_init.restrict("dets", meta_init.dets.vals[keep_all])
 
-    Returns
-    -------
-    aman : core.AxisManager or None
-        Loaded and restricted axis manager with preprocessing metadata. Returns
-        ``None`` if all detectors cut.
-    """
+    if configs_proc is not None:
+        meta_proc.restrict("dets", meta_init.dets.vals)
 
-    if logger is None:
-        logger = init_logger("preprocess")
+        pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+        logger.info("Restricting detectors on all proc pipeline processes")
+        keep_all = load_and_preprocess_det_select(meta_proc, pipe_proc)
 
-    configs_init, context_init = get_preprocess_context(configs_init)
-    meta_init = context_init.get_meta(obs_id, dets=dets, meta=meta)
-
-    configs_proc, context_proc = get_preprocess_context(configs_proc)
-    meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
+        meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
+        meta_init.restrict('dets', meta_proc.dets.vals)
 
     # Count number of stops
     if stop_for_sims:
@@ -667,99 +615,47 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             "of the data AxisManager with a higher memory usage."
         )
 
-    group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
-    group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
-
-    if (group_by_init != group_by_proc).any():
-        raise ValueError('init and proc groups do not match')
-
-    if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
-        logger.info(f"No detectors in obs {obs_id}")
-        return None
+    aman = context_init.get_obs(meta_init, no_signal=no_signal)
+    logger.info("Running initial pipeline")
+    if stop_for_sims:
+        out_amans_init = run_pipeline_stepgroups(
+            pipe_init,
+            aman,
+            run_last_step=not(init_only)
+        )
+        if init_only:
+            return out_amans_init, full_aman
     else:
-        pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
+        pipe_init.run(aman, aman.preprocess, select=False)
+        if init_only:
+            return aman, full_aman
 
-        if not ignore_cfg_check:
-            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+    if configs_proc is not None:
+        logger.info("Running dependent pipeline")
 
-        if (
-            ignore_cfg_check or
-            check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
-                           logger=logger)
-        ):
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+        if stop_for_sims:
+            aman = out_amans_init[(len(pipe_init), 'last')]
 
-            logger.info("Restricting detectors on all init pipeline processes")
-            if (
-                'valid_data' in meta_init.preprocess and
-                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
-               ):
-                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
-            else:
-              keep_all = np.ones(meta_init.dets.count,dtype=bool)
-              for process in pipe_init[:]:
-                  keep = process.select(meta_init, in_place=False)
-                  if isinstance(keep, np.ndarray):
-                      keep_all &= keep
-            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
-            meta_proc.restrict("dets", meta_init.dets.vals)
+        if 'valid_data' in aman.preprocess:
+            aman.preprocess.move('valid_data', None)
 
-            logger.info("Restricting detectors on all proc pipeline processes")
-            if (
-                'valid_data' in meta_proc.preprocess and
-                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
-               ):
-                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
-            else:
-                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-                for process in pipe_proc[:]:
-                    keep = process.select(meta_proc, in_place=False)
-                    if isinstance(keep, np.ndarray):
-                        keep_all &= keep
+        aman.preprocess.merge(meta_proc.preprocess)
 
-            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
-            meta_init.restrict('dets', meta_proc.dets.vals)
-
-            aman = context_init.get_obs(meta_init, no_signal=no_signal)
-            logger.info("Running initial pipeline")
-            if stop_for_sims:
-                out_amans_init = run_pipeline_stepgroups(
-                    pipe_init,
-                    aman,
-                    run_last_step=not(init_only)
-                )
-                if init_only:
-                    return out_amans_init
-            else:
-                pipe_init.run(aman, aman.preprocess, select=False)
-                if init_only:
-                    return aman
-
-            logger.info("Running dependent pipeline")
-
-            if stop_for_sims:
-                aman = out_amans_init[(len(pipe_init), 'last')]
-            proc_aman = context_proc.get_meta(obs_id, meta=aman)
-
-            if 'valid_data' in aman.preprocess:
-                aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(proc_aman.preprocess)
-            if stop_for_sims:
-                out_amans = run_pipeline_stepgroups(
-                    pipe_proc,
-                    out_amans_init[(len(pipe_init), 'last')],
-                )
-                out_amans.update({
-                    (step, name): out_amans_init[(step, name)]
-                    for (step, name) in out_amans_init
-                    if name != 'last'
-                })
-                return out_amans
-            else:
-                pipe_proc.run(aman, aman.preprocess, select=False)
-                return aman
+        if stop_for_sims:
+            out_amans = run_pipeline_stepgroups(
+                pipe_proc,
+                out_amans_init[(len(pipe_init), 'last')],
+            )
+            out_amans.update({
+                (step, name): out_amans_init[(step, name)]
+                for (step, name) in out_amans_init
+                if name != 'last'
+            })
+            return out_amans, full_aman
         else:
-            raise ValueError('Dependency check between configs failed.')
+            pipe_proc.run(aman, aman.preprocess, select=False)
+
+    return aman, full_aman
 
 
 def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
@@ -883,90 +779,66 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         raise ValueError('init and proc groups do not match')
 
     if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
-        logger.info(f"No detectors in obs {obs_id}")
+        logger.warn(f"No detectors in obs {obs_id}")
         return None
-    else:
-        pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
 
-        if not ignore_cfg_check:
-            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+    pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
+    aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if ignore_cfg_check or check_cfg_match(
-            aman_cfgs_ref,
-            meta_proc.preprocess['pcfg_ref'],
-            logger=logger):
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+    if (
+        ignore_cfg_check or
+        check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                        logger=logger)
+    ):
+        pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
-            logger.info("Restricting detectors on all init pipeline processes")
-            if (
-                'valid_data' in meta_init.preprocess and
-                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
-               ):
-                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
-            else:
-              keep_all = np.ones(meta_init.dets.count,dtype=bool)
-              for process in pipe_init[:]:
-                  keep = process.select(meta_init, in_place=False)
-                  if isinstance(keep, np.ndarray):
-                      keep_all &= keep
-            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
-            meta_proc.restrict("dets", meta_init.dets.vals)
+        logger.info("Restricting detectors on all init pipeline processes")
+        keep_all = load_and_preprocess_det_select(meta_init, pipe_init)
+        meta_init.restrict("dets", meta_init.dets.vals[keep_all])
+        meta_proc.restrict("dets", meta_init.dets.vals)
 
-            logger.info("Restricting detectors on all proc pipeline processes")
-            if (
-                'valid_data' in meta_proc.preprocess and
-                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
-               ):
-                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
-            else:
-                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-                for process in pipe_proc[:]:
-                    keep = process.select(meta_proc, in_place=False)
-                    if isinstance(keep, np.ndarray):
-                        keep_all &= keep
+        logger.info("Restricting detectors on all proc pipeline processes")
+        keep_all = load_and_preprocess_det_select(meta_proc, pipe_proc)
 
-            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
-            meta_init.restrict('dets', meta_proc.dets.vals)
+        meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
+        meta_init.restrict('dets', meta_proc.dets.vals)
 
-            aman = context_init.get_obs(meta_proc, no_signal=True)
-
-            # One needs to correct pointing, HWP model and gamma
-            # before loading in the simulated map
-            pointing_model.apply_pointing_model(aman)
-            aman = hwp_angle_model.apply_hwp_angle_model(aman)
-            if "wiregrid_cal" in aman.det_info:
-                logger.info(f"gamma from wiregrid_cal")
-                aman.move(
-                    name="det_info.wiregrid_cal.gamma",
-                    new_name="focal_plane.gamma"
-                )
-            logger.info("Reading in simulated map")
-            if apply_wobble and ("wobble_params" in aman):
-                logger.info("Apply pointing wobble")
-                sight = get_deflected_sightline(aman)
-            else:
-                sight = None
-            aman.move("signal", None)
-
-            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True,
-                              interpol=interpol, sight=sight)
-
-            logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess, sim=True)
-
-            if init_only:
-                return aman
-
-            logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=aman)
-            if 'valid_data' in aman.preprocess:
-                aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(proc_aman.preprocess)
-            pipe_proc.run(aman, aman.preprocess, sim=True, data_amans=data_amans)
-
-            return aman
+        aman = context_init.get_obs(meta_proc, no_signal=True)
+        pointing_model.apply_pointing_model(aman)
+        aman = hwp_angle_model.apply_hwp_angle_model(aman)
+        if "wiregrid_cal" in aman.det_info:
+            logger.info(f"gamma from wiregrid_cal")
+            aman.move(
+                name="det_info.wiregrid_cal.gamma",
+                new_name="focal_plane.gamma"
+            )
+        logger.info("Reading in simulated map")
+        if apply_wobble and ("wobble_params" in aman):
+            logger.info("Apply pointing wobble")
+            sight = get_deflected_sightline(aman)
         else:
-            raise ValueError('Dependency check between configs failed.')
+            sight = None
+        aman.move("signal", None)
+
+        logger.info("Reading in simulated map")
+        demod_mm.from_map(aman, sim_map, wrap=True, modulated=True)
+
+        logger.info("Running initial pipeline")
+        pipe_init.run(aman, aman.preprocess, sim=True)
+
+        if init_only:
+            return aman
+
+        logger.info("Running dependent pipeline")
+        proc_aman = context_proc.get_meta(obs_id, meta=aman)
+        if 'valid_data' in aman.preprocess:
+            aman.preprocess.move('valid_data', None)
+        aman.preprocess.merge(proc_aman.preprocess)
+        pipe_proc.run(aman, aman.preprocess, sim=True, data_amans=data_amans)
+
+        return aman
+    else:
+        raise ValueError('Dependency check between configs failed.')
 
 
 def find_db(obs_id, configs, dets, context=None, logger=None):
@@ -1254,7 +1126,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          save_proc_aman=True, compress=False,
                          skip_missing=False, ignore_cfg_check=False):
     """
-    This function is expected to receive a single obs_id, and dets dictionary.
+    This is the main driver function for preprocessing a single obs_id and dets pair
+    for single or two layers. It expects to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
     config files. It accepts either one or two config strings or dicts representing
     an initial and a dependent pipeline stage. If the preprocess database entry for
@@ -1402,7 +1275,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 else:
                     return_full_aman = False
                 logger.info(f"Loading and applying preprocessing for initial layer db on {obs_id}:{group}")
-                aman, proc_aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
+                aman, proc_aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
                                                       logger=logger, return_full_aman=return_full_aman)
             except Exception as e:
                 errmsg, tb = PreprocessErrors.get_errors(e)
@@ -1418,9 +1291,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         elif db_init_exist and db_proc_exist:
             try:
                 logger.info(f"Loading and applying preprocessing for both dbs on {obs_id}:{group}")
-                aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger,
-                                                      ignore_cfg_check=ignore_cfg_check)
+                aman, _ = load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
+                                              configs_proc=configs_proc, logger=logger,
+                                              ignore_cfg_check=ignore_cfg_check)
                 logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
                 return aman, None, None, (PreprocessErrors.LoadSuccess, None, None)
             except Exception as e:
