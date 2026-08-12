@@ -186,10 +186,10 @@ class SimMuMUXCrosstalk(Operator):
                 jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
                 jf.run_optics(jsim)
                 jf.run_bolos(jsim)
-                P_opts[band] = jsim['outputs'][jbolo_channel]['P_opt'] # W
-                P_atm_refs[band] = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
-                efficiencies[band] = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
-                P_sats[band] = jsim['outputs'][jbolo_channel]['P_sat'] # W
+                P_opts[band] = float(jsim['outputs'][jbolo_channel]['P_opt']) # W
+                P_atm_refs[band] = float(jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt']) # W
+                efficiencies[band] = float(jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg'])
+                P_sats[band] = float(jsim['outputs'][jbolo_channel]['P_sat']) # W
 
             # Pull from cached values
             P_opt = P_opts[band]
