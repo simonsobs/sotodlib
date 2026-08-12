@@ -661,7 +661,8 @@ def get_psd_mask(aman, psd_mask=None, f=None,
         psd_mask = psd_mask.mask()
 
     if mask_hwpss:
-        hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
+        if hwp_freq is None:
+            hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
         psd_mask = psd_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
     if mask_peak:
         psd_mask = psd_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
@@ -1091,6 +1092,7 @@ def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0
         mask: Boolean array to mask frequency and power of the given PSD. 
             True in this array stands for the index of hwpss to mask.
     """
+    hwp_freq = np.abs(hwp_freq)
     if isinstance(width, (float, int)):
         width_minus = -width/2
         width_plus = width/2
