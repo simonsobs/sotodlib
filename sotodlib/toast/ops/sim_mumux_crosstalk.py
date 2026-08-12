@@ -202,6 +202,7 @@ class SimMuMUXCrosstalk(Operator):
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
             R_TES = R_FRAC * R_BOLO
+            assert P_sat > P_opt # Check for saturated detectors
             I_TES = np.sqrt((P_sat - P_opt) / R_TES)
             dIdP = -1 / (I_TES * (R_TES - R_SHUNT))  # W -> A
             dPhi0dI = 1 / 9e-6  # A -> [rad]
