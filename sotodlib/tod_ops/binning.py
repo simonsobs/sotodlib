@@ -17,7 +17,8 @@ def bin_signal(aman, bin_by, signal=None,
         The array by which signal is binned. It should has the same samps as aman.
     signal : str or array-like optional
         signal to be binned or its name. Defaults to aman.signal if not specified.
-        Either 1D array of shape ``(samps,)`` or 2D array of shape ``(dets, samps)``.
+        Either 1D array or 2D array with shape ``(nsamps)`` or``(dets, nsamps)``,
+        where nsamps is length of bin_by.
     range : list or None
         A list specifying the bin range ([min, max]). Default is None, which means bin range
         is set to [min(bin_by), max(bin_by)].
@@ -50,17 +51,16 @@ def bin_signal(aman, bin_by, signal=None,
 
     if signal.ndim not in [1, 2]:
         raise ValueError(
-            f"signal must be 1D (samps,) or 2D (dets, samps); got ndim={signal.ndim}")
+            f"signal must be 1D or 2D; got ndim={signal.ndim}")
     is_1d = signal.ndim == 1
     signal = np.atleast_2d(signal)
     ndets = signal.shape[0]
 
-    if signal.shape[-1] != aman.samps.count:
-        raise ValueError(
-            f"signal last axis ({signal.shape[-1]}) does not match "
-            f"aman.samps.count ({aman.samps.count})")
-
     bin_by = np.asarray(bin_by)
+    nsamps = len(bin_by)
+
+    if signal.shape[-1] != nsamps:
+        raise ValueError("signal shape does not match bin_by")
 
     if range is None:
         range = (np.nanmin(bin_by), np.nanmax(bin_by))
@@ -85,34 +85,29 @@ def bin_signal(aman, bin_by, signal=None,
     )
 
     if flags is None:
-        mask = np.broadcast_to(base_valid, (ndets, aman.samps.count))
+        mask = np.broadcast_to(base_valid, (ndets, nsamps))
     else:
         if isinstance(flags, str):
             flags = aman.flags.get(flags)
-        if (not is_1d) and flags.shape == (aman.dets.count, aman.samps.count):
+        if (not is_1d) and flags.shape == (aman.dets.count, nsamps):
             mask = base_valid[None, :] & ~flags.mask()
-        elif flags.shape == (aman.samps.count, ):
+        elif flags.shape == (nsamps, ):
             mask = np.broadcast_to(base_valid & ~flags.mask(),
-                                   (ndets, aman.samps.count))
+                                   (ndets, nsamps))
         else:
-            raise ValueError('flags should have shape of (`dets`, `samps`) or (`samps`,)')
+            raise ValueError('shape of flags does not match')
 
     if weight_for_signal is None:
-        weight_for_signal = np.ones(aman.samps.count, signal_dtype)
+        weight_for_signal = np.ones(nsamps, signal_dtype)
     weight_for_signal = np.asarray(weight_for_signal)
 
-    if is_1d:
-        if weight_for_signal.shape != (aman.samps.count,):
-            raise ValueError(
-                'weight_for_signal should have shape of (`samps`,) when signal is 1D')
-        weights = np.atleast_2d(weight_for_signal)
-    elif weight_for_signal.shape == (aman.dets.count, aman.samps.count):
+    if (not is_1d) and weight_for_signal.shape == (aman.dets.count, nsamps):
         weights = weight_for_signal
-    elif weight_for_signal.shape == (aman.samps.count, ):
+    elif weight_for_signal.shape == (nsamps, ):
         weights = np.broadcast_to(weight_for_signal,
-                                  (ndets, aman.samps.count))
+                                  (ndets, nsamps))
     else:
-        raise ValueError('weight_for_signal should have shape of (`dets`, `samps`) or (`samps`,)')
+        raise ValueError('shape of weight_for_signal does not match')
 
     # prepare binned signal array
     binned_signal = np.full([ndets, nbins], np.nan, signal_dtype)
@@ -127,14 +122,14 @@ def bin_signal(aman, bin_by, signal=None,
         bin_counts[i] = np.bincount(bin_indices[m], weights=w[m], minlength=nbins)
         mcnts = bin_counts[i] > 0
         binned_signal[i][mcnts] = np.bincount(
-            bin_indices[m], weights=signal[i][m]*w[m], minlength=nbins
-        )[mcnts]/bin_counts[i][mcnts]
+            bin_indices[m], weights=signal[i][m] * w[m], minlength=nbins
+        )[mcnts] / bin_counts[i][mcnts]
         binned_signal_squared_mean[i][mcnts] = np.bincount(
-            bin_indices[m], weights=(signal[i][m]*w[m])**2, minlength=nbins
-        )[mcnts]/bin_counts[i][mcnts]
+            bin_indices[m], weights=(signal[i][m] * w[m])**2, minlength=nbins
+        )[mcnts] / bin_counts[i][mcnts]
         binned_signal_sigma[i][mcnts] = np.sqrt(
             np.abs(binned_signal_squared_mean[i, mcnts] - binned_signal[i, mcnts]**2)
-        )/np.sqrt(bin_counts[i][mcnts])
+        ) / np.sqrt(bin_counts[i][mcnts])
 
     if is_1d:
         binned_signal = binned_signal[0]
