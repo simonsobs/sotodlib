@@ -2,6 +2,7 @@ import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
+
 def bin_signal(aman, bin_by, signal=None,
                range=None, bins=100, flags=None,
                weight_for_signal=None):
@@ -37,7 +38,7 @@ def bin_signal(aman, bin_by, signal=None,
     Dictionary:
         - **bin_edges** (dict key): float array of bin edges length(bin_centers)+1.
         - **bin_centers** (dict key): center of each bin.
-        - **bin_counts** (dict key): counts of binned samples. 
+        - **bin_counts** (dict key): counts of binned samples.
         - **binned_signal** (dict key): binned signal.
         - **binned_signal_sigma** (dict key): estimated sigma of binned signal.
     """
@@ -79,8 +80,8 @@ def bin_signal(aman, bin_by, signal=None,
     # do not silently pile them into the first/last bin.
     base_valid = (
         np.isfinite(bin_by)
-        & (bin_by >= range[0])
-        & (bin_by <= range[1])
+        & (bin_by >= bin_edges[0])
+        & (bin_by <= bin_edges[-1])
     )
 
     if flags is None:
@@ -125,12 +126,15 @@ def bin_signal(aman, bin_by, signal=None,
 
         bin_counts[i] = np.bincount(bin_indices[m], weights=w[m], minlength=nbins)
         mcnts = bin_counts[i] > 0
-        binned_signal[i][mcnts] = np.bincount(bin_indices[m], weights=signal[i][m]*w[m], minlength=nbins
-                                             )[mcnts]/bin_counts[i][mcnts]
-        binned_signal_squared_mean[i][mcnts] = np.bincount(bin_indices[m], weights=(signal[i][m]*w[m])**2, minlength=nbins
-                                             )[mcnts]/bin_counts[i][mcnts]
-        binned_signal_sigma[i][mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[i,mcnts] - binned_signal[i,mcnts]**2)
-                                             ) / np.sqrt(bin_counts[i][mcnts])
+        binned_signal[i][mcnts] = np.bincount(
+            bin_indices[m], weights=signal[i][m]*w[m], minlength=nbins
+        )[mcnts]/bin_counts[i][mcnts]
+        binned_signal_squared_mean[i][mcnts] = np.bincount(
+            bin_indices[m], weights=(signal[i][m]*w[m])**2, minlength=nbins
+        )[mcnts]/bin_counts[i][mcnts]
+        binned_signal_sigma[i][mcnts] = np.sqrt(
+            np.abs(binned_signal_squared_mean[i, mcnts] - binned_signal[i, mcnts]**2)
+        )/np.sqrt(bin_counts[i][mcnts])
 
     if is_1d:
         binned_signal = binned_signal[0]
