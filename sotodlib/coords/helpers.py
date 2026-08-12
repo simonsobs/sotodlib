@@ -739,6 +739,34 @@ class ScalarLastQuat(np.ndarray):
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
 
+def get_deflection_quat(aman, wobble_meta=None):
+    '''
+    Derives the deflection quaternion.
+
+    Parameters
+    ----------
+    aman : AxisManager
+
+    wobble_meta : AxisManager
+
+    '''
+    if wobble_meta is None:
+        wobble_meta = aman.get('wobble_params')
+    elif isinstance(wobble_meta, str):
+        wobble_meta = aman.get(wobble_meta)
+    # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
+    # !!!!! this won't work for mixing more than one wafer.
+    # the metadata has amplitudes in arcmin, and phases in radians
+    amp = wobble_meta.amp[0]/60.*np.pi/180.0
+    phase = wobble_meta.phase[0]
+
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
+    deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
+
+    return deflq
+
+
 def get_deflected_sightline(aman, wobble_meta=None, sight=None, site='so', weather='typical'):
     """
     Constructs a deflected CelestialSightLine using HWP-synchronous
@@ -781,19 +809,8 @@ def get_deflected_sightline(aman, wobble_meta=None, sight=None, site='so', weath
 
     if len(wafer_slots) != 1 or len(bands) != 1:
         raise ValueError("Detectors span multiple wafer_slots or bands.")
-    if wobble_meta is None:
-        wobble_meta = aman.get('wobble_params')
-    elif isinstance(wobble_meta, str):
-        wobble_meta = aman.get(wobble_meta)
-    # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
-    # !!!!! this won't work for mixing more than one wafer.
-    # the metadata has amplitudes in arcmin, and phases in radians
-    amp = wobble_meta.amp[0]/60.*np.pi/180.0
-    phase = wobble_meta.phase[0]
-
-    dxi = amp * np.cos(aman.hwp_angle - phase)
-    deta = -amp * np.sin(aman.hwp_angle - phase)
-    deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
+    
+    deflq = get_deflection_quat(aman, wobble_meta)
 
     if sight is None:
         sight = so3g.proj.CelestialSightLine.az_el(
