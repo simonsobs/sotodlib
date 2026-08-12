@@ -159,6 +159,12 @@ class SimMuMUXCrosstalk(Operator):
         else:
             common_good = np.ones(obs.n_local_samples, dtype=bool)
 
+        # Create dicts for JBolo values
+        P_opts = {}
+        P_atm_refs = {}
+        efficiencies = {}
+        P_sats = {}
+
         dPhi0dT = {}
         for row, det in zip(rows, detectors):
             band = focalplane[det]["band"]
@@ -171,19 +177,27 @@ class SimMuMUXCrosstalk(Operator):
             #pdb.set_trace()
             median_signal = np.median(signal[row][good])
 
-            # Compute detector properties using JBolo
-            jbolo_channel = JBOLO_CHANNELS[band]
-            jbolo_model   = JBOLO_MODELS[band[:4] + jbolo_channel.split('_')[0]]
-            jsim = load_sim(jbolo_model)
-            jsim['sources']['atmosphere']['elevation'] = elevation # Degrees
-            jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
-            jf.run_optics(jsim)
-            jf.run_bolos(jsim)
-            P_opt = jsim['outputs'][jbolo_channel]['P_opt'] # W
-            P_atm_ref = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
-            efficiency = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
-            P_sat = jsim['outputs'][jbolo_channel]['P_sat'] # W
+            if band not in P_opts.keys():
+                # Compute detector properties using JBolo
+                jbolo_channel = JBOLO_CHANNELS[band]
+                jbolo_model   = JBOLO_MODELS[band[:4] + jbolo_channel.split('_')[0]]
+                jsim = load_sim(jbolo_model)
+                jsim['sources']['atmosphere']['elevation'] = elevation # Degrees
+                jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
+                jf.run_optics(jsim)
+                jf.run_bolos(jsim)
+                P_opts[band] = jsim['outputs'][jbolo_channel]['P_opt'] # W
+                P_atm_refs[band] = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
+                efficiencies[band] = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
+                P_sats[band] = jsim['outputs'][jbolo_channel]['P_sat'] # W
 
+            # Pull from cached values
+            P_opt = P_opts[band]
+            P_atm_ref = P_atm_refs[band]
+            efficiency = efficiencies[band]
+            P_sat = P_sats[band]
+
+            # Compute conversion
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
@@ -206,7 +220,7 @@ class SimMuMUXCrosstalk(Operator):
             )
 
         # Check for JBOLO data path
-        if not 'JBOLO_PATH' in os.environ.keys() or not 'JBOLO_MODELS_PATH' in os.environ.keys():
+        if 'JBOLO_PATH' not in os.environ.keys() or 'JBOLO_MODELS_PATH' not in os.environ.keys():
             raise RuntimeError(
                 "Cannot calculate detector parameters -- no JBolo models available"
             )
