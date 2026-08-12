@@ -14,7 +14,8 @@ def bin_signal(aman, bin_by, signal=None,
     aman : TOD
         The Axismanager object to be binned.
     bin_by : array-like
-        The array by which signal is binned. It should has the same samps as aman.
+        The array by which signal is binned. Any length is allowed, but it must be consistent
+        with `signal` (and `flags` and `weight_for_signal`, if specified).
     signal : str or array-like optional
         signal to be binned or its name. Defaults to aman.signal if not specified.
         Either 1D array or 2D array with shape ``(nsamps)`` or``(dets, nsamps)``,
