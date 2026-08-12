@@ -18,11 +18,12 @@ from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
 # JBolo sims to use
 JBOLO_MODELS = {
-    'SAT_MF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_MF.yaml"),
-    'SAT_UHF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_UHF.yaml"),
-    'LAT_LF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_LF.yaml"),
-    'LAT_MF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_MF.yaml"),
-    'LAT_UHF': os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_UHF.yaml")
+    'SAT_LF' : os.path.expandvars("$JBOLO_MODELS_PATH/V3r7_JBolo/V3r7_Baseline/SAT/V3r7_Baseline_SAT_LF.yaml"),
+    'SAT_MF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_MF.yaml"),
+    'SAT_UHF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_UHF.yaml"),
+    'LAT_LF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_LF.yaml"),
+    'LAT_MF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_MF.yaml"),
+    'LAT_UHF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_UHF.yaml")
 }
 
 JBOLO_CHANNELS = {
