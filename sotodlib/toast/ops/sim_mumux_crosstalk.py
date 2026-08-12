@@ -178,10 +178,10 @@ class SimMuMUXCrosstalk(Operator):
             jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
             jf.run_optics(jsim)
             jf.run_bolos(jsim)
-            P_opt = sim['outputs'][jbolo_channel]['P_opt'] # W
-            P_atm_ref = sim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
-            efficiency = sim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
-            P_sat = sim['outputs'][jbolo_channel]['P_sat'] # W
+            P_opt = jsim['outputs'][jbolo_channel]['P_opt'] # W
+            P_atm_ref = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt'] # W
+            efficiency = jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg']
+            P_sat = jsim['outputs'][jbolo_channel]['P_sat'] # W
 
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
