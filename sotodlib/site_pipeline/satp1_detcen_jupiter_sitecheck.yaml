@@ -1,9 +1,24 @@
-context_file: "/home/gs8865/work/files/contexts/satp1/use_this_local_251215_tmatm.yaml" # path to the context file, same as 251215 for comparing this with 2025/12/15 result
+context_file: #"/home/gs8865/work/files/contexts/satp1/use_this_local_251215_tmatm.yaml" # path to the context file, same as 251215 for comparing this with 2025/12/15 result
 
-dbpath: '/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/maps/satp1/site_check/detcen_jupiter_postrf.sqlite' # path to the database of planet observtions
-errlogpath: '/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/err/satp1/site_check/satp1_detcen_jupiter_errlog_postrf.txt' # path to the error log file
+
+base_dir: '/scratch/gpfs/SIMONSOBS/users/ys5857/workspace/output/2026/02/12'
+dbpath: "{base_dir}/db/detcen_jupiter.sqlite"
+errlogpath: "{base_dir}/err/satp3_detcen_jupiter_errlog.txt"
 overwrite: True # overwrite maps even if they already exist
 mapmaker_path: '/home/gs8865/work/scripts/pwg-scripts/flp/planet_mapmaker'
+
+query:
+    start: '2024/7/22' #or you can pass str following YYYY/MM/DD # AfterRun13
+    end: '2026/1/1' #or you can pass str following YYYY/MM/DD
+    tags: ['jupiter', 'taua'] # tags for observations you want to pick up
+    all_wafers: True # whether to include all wafers in obs or only the ones with tags. If True, it will include all wafers in obs regardless of tags. If False, it will only include wafers with tags.
+    # specific_wafers: [0, 1] # whether to include only these specific wafers
+    bands: ['f090', 'f150']
+    fwhm_max: {'f090':31, 'f150':22}
+    fwhm_min: {'f090':20, 'f150':15}
+    mask_rad: {'f090':29, 'f150':20}
+
+
 
 mapmaking:
     inv_var:
@@ -38,7 +53,7 @@ mapmaking:
       recenter: True # whether to recenter output maps
       var_minr: 50 # arcmin, minimum radius for calculating map variance
       var_maxr: 72 # arcmin, maximum radius for calculating map variance
-      save_dire: "/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/maps/satp1/site_check/detcen_jupiter_postrf/"
+      save_dire: #"/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/maps/satp1/site_check/detcen_jupiter_postrf/"
       single_save: False # Save single map or not, currently only works with "detector_center" or "boresight_center" coordinate
 
 process_pipe:

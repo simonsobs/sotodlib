@@ -2,21 +2,23 @@ import numpy as np
 import yaml
 import os
 import warnings
-from sotodlib import coords
+from sotodlib import coords, core
 import argparse
 import scipy
 from pixell import enmap
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import importlib
 import sys
+import traceback
 from pathlib import Path
+from typing import Optional, List
+from sotodlib.site_pipeline.utils import logging
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
+from sotodlib.io.metadata import write_dataset, ResultSet
 
 warnings.filterwarnings('ignore')
 
-# sys.path.append('/home/gs8865/work/scripts/pwg-scripts/flp/planet_mapmaker')
-# from planet_mapmaking import planet_mapmake_eachobs
-
-# running the planet mapmaker will produce the maps and database, and store it in a location specified by the paths in the config file --- which paths?
+# running the planet mapmaker will produce the maps and database, and store it in a location specified by the paths in the config file 
 
 def expand(obj, vars):
     """
@@ -151,7 +153,13 @@ def fit_gaussian_to_beam(maps):
     
     return popt, pcov
 
-def map_selection(band, obs_id, solved_maps=None, rad_fwhm_max = None, rad_fwhm_min = None):
+def get_errors(e):
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+
+        return errmsg, tb
+
+def map_selection(band, obs_id, configs, solved_maps=None, verbosity = 3):
     """Determines if provided map contributes to co-add.
     Based on FWHM.
 
@@ -164,21 +172,29 @@ def map_selection(band, obs_id, solved_maps=None, rad_fwhm_max = None, rad_fwhm_
     Returns:
         True/False: bool
     """
-    if rad_fwhm_max is None:
-        if band == 'f090':
-            rad_fwhm_max = 31
-        else:
-            rad_fwhm_max = 22
+    logger = logging.init_logger("compute_data_quality", verbosity=verbosity)
+    
+    # if rad_fwhm_max is None:
+    #     if band == 'f090':
+    #         rad_fwhm_max = 31
+    #     else:
+    #         rad_fwhm_max = 22
 
-    if rad_fwhm_min is None:            
-        if band == 'f090':
-            rad_fwhm_min = 20
-        else:
-            rad_fwhm_min = 15
+    # if rad_fwhm_min is None:            
+    #     if band == 'f090':
+    #         rad_fwhm_min = 20
+    #     else:
+    #         rad_fwhm_min = 15
+
+    rad_fwhm_max = configs['query']['fwhm_max'][band]
+    rad_fwhm_min = configs['query']['fwhm_min'][band]
+
     try:
         rad_prof = calc_rad_profile(solved_maps[0])  # solved_maps[0] is imap
     except Exception as e:
-        print(f'{obs_id} failed fit. Skipping.')
+        # logger.info(f"{obs_id} failed fit. Skipping.")
+        errmsg, tb = get_errors(e)
+        logger.error(f" FWHM fit failed for {obs_id}: \n{errmsg}\n{tb}")
         return False, None
     try:
         profile = 10*np.log10(rad_prof['profile'])
@@ -187,22 +203,18 @@ def map_selection(band, obs_id, solved_maps=None, rad_fwhm_max = None, rad_fwhm_
         fwhm = radius[_3db]*2        
         
     except Exception as e:
-        print(e)
-        print(f'{obs_id} does not have fwhm near -3db.')    
+        # print(e)
+        errmsg, tb = get_errors(e)
+        logger.error(f" No FWHM near -3dB for {obs_id}: \n{errmsg}\n{tb}")
+        # logger.info(f"{obs_id} does not have fwhm near -3db.")
         return False, None
     
     if fwhm > rad_fwhm_max or fwhm < rad_fwhm_min:
-        print(f'{obs_id} has poor fwhm fit: {fwhm}') 
+        logger.info(f"{obs_id} has poor fwhm fit: {fwhm}")
         return False, None 
-    if obs_id == 'obs_1724567567_satp1_1111111' or obs_id == 'obs_1724553289_satp1_1111111':
-        print(f'{obs_id} skipped! -- seeing double!')
-        return False, None
-    if obs_id == 'obs_1732418203_satp3_1111111':
-        print(f'{obs_id} is stripey (by eye). Skipping.')
-        return False, None   
     return True, rad_prof
     
-def calc_map_quality(maps, band, metric='resid', fwhm_max=None, fwhm_min=None, mask_rad=None):
+def calc_map_quality(maps, band, configs, metric='resid', verbosity = 3):
     """Iterate through stored maps, and Calculate map quality based on fitted
     2D Gaussian. 
 
@@ -213,27 +225,13 @@ def calc_map_quality(maps, band, metric='resid', fwhm_max=None, fwhm_min=None, m
         fwhm_min (float, optional): Min fitted fwhm in arcminutes. Defaults to None.
         mask_rad (float, optional): Radius [arcmin] to compare fit to observed. Defaults to None.
     """
-
+    n_params = 7
     size = len(maps)
     q_scores = np.empty(size)
-    popts = np.empty([size, 7])
-    if fwhm_max is None:
-        if band == 'f090':
-            fwhm_max = 31
-        else:
-            fwhm_max = 22
-            
-    if fwhm_min is None:
-        if band == 'f090':
-            fwhm_min = 20
-        else:
-            fwhm_min = 15
-            
-    if mask_rad is None:
-        if band == 'f090':
-            mask_rad = 29
-        else:
-            mask_rad = 20
+    popts = np.empty([size, n_params])
+    logger = logging.init_logger("compute_data_quality", verbosity=verbosity)
+
+    mask_rad = configs['query']['mask_rad'][band]
             
     for idx, m in enumerate(maps):
         filename = os.path.basename(m)
@@ -241,21 +239,21 @@ def calc_map_quality(maps, band, metric='resid', fwhm_max=None, fwhm_min=None, m
         obs_id = filename.rsplit("_", 1)[0]
         solved_maps = enmap.read_fits(m)
 
-        success, rad_prof = map_selection(band, obs_id, solved_maps=solved_maps,
-                                              rad_fwhm_max=fwhm_max, rad_fwhm_min=fwhm_min)
+        success, rad_prof = map_selection(band, obs_id, configs, solved_maps=solved_maps)
         
         if success:
             try:  
                 popt, _, = fit_gaussian_to_beam(solved_maps)
             except Exception as e:
-                print(f'{obs_id} failed 2D Gauss fit: {e}')
+                errmsg, tb = get_errors(e)
+                logger.error(f" 2D Gauss fit failed for {obs_id}: \n{errmsg}\n{tb}")
+                # logger.info(f"{obs_id} failed 2D Gauss fit: {e}")
                 quality = np.inf
-                popt= np.full(7,np.nan)
+                popt= np.full(n_params, np.nan)
                 q_scores[idx] = quality
                 popts[idx] = popt
                 continue
             
-            # print(f'{obs_id}, success: {success}')
             pos = solved_maps[0].posmap()
             ra = pos[1]
             dec = pos[0]
@@ -273,32 +271,156 @@ def calc_map_quality(maps, band, metric='resid', fwhm_max=None, fwhm_min=None, m
                 masked_map /= popt[0]
                 masked_fit /= popt[0]
                 residuals = masked_map - masked_fit
-                quality = np.nanstd(residuals)
+                quality = np.sqrt(np.nanmean(residuals**2))  # true RMSE
                 
         else:
             quality=np.inf
-            popt=np.full(7,np.nan)
+            popt=np.full(n_params, np.nan)
             
         q_scores[idx] = quality
         popts[idx] = popt
     
     return q_scores, popts
 
+def add_to_failed_cache(obs_id, band, ws, msg, failed_cache_file):
+    """Cache one failed (obs_id, band, wafer) combination."""
+    logger = logging.init_logger("compute_data_quality")
+
+    if msg is None:
+        msg = "unknown error"
+    msg = str(msg)
+
+    if "KeyboardInterrupt" in msg:  # Don't cache keyboard interrupts
+        return False
+
+    # Transient metadata errors should be retried rather than cached.
+    transient_errors = [
+        "sotodlib.core.metadata.loader.LoaderError",
+        "BlockingIOError",
+    ]
+    for err in transient_errors:
+        if err in msg:
+            logger.error(
+                f"obs_id {obs_id} failed to load metadata {err}. Try again later"
+            )
+            return False
+
+    cache_key = f"{obs_id}_{band}_{ws}"
+    logger.info(f"Adding {cache_key} to failed_file_cache")
+
+    if os.path.exists(failed_cache_file):
+        with open(failed_cache_file, "r") as f:
+            d = yaml.safe_load(f) or {}
+    else:
+        d = {}
+
+    d[cache_key] = msg
+
+    with open(failed_cache_file, "w") as f:
+        yaml.safe_dump(d, f)
+
+    return True
+
+
+def get_quality_db(index_path):
+    """
+    The index key is (obs:obs_id, band, wafer).  The HDF5 dataset address is
+    stored explicitly so every tuple can point to its own dataset.
+    """
+    required_fields = {"obs:obs_id", "band", "wafer", "success", "rmse", "dataset"}
+
+    if os.path.exists(index_path):
+        db = core.metadata.ManifestDb(index_path)
+        scheme_rs = db.scheme.as_resultset()
+        existing_fields = set(scheme_rs["field"])
+        missing = required_fields - existing_fields
+        if missing:
+            raise RuntimeError(
+                f"Existing manifest {index_path} has the old/incompatible schema. "
+                f"Missing fields: {sorted(missing)}. Move/delete the old index and "
+                "rerun so a tuple-aware manifest can be created."
+            )
+        return db
+
+    scheme = core.metadata.ManifestScheme()
+    scheme.add_exact_match("obs:obs_id")
+    scheme.add_exact_match("band")
+    scheme.add_exact_match("wafer")
+    scheme.add_data_field("success")
+    scheme.add_data_field("rmse")
+    scheme.add_data_field("dataset")
+    return core.metadata.ManifestDb(index_path, scheme=scheme)
+
+
+def handle_result(obs_id, rmse, wafer, band, success, h5_path, h5_unix_digits, index_path, failed_cache_file, msg=None):
+    """Store/cache exactly one (obs_id, band, wafer) result.
+
+    Deliberately rejects a wafer list so one RMSE can never accidentally be
+    copied to several wafers.
+    """
+    if not isinstance(wafer, str):
+        raise TypeError(
+            "handle_result expects one wafer string, e.g. 'ws3'. "
+            "Call it once per wafer so RMSE values cannot be duplicated."
+        )
+
+    if not success:
+        if msg is None:
+            msg = "unknown error"
+        return add_to_failed_cache(obs_id, band, wafer, msg, failed_cache_file)
+
+    obsid_result = np.array(
+        [(obs_id, rmse, wafer, band, True)],
+        dtype=[
+            ("obs_id", "U50"), ("rmse", "f8"), ("wafer", "U10"),
+            ("band", "U10"), ("success", "?")])
+    rset = ResultSet.from_friend(obsid_result)
+
+    if h5_unix_digits:
+        name, ext = os.path.splitext(h5_path)
+        obs_parts = str(obs_id).split("_")
+        if len(obs_parts) < 2:
+            raise ValueError(
+                f"Cannot extract unix time from obs_id={obs_id!r} for h5_unix_digits"
+            )
+        unixtime = obs_parts[1][:h5_unix_digits]
+        h5_path = f"{name}_{unixtime}{ext}"
+
+    dataset_name = f"{obs_id}_{band}_{wafer}"
+    write_dataset(rset, h5_path, dataset_name, overwrite=True)
+
+    db = get_quality_db(index_path)
+    relpath = os.path.relpath(h5_path, start=os.path.dirname(index_path))
+    db.add_entry({"obs:obs_id": obs_id, "band": band, "wafer": wafer,
+            "success": True, "rmse": float(rmse), "dataset": dataset_name},
+        filename=relpath, replace=True, )
+    return True
+
 
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, help='path to config file')
-    parser.add_argument('--freq_channel', type=str, help='frequency channel of observation')
-    parser.add_argument('--wafer', type=str, help='wafer of observation')
-    parser.add_argument('--obs_id', type=str, default=None, help='obs id to be mapped')
-    # parser.add_argument('--nproc', type=int, default=2, help='Number of processes to use')
+    parser.add_argument('--query', type=str, default=None, help='query string for obsdb')
+    parser.add_argument('--update_delay', type=int, default=None, help='days to subtract from current time')
+    parser.add_argument('--planet_tags', type=str, nargs='+', default=[], help='planet names to be tagged')
     parser.add_argument('--verbosity', type=int, default=2, help='Number for logger verbosity')
+    parser.add_argument('--h5_path', type=str, default='quality_check.h5', help='Path to store hdf5 files')
+    parser.add_argument('--h5_unix_digits', type=int, default=4, help='unix digits to store with h5 path')
+    parser.add_argument('--index_path', type=str, default='quality_check.sqlite', help='Path to store db')
+    parser.add_argument('--failed_cache_file', type=str, default='failed_obsids.yaml', help='Path to store failed obsids')
 
     return parser
 
-def main(config_file: str, wafer: str, freq_channel: str, obs_id: str, verbosity: int):
+def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_path: str, 
+         h5_unix_digits: int, index_path: str, failed_cache_file: str, planet_tags: Optional[List[str]] = None,):
+
     configs = read_configs(config_file)
+    context = core.Context(configs["context_file"])
+    map_path =  configs['mapmaking']['map']['save_dire']   
+    bands = configs['query'].get('bands')
+    if not bands:
+        raise ValueError("No bands configured at configs['query']['bands']")
     
     repo_root = Path(configs["mapmaker_path"])
     module_path = repo_root / "planet_mapmaking.py"
@@ -308,34 +430,127 @@ def main(config_file: str, wafer: str, freq_channel: str, obs_id: str, verbosity
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     
-    ws = wafer
-    band = freq_channel
-    dets={'wafer_slot': ws, 'wafer.bandpass': band, }
-
-    module.planet_mapmake_eachobs(config_file, obs_id, dets, verbosity)
+    logger = logging.init_logger("compute_data_quality", verbosity=verbosity)
     
-    map_path =  configs['mapmaking']['map']['save_dire']   
+    obsid_list = get_obslist(context = context, query = query, update_delay = update_delay, tags = planet_tags, planet_obs = True)
+    obs_ids = list(dict.fromkeys( obs["obs_id"] for obs in obsid_list))
 
-    maps_dire_band = os.path.join(map_path, band, "map")
-    matching_files = [os.path.join(maps_dire_band, f) for f in os.listdir(maps_dire_band) if f.startswith(obs_id) and f.endswith(".fits")]
+    if os.path.exists(failed_cache_file):
+        with open(failed_cache_file, "r") as f:
+          d = yaml.safe_load(f) or {}
+    else:
+        d = {}
 
-    if len(matching_files) == 0:
-        raise FileNotFoundError(f"No map found for obs_id={obs_id}")
-    map_file = matching_files[0]
-    maps = [map_file]    
-    
-    qscores, popts = calc_map_quality(maps, band)
-    threshold_quality = 0.05
-    if qscores[0] > threshold_quality:
-        print( f'Observation {obs_id} quality is not good enough '
-           f'(RMSE={qscores[0]:.4f})')
-    else: 
-        print(f'{obs_id} is good')
-    
-# if __name__ == '__main__':
-#     parser = get_parser()
-#     args = parser.parse_args()
-#     main(args.config_file, args.wafer, args.freq_channel, args.obs_id, args.verbosity)
+    failed_obsids = set(d.keys())
+
+    for obs_id in obs_ids:
+        for band in bands:
+            try:
+                obs = context.obsdb.get(str(obs_id), tags=True)
+                tags = obs["tags"]
+                wafers = [tag for tag in tags if tag.startswith("ws")]
+
+                if not wafers:
+                    raise ValueError(
+                        f"No wafer tags found for obs_id={obs_id}. Available tags: {tags}"
+                    )
+
+            except KeyboardInterrupt:
+                logger.warning("Keyboard interrupt received. Stopping processing.")
+                raise
+
+            except Exception as e:
+                # At this point we do not reliably know the wafer(s), so do not
+                # fabricate tuple-level cache entries.
+                errmsg, tb = get_errors(e)
+                logger.error(
+                    f"Could not determine wafers for {obs_id} in {band}:\n{errmsg}\n{tb}"
+                )
+                continue
+
+            # Process each wafer independently.  This guarantees that each
+            # (obs_id, band, wafer) has its own map-quality calculation and
+            # that a failure in one wafer does not affect the others.
+            for ws in wafers:
+                cache_key_name = f"{obs_id}_{band}_{ws}"
+
+                if cache_key_name in failed_obsids:
+                    logger.info(
+                        f"{obs_id} is known to be bad for {band} and {ws}. "
+                        "Skipping this wafer."
+                    )
+                    continue
+
+                try:
+                    logger.info(f"Processing obs_id={obs_id}, band={band}, wafer={ws}")
+
+                    dets = {"wafer_slot": [ws], "wafer.bandpass": band}
+                    module.planet_mapmake_eachobs(config_file, obs_id, dets, verbosity)
+
+                    maps_dire_band = os.path.join(map_path, band, "map")
+                    if not os.path.isdir(maps_dire_band):
+                        raise FileNotFoundError(f"Map directory does not exist: {maps_dire_band}")
+
+                    # The existing calc_map_quality code assumes filenames end
+                    # in _<wafer>.fits, so require that exact tuple match here.
+                    matching_files = []
+                    for filename in os.listdir(maps_dire_band):
+                        if not filename.endswith(".fits"):
+                            continue
+                        stem = filename[:-5]
+                        if "_" not in stem:
+                            continue
+                        file_obs_id, file_ws = stem.rsplit("_", 1)
+                        if file_obs_id == str(obs_id) and file_ws == ws:
+                            matching_files.append(os.path.join(maps_dire_band, filename))
+
+                    if len(matching_files) == 0:
+                        raise FileNotFoundError(f"No map found for obs_id={obs_id}, band={band}, wafer={ws}")
+                    if len(matching_files) > 1:
+                        raise RuntimeError(f"Found multiple maps for obs_id={obs_id}, band={band}, "
+                            f"wafer={ws}: {matching_files}")
+
+                    map_file = matching_files[0]
+                    qscores, _ = calc_map_quality([map_file], band, configs)
+                    quality_score = float(qscores[0])
+
+                    threshold_quality = 0.05
+
+                    if (not np.isfinite(quality_score)) or (quality_score > threshold_quality):
+                        logger.info(f"Bad map: obs_id={obs_id}, band={band}, wafer={ws}, "
+                            f"RMSE={quality_score}")
+
+                        cached = handle_result(obs_id, quality_score, ws, band, False, h5_path=h5_path,
+                            h5_unix_digits=h5_unix_digits, index_path=index_path, failed_cache_file=failed_cache_file,
+                            msg=f"Large RMSE: {quality_score}")
+                        if cached:
+                            failed_obsids.add(cache_key_name)
+
+                    else:
+                        logger.info(f"Good map: obs_id={obs_id}, band={band}, wafer={ws}, "
+                            f"RMSE={quality_score:.6g}")
+
+                        handle_result(obs_id, quality_score, ws, band, True, h5_path=h5_path,
+                            h5_unix_digits=h5_unix_digits, index_path=index_path, failed_cache_file=failed_cache_file,
+                            msg=None)
+                        
+                except KeyboardInterrupt:
+                    logger.warning("Keyboard interrupt received. Stopping processing.")
+                    handle_result(obs_id, np.nan, ws, band, False, h5_path=h5_path,
+                        h5_unix_digits=h5_unix_digits, index_path=index_path, failed_cache_file=failed_cache_file,
+                        msg="KeyboardInterrupt")
+                    raise
+
+                except Exception as e:
+                    errmsg, tb = get_errors(e)
+                    logger.error(f"Processing failed for obs_id={obs_id}, band={band}, "
+                        f"wafer={ws}:\n{errmsg}\n{tb}")
+                    cached = handle_result(obs_id, np.nan, ws, band, False, h5_path=h5_path,
+                        h5_unix_digits=h5_unix_digits, index_path=index_path, failed_cache_file=failed_cache_file,
+                        msg=errmsg)
+                    if cached:
+                        failed_obsids.add(cache_key_name)
+                    continue
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)
