@@ -16,7 +16,7 @@ def bin_signal(aman, bin_by, signal=None,
     bin_by : array-like
         The array by which signal is binned. Any length is allowed, but it must be consistent
         with `signal` (and `flags` and `weight_for_signal`, if specified).
-    signal : str or array-like optional
+    signal : str or array-like of float, optional
         signal to be binned or its name. Defaults to aman.signal if not specified.
         Either 1D array or 2D array with shape ``(nsamps)`` or``(dets, nsamps)``,
         where nsamps is length of bin_by.
@@ -70,7 +70,7 @@ def bin_signal(aman, bin_by, signal=None,
 
     # get bin_edges
     bin_edges = np.histogram_bin_edges(bin_by, bins=bins, range=range,)
-    bin_centers = (bin_edges[1] - bin_edges[0])/2. + bin_edges[:-1] # edge to center
+    bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2.
     nbins = len(bin_centers)
 
     # get bin indices
@@ -90,7 +90,7 @@ def bin_signal(aman, bin_by, signal=None,
     else:
         if isinstance(flags, str):
             flags = aman.flags.get(flags)
-        if (not is_1d) and flags.shape == (aman.dets.count, nsamps):
+        if (not is_1d) and flags.shape == (ndets, nsamps):
             mask = base_valid[None, :] & ~flags.mask()
         elif flags.shape == (nsamps, ):
             mask = np.broadcast_to(base_valid & ~flags.mask(),
@@ -102,7 +102,7 @@ def bin_signal(aman, bin_by, signal=None,
         weight_for_signal = np.ones(nsamps, signal_dtype)
     weight_for_signal = np.asarray(weight_for_signal)
 
-    if (not is_1d) and weight_for_signal.shape == (aman.dets.count, nsamps):
+    if (not is_1d) and weight_for_signal.shape == (ndets, nsamps):
         weights = weight_for_signal
     elif weight_for_signal.shape == (nsamps, ):
         weights = np.broadcast_to(weight_for_signal,
