@@ -4,20 +4,21 @@ is specifically designed to work when the data is dynamically coming in. Meaning
 is designed to work from something like a cronjob.
 """
 import os
-from pathlib import Path
-import yaml
 import datetime as dt
-import numpy as np
 import argparse
 import logging
-from sqlalchemy import not_, or_, and_
+from sqlalchemy import or_
 from typing import Optional
+from pathlib import Path
+
+
+from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
 
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 from sotodlib.io.datapkg_utils import load_configs
 
-
-def core(
+@profile("update_g3tsmurf_db")
+def main(
     config: Optional[str] = None, update_delay: float = 2,
     from_scratch: bool = False, verbosity: int = 2,
     min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
@@ -222,6 +223,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
+    
     parser.add_argument('config', help="g3tsmurf db configuration file")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
@@ -229,10 +231,6 @@ def get_parser(parser=None):
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                         default=2, type=int)
-    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
-                        action="store_true")
-    parser.add_argument("--checked-file",
-        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
     parser.add_argument("--min_ctime",
         help="minimum ctime to start search, overrides time set by update-delay",
         default=None, type=int
@@ -241,9 +239,13 @@ def get_parser(parser=None):
         help="maximum ctime to search, otherwise searches through 'now'",
         default=None, type=int
     )
-    parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
-    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
-                        type=Path)
+    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+                        action="store_true")
+    parser.add_argument("--checked-file",
+        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
+    
+    add_profile_args(parser)
+
     return parser
 
 if __name__ == '__main__':
