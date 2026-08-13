@@ -292,16 +292,13 @@ def parse_context(ctxt, args):
         raise RuntimeError("Context has no obsfiledb key")
     obsfiledb = ctxt["obsfiledb"]
 
-    rel_obsdb = os.path.relpath(obsdb, args.local_metadata)
-    tele_name, _ = os.path.split(rel_obsdb)
-
     manifests = []
     for md in ctxt["metadata"]:
         if "db" not in md:
             continue
         dbpath = md["db"]
         manifests.append(dbpath)
-    return tele_name, obsdb, obsfiledb, manifests
+    return obsdb, obsfiledb, manifests
 
 
 def sync_manifest(db_path, args, obs_list):
@@ -357,6 +354,8 @@ def sync_manifest(db_path, args, obs_list):
         cursor.execute(f"select name from files inner join map on files.id = map.file_id where \"obs:obs_id\" in {obs_str};")
         for row in cursor.fetchall():
             mfiles.append(row[0])
+        mset = set(mfiles)
+        mfiles = list(sorted(mset))
         print(f"Meta: {rel_db}: obs {obs_str} has meta files {mfiles}", flush=True)
         for mf in mfiles:
             ssh_connection.sync(f"{remote_mdir}/{mf}", f"{local_mdir}/")
@@ -366,11 +365,10 @@ def sync_manifest(db_path, args, obs_list):
         ssh_connection.sync(f"{remote_mdir}/*.h5", f"{local_mdir}/")
 
 
-def sync_obs_g3book(tele_name, obs, args):
+def sync_obs_g3book(obs, args):
     """Sync a single observation book.
 
     Args:
-        tele_name (str):  The telescope name
         obs (str):  The obs_id
         args (namespace):  The parsed commandline arguments.
 
@@ -381,10 +379,11 @@ def sync_obs_g3book(tele_name, obs, args):
     global ssh_connection #noqa
 
     # Get the first 5 digits of the obs time
-    mat = re.match(f"obs_(\d\d\d\d\d)\d+_{tele_name}_.*", obs)
+    mat = re.match(r"obs_(\d\d\d\d\d)\d+_([0-9a-z]+)_.*", obs)
     if mat is None:
         raise RuntimeError(f"obs {obs} does not have expected format")
     firstfive = mat.group(1)
+    tele_name = mat.group(2)
     rel_path = os.path.join(tele_name, "obs", firstfive, obs)
     remote = os.path.join(args.remote_data, rel_path)
     local = os.path.join(args.local_data, rel_path)
@@ -491,7 +490,7 @@ def main():
 
         # Load the context file and find all the databases used.
         ctxt = load_context_file(args.local_context)
-        tele, obsdb, obsfiledb, manifests = parse_context(ctxt, args)
+        obsdb, obsfiledb, manifests = parse_context(ctxt, args)
 
         # Sync all databases used in the context
         all_dbs = [obsdb, obsfiledb]
@@ -510,7 +509,7 @@ def main():
 
         # We want to sync the full books, not just the g3 files.
         for obs in obs_list:
-            sync_obs_g3book(tele, obs, args)
+            sync_obs_g3book(obs, args)
 
     except Exception: #noqa
         pass
