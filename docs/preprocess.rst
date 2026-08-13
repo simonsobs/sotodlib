@@ -54,7 +54,7 @@ repository, e.g. ``satp1/preprocess_config_init.yaml`` +
 ``satp1/preprocess_config_proc.yaml`` (two-layer) and
 ``lat/preprocess_config_cmb.yaml`` (single-layer).
 
-`[TOD Processing] Infrastructure Introduction <https://simonsobs.atlassian.net/wiki/spaces/DM/pages/305627401/TOD+Processing+Infrastructure+Introduction>` has a fuller walkthrough (jobdb usage, extensive interactive/Python examples for loading, running, and saving preprocessing archives) that complements this reference page.
+`[TOD Processing] Infrastructure Introduction <https://simonsobs.atlassian.net/wiki/spaces/DM/pages/305627401/TOD+Processing+Infrastructure+Introduction>`_ has a fuller walkthrough (jobdb usage, extensive interactive/Python examples for loading, running, and saving preprocessing archives) that complements this reference page.
 
 Preprocessing job tracking (``jobdb``)
 ::::::::::::::::::::::::::::::::::::::
