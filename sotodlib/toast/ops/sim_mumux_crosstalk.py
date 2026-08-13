@@ -10,7 +10,6 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer, Timer
 from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
-from toast.mpi import MPI #added this import- Tran
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
