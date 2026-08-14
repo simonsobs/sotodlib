@@ -70,7 +70,7 @@ already-known-to-fail work. Jobs can be inspected programmatically via
 ``sotodlib.site_pipeline.jobdb.JobManager``.
 
 Preprocessing Pipelines
-------------------------
+:::::::::::::::::::::::
 
 A preprocessing pipeline is series of modules, each inheriting from
 ``_Preprocess``, that are defined through a configuration file and intended to be
@@ -90,7 +90,7 @@ modules that can be used to make a new pipeline.
 
 
 Processing Scripts
-------------------
+::::::::::::::::::
 These scripts are designed to be the ones that interact with specific
 configuration files and specific manifest databases.
 
@@ -113,7 +113,7 @@ configuration files and specific manifest databases.
 
 
 Processing Util Functions
----------------------------
+:::::::::::::::::::::::::
 These functions support and are used within the driver processing scripts
 above and are useful for saving, loading, and verifying preprocessing archives
 and databases.
@@ -153,7 +153,7 @@ and databases.
 
 
 Example TOD Pipeline Configuration File
----------------------------------------
+:::::::::::::::::::::::::::::::::::::::
 
 Suppose we want to run a simple pipeline that runs the glitch calculator and
 estimates the white noise levels of the data. A configuration file for the
@@ -234,7 +234,7 @@ the processing pipe. The ``process`` function is always run before the
 ``calc_and_save`` when ``plot: True`` for a module that supports it.
 
 Example Planet TOD Pipeline Configuration File
-----------------------------------------------
+::::::::::::::::::::::::::::::::::::::::::::::
 Similar to a regular TOD pipeline, if we want to run one for planet observations,
 we must first flag sources in the signal and gapfill them. An example configuration
 file should be equivalent to non-planet data processing after a few extra first
@@ -282,7 +282,7 @@ steps::
             modes: 3
 
 Example Obs Pipeline Configuration File
----------------------------------------
+:::::::::::::::::::::::::::::::::::::::
 
 Suppose we want to run an observation-level pipeline that creates a SSO footprint.
 A configuration file for the processing pipeline would look like::
@@ -319,181 +319,57 @@ A configuration file for the processing pipeline would look like::
             focal_plane: 'focal_plane_positions.npz'
 
 Process Step Glossary
----------------------
+:::::::::::::::::::::
 
 Quick reference for every registered ``process_pipe`` step name (the
-``name:`` string you put in a config file), grouped by what it's for. The
-"What it does" column is the first line of each class's docstring (see
-`Processing Modules`_ below for the full docstring, including config
-options, for any given step). This table is generated from
+``name:`` string you put in a config file), grouped by what it's for.
+The "What it does" column is the first line of each class's docstring
+-- see that class's full entry below (including ``calc``/``save``/
+``select``/``plot`` config options and an example config block) in the
+same subsection. This table is generated from
 ``sotodlib.preprocess.processes``; if you add a new registered process,
-add a row here too and a matching ``.. autoclass::`` entry under
-`Processing Modules`_ below —
-``tests/test_preprocess_docs.py`` will fail CI if the two fall out of
-sync.
-
-**General / utility**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``fft_trim``            ``FFTTrim``          Trim the AxisManager to optimize for faster FFTs later in the pipeline.
-``detrend``              ``Detrend``          Remove mean, median or linear trend from the data.
-``move``                 ``Move``             Rename or remove a data field (used to replace gamma angles with those from wiregrid for example).
-``trim_flag_edge``       ``TrimFlagEdge``     Trim edge until given flags of all detectors are False.
-======================= ==================== =================================================================
-
-**Detector Cuts and Flags**
-
-======================= ======================== =================================================================
-``name:``               Class                    What it does
-======================= ======================== =================================================================
-``det_bias_flags``      ``DetBiasFlags``         Derive poorly biased detectors from IV and Bias Step data.
-``trends``              ``Trends``               Check for large linear ramping in the data to look for unlocked detectors.
-``ptp_flags``           ``PTPFlags``             Find (and cut) detectors with anomalous peak-to-peak signal.
-``inv_var_flags``       ``InvVarFlags``          Find (and cut) detectors with too high inverse variance.
-``cut_bad_dist``        ``CutBadDistribution``   Detector cuts to keep a statistic (i.e white noise, peak-peak, fknee, etc.) within some bounds of a gaussian distribution.
-``detcal_nan_cuts``     ``DetcalNanCuts``        Remove detectors with NaN values in the specified det_cal metadata fields.
-``fp_flags``            ``FocalplaneNanFlags``   Cut detectors which have nans in their pointing information.
-``dark_dets``           ``DarkDets``             Cut dark detectors in the data.
-``acu_drop_flags``      ``AcuDropFlags``         Expands ACU drop (bad ACU/platform pointing data) flag fields in aman to all detectors.
-``smurfgaps_flags``     ``SmurfGapsFlags``       Expand smurfgaps (bad smurf data) flag of each stream_id to all detectors.
-``load_premade_flags``  ``LoadPremadeFlags``  Load premade flags from aman.
-``tod_stats``           ``GetStats``          Get basic statistics from a TOD or its power spectrum to use for flags and cuts.
-======================= ==================== =================================================================
-
-**Glitches & jumps**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``glitches``            ``GlitchDetection``  Run glitch detection algorithm to find glitches.
-``glitchfill``          ``GlitchFill``       Fill glitches.
-``jumps``               ``Jumps``            Run generic jump finding and fixing algorithm.
-``fix_jumps``           ``FixJumps``         Repairs the jump heights given a set of jump flags and heights.
-======================= ==================== =================================================================
-
-**Noise & PSD**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``psd``                 ``PSDCalc``          Calculate the PSD of the data and add it to the AxisManager.
-``noise_ratio``         ``NoiseRatio``       Compute ratios of "signal band" to white noise in PSDs (simple fit-independent way to check for excessive 1/f channels).
-``noise``               ``Noise``            Estimate the white noise levels in the data.
-======================= ==================== =================================================================
-
-**Calibration**
-
-======================= ======================== =================================================================
-``name:``               Class                    What it does
-======================= ======================== =================================================================
-``calibrate``           ``Calibrate``            Calibrate the timestreams based on some provided information (Abscal, relcal, bias step)--just a multiplication.
-``pca_relcal``          ``PCARelCal``            Estimate the relcal factor from the atmosphere using PCA.
-``correct_iir_params``  ``CorrectIIRParams``     Correct missing iir_params (readout downsampling filter) by default values.
-======================= ======================== =================================================================
-
-**HWP & demodulation**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``hwp_angle_model``     ``HWPAngleModel``    Apply hwp angle model (from metadata) to the TOD.
-``estimate_hwpss``      ``EstimateHWPSS``    Builds a HWPSS (HWP-synchronous-signal) template.
-``subtract_hwpss``      ``SubtractHWPSS``    Subtracts a HWPSS template from signal.
-``demodulate``          ``Demodulate``       Demodulate the TOD.
-``a2_stats``            ``A2Stats``          Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
-``get_tau_hwp``         ``GetTauHWP``        Analyze observation with hwp spinning up or spinning down to estimate time constant.
-======================= ==================== =================================================================
-
-**Ground pickup (AzSS)**
-
-============================ ============================ =================================================================
-``name:``                    Class                        What it does
-============================ ============================ =================================================================
-``azss``                     ``AzSS``                     Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight  and subtract.
-``subtract_azss_template``   ``SubtractAzSSTemplate``     Subtract Azimuth Synchronous Signal (AzSS) common template.
-============================ ============================ =================================================================
-
-**Filtering**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``fourier_filter``      ``FourierFilter``    Applies a chain of Fourier filters (defined in fft_ops) to the data.
-``sub_polyf``           ``SubPolyf``         Fit TOD in each subscan with polynomial of given order and subtract it.
-``apodize``             ``Apodize``          Apodize the edges of a signal.
-``scan_freq_cut``       ``ScanFreqCut``      Apply high-pass cut at the scan frequency.
-``pca_filter``          ``PCAFilter``        Applies a pca filter to the data.
-``get_common_mode``     ``GetCommonMode``    Calculate common mode (average over detectors not PCA filtered).
-======================= ==================== =================================================================
-
-**Pointing & focal-plane geometry**
-
-============================== ============================== =================================================================
-``name:``                      Class                          What it does
-============================== ============================== =================================================================
-``pointing_model``             ``PointingModel``               Apply pointing model to the TOD.
-``rotate_focal_plane``         ``RotateFocalPlane``            Interpret the boresight rotation effect as a focal plane rotation.
-``rotate_qu``                  ``RotateQU``                    Rotate Q and U components to/from telescope coordinates.
-``subtract_qu_common_mode``    ``SubtractQUCommonMode``        Subtract Q and U common mode.
-============================== ============================== =================================================================
-
-**Sources & planets**
-
-======================= ======================== =================================================================
-``name:``               Class                    What it does
-======================= ======================== =================================================================
-``source_flags``        ``SourceFlags``          Calculate the source flags in the data.
-``filter_for_sources``  ``FilterForSources``     Mask and gap-fill the signal at samples flagged by source_flags.
-``sso_footprint``       ``SSOFootprint``         Find nearby sources within a given distance and get SSO footprint and plot.
-======================= ======================== =================================================================
-
-**T-to-P (temperature-to-polarization) leakage**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``estimate_t2p``        ``EstimateT2P``      Estimate T to P leakage coefficients.
-``subtract_t2p``        ``SubtractT2P``      Subtract T to P leakage.
-======================= ==================== =================================================================
-
-**Scan / turnaround flags**
-
-======================= ======================== =================================================================
-``name:``               Class                    What it does
-======================= ======================== =================================================================
-``flag_turnarounds``    ``FlagTurnarounds``      From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
-``noisy_subscan_flags`` ``BadSubscanFlags``      Identifies and flags bad subscans (statistics of the subscan non-gaussian, e.g., high kurtosis).
-======================= ======================== =================================================================
-
-**Flag combination (for mapmaking / splits)**
-
-======================= ==================== =================================================================
-``name:``               Class                What it does
-======================= ==================== =================================================================
-``union_flags``         ``UnionFlags``       Do the union of relevant flags for mapping.
-``combine_flags``       ``CombineFlags``     Do the combination of relevant flags for mapping.
-``split_flags``         ``SplitFlags``       Get flags used for map splitting/bundling.
-======================= ==================== =================================================================
-
-
-Processing Modules
-------------------
-
-Full reference (docstrings, including ``calc``/``save``/``select``/``plot``
-config options and example config blocks) for all registered process
-classes, grouped as in the glossary above.
+add a row to the relevant table below and a matching ``.. autoclass::``
+entry in the same subsection --
+``tests/test_preprocess_docs.py`` will fail CI if a class is registered
+but has no ``.. autoclass::`` entry anywhere on this page.
 
 General / Utility
-::::::::::::::::::
+-----------------
+
+================== ================ ==================================================================================================
+``name:``          Class            What it does
+================== ================ ==================================================================================================
+``fft_trim``       ``FFTTrim``      Trim the AxisManager to optimize for faster FFTs later in the pipeline.
+``detrend``        ``Detrend``      Remove mean, median or linear trend from the data.
+``move``           ``Move``         Rename or remove a data field (used to replace gamma angles with those from wiregrid for example).
+``trim_flag_edge`` ``TrimFlagEdge`` Trim edge until given flags of all detectors are False.
+================== ================ ==================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.FFTTrim
 .. autoclass:: sotodlib.preprocess.processes.Detrend
 .. autoclass:: sotodlib.preprocess.processes.Move
 .. autoclass:: sotodlib.preprocess.processes.TrimFlagEdge
 
-Detector Quality Flags
-:::::::::::::::::::::::
+Detector Cuts and Flags
+-----------------------
+
+====================== ====================== ==========================================================================================================================
+``name:``              Class                  What it does
+====================== ====================== ==========================================================================================================================
+``det_bias_flags``     ``DetBiasFlags``       Derive poorly biased detectors from IV and Bias Step data.
+``trends``             ``Trends``             Check for large linear ramping in the data to look for unlocked detectors.
+``ptp_flags``          ``PTPFlags``           Find (and cut) detectors with anomalous peak-to-peak signal.
+``inv_var_flags``      ``InvVarFlags``        Find (and cut) detectors with too high inverse variance.
+``cut_bad_dist``       ``CutBadDistribution`` Detector cuts to keep a statistic (i.e white noise, peak-peak, fknee, etc.) within some bounds of a gaussian distribution.
+``detcal_nan_cuts``    ``DetcalNanCuts``      Remove detectors with NaN values in the specified det_cal metadata fields.
+``fp_flags``           ``FocalplaneNanFlags`` Cut detectors which have nans in their pointing information.
+``dark_dets``          ``DarkDets``           Cut dark detectors in the data.
+``acu_drop_flags``     ``AcuDropFlags``       Expands ACU drop (bad ACU/platform pointing data) flag fields in aman to all detectors.
+``smurfgaps_flags``    ``SmurfGapsFlags``     Expand smurfgaps (bad smurf data) flag of each stream_id to all detectors.
+``load_premade_flags`` ``LoadPremadeFlags``   Load premade flags from aman.
+``tod_stats``          ``GetStats``           Get basic statistics from a TOD or its power spectrum to use for flags and cuts.
+====================== ====================== ==========================================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.DetBiasFlags
 .. autoclass:: sotodlib.preprocess.processes.Trends
 .. autoclass:: sotodlib.preprocess.processes.PTPFlags
@@ -504,33 +380,70 @@ Detector Quality Flags
 .. autoclass:: sotodlib.preprocess.processes.DarkDets
 .. autoclass:: sotodlib.preprocess.processes.AcuDropFlags
 .. autoclass:: sotodlib.preprocess.processes.SmurfGapsFlags
-
-Premade Flags & Stats
-:::::::::::::::::::::::
 .. autoclass:: sotodlib.preprocess.processes.LoadPremadeFlags
 .. autoclass:: sotodlib.preprocess.processes.GetStats
 
 Glitches & Jumps
-::::::::::::::::::
+----------------
+
+============== =================== ===============================================================
+``name:``      Class               What it does
+============== =================== ===============================================================
+``glitches``   ``GlitchDetection`` Run glitch detection algorithm to find glitches.
+``glitchfill`` ``GlitchFill``      Fill glitches.
+``jumps``      ``Jumps``           Run generic jump finding and fixing algorithm.
+``fix_jumps``  ``FixJumps``        Repairs the jump heights given a set of jump flags and heights.
+============== =================== ===============================================================
+
 .. autoclass:: sotodlib.preprocess.processes.GlitchDetection
 .. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Jumps
 .. autoclass:: sotodlib.preprocess.processes.FixJumps
 
 Noise & PSD
-::::::::::::
+-----------
+
+=============== ============== ========================================================================================================================
+``name:``       Class          What it does
+=============== ============== ========================================================================================================================
+``psd``         ``PSDCalc``    Calculate the PSD of the data and add it to the AxisManager.
+``noise_ratio`` ``NoiseRatio`` Compute ratios of "signal band" to white noise in PSDs (simple fit-independent way to check for excessive 1/f channels).
+``noise``       ``Noise``      Estimate the white noise levels in the data.
+=============== ============== ========================================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.PSDCalc
 .. autoclass:: sotodlib.preprocess.processes.NoiseRatio
 .. autoclass:: sotodlib.preprocess.processes.Noise
 
 Calibration
-:::::::::::
+-----------
+
+====================== ==================== ================================================================================================================
+``name:``              Class                What it does
+====================== ==================== ================================================================================================================
+``calibrate``          ``Calibrate``        Calibrate the timestreams based on some provided information (Abscal, relcal, bias step)--just a multiplication.
+``pca_relcal``         ``PCARelCal``        Estimate the relcal factor from the atmosphere using PCA.
+``correct_iir_params`` ``CorrectIIRParams`` Correct missing iir_params (readout downsampling filter) by default values.
+====================== ==================== ================================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.Calibrate
 .. autoclass:: sotodlib.preprocess.processes.PCARelCal
 .. autoclass:: sotodlib.preprocess.processes.CorrectIIRParams
 
 HWP & Demodulation
-:::::::::::::::::::
+------------------
+
+=================== ================= ====================================================================================
+``name:``           Class             What it does
+=================== ================= ====================================================================================
+``hwp_angle_model`` ``HWPAngleModel`` Apply hwp angle model (from metadata) to the TOD.
+``estimate_hwpss``  ``EstimateHWPSS`` Builds a HWPSS (HWP-synchronous-signal) template.
+``subtract_hwpss``  ``SubtractHWPSS`` Subtracts a HWPSS template from signal.
+``demodulate``      ``Demodulate``    Demodulate the TOD.
+``a2_stats``        ``A2Stats``       Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
+``get_tau_hwp``     ``GetTauHWP``     Analyze observation with hwp spinning up or spinning down to estimate time constant.
+=================== ================= ====================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.HWPAngleModel
 .. autoclass:: sotodlib.preprocess.processes.EstimateHWPSS
 .. autoclass:: sotodlib.preprocess.processes.SubtractHWPSS
@@ -539,12 +452,32 @@ HWP & Demodulation
 .. autoclass:: sotodlib.preprocess.processes.GetTauHWP
 
 Ground Pickup (AzSS)
-::::::::::::::::::::::
+--------------------
+
+========================== ======================== ====================================================================================================
+``name:``                  Class                    What it does
+========================== ======================== ====================================================================================================
+``azss``                   ``AzSS``                 Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight  and subtract.
+``subtract_azss_template`` ``SubtractAzSSTemplate`` Subtract Azimuth Synchronous Signal (AzSS) common template.
+========================== ======================== ====================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.AzSS
 .. autoclass:: sotodlib.preprocess.processes.SubtractAzSSTemplate
 
 Filtering
-:::::::::
+---------
+
+=================== ================= =======================================================================
+``name:``           Class             What it does
+=================== ================= =======================================================================
+``fourier_filter``  ``FourierFilter`` Applies a chain of Fourier filters (defined in fft_ops) to the data.
+``sub_polyf``       ``SubPolyf``      Fit TOD in each subscan with polynomial of given order and subtract it.
+``apodize``         ``Apodize``       Apodize the edges of a signal.
+``scan_freq_cut``   ``ScanFreqCut``   Apply high-pass cut at the scan frequency.
+``pca_filter``      ``PCAFilter``     Applies a pca filter to the data.
+``get_common_mode`` ``GetCommonMode`` Calculate common mode (average over detectors not PCA filtered).
+=================== ================= =======================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.FourierFilter
 .. autoclass:: sotodlib.preprocess.processes.SubPolyf
 .. autoclass:: sotodlib.preprocess.processes.Apodize
@@ -553,30 +486,74 @@ Filtering
 .. autoclass:: sotodlib.preprocess.processes.GetCommonMode
 
 Pointing & Focal-Plane Geometry
-:::::::::::::::::::::::::::::::::
+-------------------------------
+
+=========================== ======================== ==================================================================
+``name:``                   Class                    What it does
+=========================== ======================== ==================================================================
+``pointing_model``          ``PointingModel``        Apply pointing model to the TOD.
+``rotate_focal_plane``      ``RotateFocalPlane``     Interpret the boresight rotation effect as a focal plane rotation.
+``rotate_qu``               ``RotateQU``             Rotate Q and U components to/from telescope coordinates.
+``subtract_qu_common_mode`` ``SubtractQUCommonMode`` Subtract Q and U common mode.
+=========================== ======================== ==================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.PointingModel
 .. autoclass:: sotodlib.preprocess.processes.RotateFocalPlane
 .. autoclass:: sotodlib.preprocess.processes.RotateQU
 .. autoclass:: sotodlib.preprocess.processes.SubtractQUCommonMode
 
 Sources & Planets
-::::::::::::::::::
+-----------------
+
+====================== ==================== ===========================================================================
+``name:``              Class                What it does
+====================== ==================== ===========================================================================
+``source_flags``       ``SourceFlags``      Calculate the source flags in the data.
+``filter_for_sources`` ``FilterForSources`` Mask and gap-fill the signal at samples flagged by source_flags.
+``sso_footprint``      ``SSOFootprint``     Find nearby sources within a given distance and get SSO footprint and plot.
+====================== ==================== ===========================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.SourceFlags
 .. autoclass:: sotodlib.preprocess.processes.FilterForSources
 .. autoclass:: sotodlib.preprocess.processes.SSOFootprint
 
 T-to-P Leakage
-:::::::::::::::
+--------------
+
+================ =============== =====================================
+``name:``        Class           What it does
+================ =============== =====================================
+``estimate_t2p`` ``EstimateT2P`` Estimate T to P leakage coefficients.
+``subtract_t2p`` ``SubtractT2P`` Subtract T to P leakage.
+================ =============== =====================================
+
 .. autoclass:: sotodlib.preprocess.processes.EstimateT2P
 .. autoclass:: sotodlib.preprocess.processes.SubtractT2P
 
 Scan / Turnaround Flags
-:::::::::::::::::::::::::
+-----------------------
+
+======================= =================== ================================================================================================
+``name:``               Class               What it does
+======================= =================== ================================================================================================
+``flag_turnarounds``    ``FlagTurnarounds`` From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
+``noisy_subscan_flags`` ``BadSubscanFlags`` Identifies and flags bad subscans (statistics of the subscan non-gaussian, e.g., high kurtosis).
+======================= =================== ================================================================================================
+
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 .. autoclass:: sotodlib.preprocess.processes.BadSubscanFlags
 
 Flag Combination (Mapmaking / Splits)
-:::::::::::::::::::::::::::::::::::::::
+-------------------------------------
+
+================= ================ =================================================
+``name:``         Class            What it does
+================= ================ =================================================
+``union_flags``   ``UnionFlags``   Do the union of relevant flags for mapping.
+``combine_flags`` ``CombineFlags`` Do the combination of relevant flags for mapping.
+``split_flags``   ``SplitFlags``   Get flags used for map splitting/bundling.
+================= ================ =================================================
+
 .. autoclass:: sotodlib.preprocess.processes.UnionFlags
 .. autoclass:: sotodlib.preprocess.processes.CombineFlags
 .. autoclass:: sotodlib.preprocess.processes.SplitFlags
