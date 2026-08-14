@@ -205,7 +205,18 @@ class SimMuMUXCrosstalk(Operator):
             )
             #import pdb
             #pdb.set_trace()
-            median_signal = np.median(signal[row][good])
+            ## Calculate a global median 
+            local_good = signal[row][good]
+            if obs.comm.comm_group is not None:
+                all_good = obs.comm.comm_group.gather(local_good, root=0)
+                if obs.comm.group_rank == 0:
+                    median_signal = np.median(np.concatenate(all_good))
+                else:
+                    median_signal = None
+                median_signal = obs.comm.comm_group.bcast(median_signal, root=0)
+            else:
+                median_signal = np.median(local_good)
+            ##
             P_opt = P_OPT[band] * 1e-12  # W
             P_atm_ref = P_ATM[band] * 1e-12  # W
             efficiency = ETA_ATM[band]
