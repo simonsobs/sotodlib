@@ -180,7 +180,18 @@ class SimMuMUXCrosstalk(Operator):
             )
             #import pdb
             #pdb.set_trace()
-            median_signal = np.median(signal[row][good])
+            ## Calculate a global median 
+            local_good = signal[row][good]
+            if obs.comm.comm_group is not None:
+                all_good = obs.comm.comm_group.gather(local_good, root=0)
+                if obs.comm.group_rank == 0:
+                    median_signal = np.median(np.concatenate(all_good))
+                else:
+                    median_signal = None
+                median_signal = obs.comm.comm_group.bcast(median_signal, root=0)
+            else:
+                median_signal = np.median(local_good)
+            ##
 
             if band not in P_opts.keys():
                 # Compute detector properties using JBolo
@@ -201,7 +212,7 @@ class SimMuMUXCrosstalk(Operator):
             P_atm_ref = P_atm_refs[band]
             efficiency = efficiencies[band]
             P_sat = P_sats[band]
-
+            
             # Compute conversion
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
