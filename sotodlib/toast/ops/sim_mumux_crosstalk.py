@@ -11,8 +11,13 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer, Timer
 from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
-import jbolo.jbolo_funcs as jf
-from jbolo.utils import load_sim
+
+try:
+    import jbolo.jbolo_funcs as jf
+    from jbolo.utils import load_sim
+    jbolo_available = True
+except:
+    jbolo_available = False
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
@@ -220,6 +225,11 @@ class SimMuMUXCrosstalk(Operator):
                 "SimMuMUXCrosstalk cannot be run on subsets of detectors"
             )
 
+        # Check for JBOLO installation
+        if not jbolo_available:
+            raise RuntimeError(
+                "Cannot calculate detector parameters -- no JBolo installation"
+            )
         # Check for JBOLO data path
         if 'JBOLO_PATH' not in os.environ.keys() or 'JBOLO_MODELS_PATH' not in os.environ.keys():
             raise RuntimeError(
