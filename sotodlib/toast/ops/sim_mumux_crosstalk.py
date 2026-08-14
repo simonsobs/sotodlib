@@ -207,7 +207,11 @@ class SimMuMUXCrosstalk(Operator):
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
             R_TES = R_FRAC * R_BOLO
-            assert P_sat > P_opt # Check for saturated detectors
+
+            # Check for saturated detectors, flag if so
+            if P_sat < P_opt:
+                obs.detdata[self.det_flags][det] |= self.det_flag_mask
+
             I_TES = np.sqrt((P_sat - P_opt) / R_TES)
             dIdP = -1 / (I_TES * (R_TES - R_SHUNT))  # W -> A
             dPhi0dI = 1 / 9e-6  # A -> [rad]
@@ -285,6 +289,10 @@ class SimMuMUXCrosstalk(Operator):
             #     Get crosstalk strength, chi
             #     Generate output data by mixing input data
             for row_target, det_target in zip(rows, detectors):
+                # Skip crosstalk for saturated detectors
+                if np.isnan(dPhi0dT[det_target]):
+                    continue
+
                 crosstalk = np.zeros_like(input_data[row_target])
                 target_squid_phase = self._temperature_to_squid_phase(
                     input_data[row_target],
@@ -301,8 +309,8 @@ class SimMuMUXCrosstalk(Operator):
                         Phi0[det_source],
                         dPhi0dT[det_source],
                     )
-                    # Add crosstalk if not collided resonator
-                    if not np.isnan(chi):
+                    # Add crosstalk if not collided resonator or saturated detector
+                    if not (np.isnan(chi) or np.isnan(dPhi0dT[det_source])):
                         crosstalk += chi * np.sin(
                             source_squid_phase - target_squid_phase
                         )
