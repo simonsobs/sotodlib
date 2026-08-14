@@ -339,7 +339,6 @@ class SimMuMUXCrosstalk(Operator):
                 # Propagate flags
                 obs.detdata[self.det_flags][det] |= temp_obs.detdata[self.det_flags][det]
 
-
             # Free data copy
             temp_obs.clear()
             del temp_obs
