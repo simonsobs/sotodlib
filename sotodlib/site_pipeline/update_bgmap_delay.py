@@ -146,6 +146,7 @@ class OutputCfg:
         transient_errors = [
             'sotodlib.core.metadata.loader.LoaderError',
             'BlockingIOError',
+            'FileNotFoundError',
         ]
         for err in transient_errors:
             if err in msg:
@@ -269,6 +270,9 @@ class BgmapDelayCfg:
             num_process = self.process.num_obs
         else:
             raise ValueError(f'which is not bgmap or obs but {which}')
+
+        if num_process == 0:
+            return []
 
         # Find all obs_ids that have not been processed
         with open(failed_file, "r") as f:
