@@ -1039,7 +1039,7 @@ def run_obs_process(cfg: BgmapDelayCfg, obs_id: str) -> RunObsResult:
             cfg.data.context_path,
             metadata_list=cfg.data.metadata_list)
 
-        bgmap_dict = load_book.get_cal_obsids(ctx, obs_id, "bgmap")
+        bgmap_dict = load_book.get_cal_obsids(ctx, obs_id, "bgmap", max_days_before=20)
         bgmap_ids = []
         for dset, oid in bgmap_dict.items():
             if oid is None:
