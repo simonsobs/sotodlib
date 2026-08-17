@@ -286,6 +286,8 @@ TOD Operations
 .. autoclass:: sotodlib.preprocess.processes.Jumps
 .. autoclass:: sotodlib.preprocess.processes.FixJumps
 .. autoclass:: sotodlib.preprocess.processes.FourierFilter
+.. autoclass:: sotodlib.preprocess.processes.JointQUNmatModel
+.. autoclass:: sotodlib.preprocess.processes.JointQUNmatFilter
 
 Calibration
 :::::::::::

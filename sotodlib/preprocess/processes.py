@@ -2355,6 +2355,141 @@ class PCAFilter(_Preprocess):
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
 
+
+class JointQUNmatModel(_Preprocess):
+    """Fit a joint demodulated Q/U Fourier Nmat operator.
+
+    The Q and U detector streams are whitened and analyzed together. Modes
+    inconsistent with independent noise according to a Marchenko--Pastur plus
+    Tracy--Widom threshold are identified, and the whitened noise model
+    ``N(f) = D(f) + V E(f) V.T`` is stored in ``proc_aman``.
+
+    This is calculated from real data only (``skip_on_sim: True``) so that
+    ``joint_qu_nmat_filter`` can reload it when running on simulations,
+    following the same pattern as ``noise`` and ``fourier_filter``.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_model"
+        skip_on_sim: True
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        calc:
+          fmin: 0.0015
+          fmax: 0.2
+          noise_band: [0.5, 1.75]
+          bin_width_hz: 0.2
+          mp_significance: 0.999
+          n_modes_max: 18
+          singleness_max: 0.55
+          profile_n_bins: 40
+          profile_min_nfreq: 20
+          profile_diagonal_floor: 0.05
+        save:
+          wrap_name: "nmat_qu"
+
+    See sotodlib.tod_ops.nmat_filter.fit_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_model"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = (step_cfgs.get("save") or {}).get("wrap_name", "nmat_qu")
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+            aman,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            **self.calc_cfgs,
+        )
+        logger.info(
+            "Joint Q/U Nmat model: selected %s modes per bin "
+            "(above threshold %s, singleness-vetoed %s, capped %s)",
+            np.asarray(operator.n_selected).tolist(),
+            np.asarray(operator.n_above_threshold).tolist(),
+            np.asarray(operator.n_failed_singleness).tolist(),
+            np.asarray(operator.n_capped_by_max).tolist(),
+        )
+        self.save(proc_aman, operator)
+        return aman, proc_aman
+
+    def save(self, proc_aman, operator):
+        if self.save_cfgs is None:
+            return
+        proc_aman.wrap(self.save_name, operator)
+
+
+class JointQUNmatFilter(_Preprocess):
+    """Apply a stored joint demodulated Q/U Fourier Nmat operator.
+
+    Reads the operator fit by ``joint_qu_nmat_model`` from ``proc_aman`` and
+    applies it, so simulations reuse the operator derived from real data rather
+    than refitting it on signal-only timestreams.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_filter"
+        skip_on_sim: False
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        process:
+          nmat_model: "nmat_qu"
+          psd_scale: 1.0
+
+    Setting ``use_data_aman: True`` instead fits the operator directly from the
+    supplied real-data AxisManager rather than reloading a stored one, with the
+    fit parameters given under ``process.fit``.
+
+    See sotodlib.tod_ops.nmat_filter.apply_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_filter"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = None
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        cfgs = dict(self.process_cfgs)
+        model_name = cfgs.pop("nmat_model", "nmat_qu")
+        fit_cfgs = cfgs.pop("fit", None)
+
+        if self.use_data_aman:
+            model_aman = data_aman if data_aman is not None else aman
+            logger.info(
+                "Fitting the Nmat operator from the supplied AxisManager "
+                "(%d detectors)", model_aman.dets.count
+            )
+            operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+                model_aman,
+                signal_Q=self.signal_Q,
+                signal_U=self.signal_U,
+                **(fit_cfgs or {}),
+            )
+        else:
+            if model_name not in proc_aman:
+                raise KeyError(
+                    f"Nmat operator {model_name!r} not found in proc_aman; "
+                    "run joint_qu_nmat_model first, or point nmat_model at "
+                    "the name it was saved under"
+                )
+            operator = proc_aman[model_name]
+
+        tod_ops.nmat_filter.apply_joint_qu_nmat_operator(
+            aman,
+            operator,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            in_place=True,
+            **cfgs,
+        )
+        return aman, proc_aman
+
+
 class GetCommonMode(_Preprocess):
     """
     Calculate common mode.
@@ -3300,6 +3435,8 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(JointQUNmatModel)
+_Preprocess.register(JointQUNmatFilter)
 _Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
