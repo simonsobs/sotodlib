@@ -12,11 +12,12 @@ https://sotodlib.readthedocs.io/en/latest/preprocess.html.
 
 This only checks for missing/stale coverage of the registry against the
 docs page -- it does not check that any of the RST itself is
-well-formed. That's what the Sphinx build is for: it will fail on a broken
-``.. autoclass::``/``.. autofunction::`` target or malformed docstring,
-which is a class of bug this test can't see (e.g. it can't tell that a
-docstring's own RST is broken -- only that some string referencing the
-class exists somewhere on the page).
+well-formed (e.g. it can't tell that a docstring's own RST is broken --
+only that some string referencing the class exists somewhere on the
+page). That's what the actual Sphinx build is for: .readthedocs.yaml
+sets sphinx.fail_on_warning: true, so the "docs/readthedocs.org:
+sotodlib" PR check fails on any RST/autodoc warning, repo-wide -- not
+just in docs/preprocess.rst.
 """
 
 import re

@@ -1171,6 +1171,7 @@ class A2Stats(_Preprocess):
     Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
 
     Takes the following ``calc`` config options:
+
     :stat_names: (*list*) List of strings identifying which statistics to calculate.
         Refer to ``sotodlib.tod_ops.flags.get_stats`` (below) for available stats.
         Default is ``["mean", "median", "var", "ptp"]``.

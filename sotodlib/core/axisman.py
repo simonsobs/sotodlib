@@ -830,21 +830,21 @@ class AxisManager:
         data array that is found assigned to an axis
         matching the specified axis.
 
-        Args:
-            axis (str): The name of the axis in the aman to reindex.
-            indexes (int array): an array of ints with length
-                equal to the length of the new array
-                and values equal to the idxs of the
-                values in the data to be reindexed.
-                Indexes that should be left as nan in
-                the new array should be set to -1 or nan.
+        For example, with data = [1,3,5] and indexes = [0, -1, 2, 1],
+        the result is new_data = [1, nan, 5, 3].
 
-            For example:
-                data = [1,3,5], indexes = [0, -1, 2, 1]
-                would result in new_data = [1, nan, 5, 3]
-            
-            in_place (bool): If in_place == True, the intersection is
-            applied to self.  Otherwise, a new object is returned,
+        Args:
+
+          axis (str): The name of the axis in the aman to reindex.
+
+          indexes (int array): an array of ints with length equal to
+            the length of the new array and values equal to the idxs
+            of the values in the data to be reindexed. Indexes that
+            should be left as nan in the new array should be set to
+            -1 or nan.
+
+          in_place (bool): If in_place == True, the intersection is
+            applied to self. Otherwise, a new object is returned,
             with data copied out.
         """
         # Check if axis even exists first
