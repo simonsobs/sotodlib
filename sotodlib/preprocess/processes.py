@@ -521,20 +521,20 @@ class NoiseRatio(_Preprocess):
 
     Example config block::
 
-    - name: "noise_ratio"
-      psd: "psdQ"
-      wrap: "noise_ratio_Q"
-      subscan: False
-      calc:
-        f_sel: [0.04, 0.14]
-        f_wn: [0.6, 1.0]
-      save: True
-      select:
-        r_max: 1.19
-        select_per_detector: True
+      - name: "noise_ratio"
+        psd: "psdQ"
+        wrap: "noise_ratio_Q"
+        subscan: False
+        calc:
+          f_sel: [0.04, 0.14]
+          f_wn: [0.6, 1.0]
+        save: True
+        select:
+          r_max: 1.19
+          select_per_detector: True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
-"""
+    """
     name = "noise_ratio"
 
     def __init__(self, step_cfgs):
@@ -1344,7 +1344,7 @@ class AzSS(_Preprocess):
           subtract: True
 
     If we estimate and subtract azss in left going scans only,
-    make union of glitch_flags and scan_flags first
+    make union of glitch_flags and scan_flags first::
 
       - name : "union_flags"
         process:
@@ -2748,6 +2748,11 @@ class UnionFlags(_Preprocess):
     """Do the union of relevant flags for mapping
     Typically you would include turnarounds, glitches, etc.
 
+    .. deprecated::
+        Use the more general ``CombineFlags`` instead. ``UnionFlags`` is kept
+        only so archives built with older process configs can still be
+        loaded; ``process()`` raises a deprecation warning when run.
+
     Saves results for aman under the "flags.[total_flags_label]" field.
 
      Example config block::
@@ -2878,6 +2883,12 @@ class RotateFocalPlane(_Preprocess):
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
 
+    ``sign: 1`` (the default) rotates each detector's demodQ/demodU out of
+    its own polarization-angle frame and into the shared telescope frame,
+    zeroing ``focal_plane.gamma`` when ``update_focal_plane: True``.
+    ``sign: -1`` undoes that, rotating back from the shared telescope frame
+    into each detector's own polarization-angle frame.
+
     Example config block::
 
         - name : "rotate_qu"
@@ -2945,8 +2956,7 @@ class SubtractQUCommonMode(_Preprocess):
     def save(self, proc_aman, coeff_aman):
         if not self.save_cfgs:
             return
-        if self.save_cfgs:
-            proc_aman.wrap(self.save_name, coeff_aman)
+        proc_aman.wrap(self.save_name, coeff_aman)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:

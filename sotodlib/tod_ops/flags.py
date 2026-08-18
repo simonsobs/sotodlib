@@ -1189,7 +1189,10 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
                          name="noisy_subscan"):
     """
     Identify and flag bad subscans based on various statistical thresholds.
-    aman : AxisManager 
+
+    Parameters
+    ----------
+    aman : AxisManager
         The tod.
     subscan_stats : dict
         Dictionary containing statistical metrics for subscans. Keys should 

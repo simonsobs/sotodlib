@@ -8,10 +8,15 @@ This guards against the failure mode where a new process is added to
 sotodlib.preprocess.processes and registered on the pipeline, but never
 added to the "Processing Modules" section of docs/preprocess.rst -- so
 it's usable from a config file but invisible to anyone reading
-https://sotodlib.readthedocs.io/en/latest/preprocess.html. An audit found
-32 of 54 registered classes missing from the docs this way before this
-test was added; see the "preproc_docs" repo's GAP_ANALYSIS.md for the
-full write-up.
+https://sotodlib.readthedocs.io/en/latest/preprocess.html.
+
+This only checks for missing/stale coverage of the registry against the
+docs page -- it does not check that any of the RST itself is
+well-formed. That's what the Sphinx build is for: it will fail on a broken
+``.. autoclass::``/``.. autofunction::`` target or malformed docstring,
+which is a class of bug this test can't see (e.g. it can't tell that a
+docstring's own RST is broken -- only that some string referencing the
+class exists somewhere on the page).
 """
 
 import re
@@ -30,10 +35,17 @@ AUTOCLASS_RE = re.compile(
     re.MULTILINE,
 )
 
+# Matches a double-backtick'd identifier, e.g. the ``FFTTrim`` cell of a
+# "Process Step Glossary" table row.
+DOUBLE_BACKTICK_RE = re.compile(r"``(\w+)``")
+
 
 class TestPreprocessDocsCoverage(unittest.TestCase):
-    """Cross-check the live Pipeline.PIPELINE registry against the
-    ``.. autoclass::`` entries in docs/preprocess.rst.
+    """Cross-check the live Pipeline.PIPELINE registry against
+    docs/preprocess.rst: every registered class needs both a
+    ``.. autoclass::`` entry (its full reference section) and a row in
+    one of the "Process Step Glossary" summary tables (its one-line
+    quick-reference entry).
     """
 
     def setUp(self):
@@ -51,26 +63,36 @@ class TestPreprocessDocsCoverage(unittest.TestCase):
         self.registered = {
             cls.__name__ for cls in Pipeline.PIPELINE.values()
         }
-        self.documented = set(AUTOCLASS_RE.findall(PREPROCESS_RST.read_text()))
+        rst_text = PREPROCESS_RST.read_text()
+        self.documented = set(AUTOCLASS_RE.findall(rst_text))
+        # Table rows aren't parsed structurally -- just check that each
+        # class name appears somewhere as a double-backtick'd identifier
+        # outside of its own ".. autoclass::" line, which is what a
+        # "Class" column entry in a glossary table looks like.
+        non_autoclass_text = "\n".join(
+            line for line in rst_text.splitlines()
+            if not line.lstrip().startswith(".. autoclass::")
+        )
+        self.in_tables = set(DOUBLE_BACKTICK_RE.findall(non_autoclass_text))
 
-    def test_100_all_registered_processes_are_documented(self):
+    def test_100_all_registered_processes_have_an_autoclass_entry(self):
         missing = sorted(self.registered - self.documented)
         self.assertEqual(
             missing, [],
             "The following process classes are registered on "
             "Pipeline.PIPELINE (sotodlib/preprocess/processes.py) but "
             "have no '.. autoclass::' entry in docs/preprocess.rst. Add "
-            "one under the 'Processing Modules' section (and a row in "
-            f"the 'Process Step Glossary' table) for: {missing}"
+            f"one under the 'Processing Modules' section for: {missing}"
         )
 
-    def test_101_no_stale_autoclass_entries(self):
-        stale = sorted(self.documented - self.registered)
+    def test_101_all_registered_processes_have_a_glossary_row(self):
+        missing = sorted(self.registered - self.in_tables)
         self.assertEqual(
-            stale, [],
-            "The following classes are referenced via '.. autoclass::' "
-            "in docs/preprocess.rst but are no longer registered on "
-            f"Pipeline.PIPELINE (renamed or removed?): {stale}"
+            missing, [],
+            "The following process classes have no row in a 'Process "
+            "Step Glossary' summary table in docs/preprocess.rst (no "
+            "``ClassName`` appears outside an '.. autoclass::' line). "
+            f"Add a table row for: {missing}"
         )
 
 

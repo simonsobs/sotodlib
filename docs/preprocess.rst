@@ -33,7 +33,8 @@ records which init layer it was built from, so if you try to run a proc
 config against a different init archive than the one it was created with, it
 will fail rather than silently mixing incompatible layers. Layers are
 chainable, so a proc layer's output can itself become the init input for a
-further layer.
+further layer, though doing so currently means running that further layer
+interactively because there is no ``three_layer_preprocess_tod`` script.
 
 This split was introduced to separate the pre-demodulation and
 post-demodulation steps for the SATs: the first (init) layer runs pointing,
@@ -52,7 +53,8 @@ synthetic examples on this page), see the platform config directories in the
 `site-pipeline-configs <https://github.com/simonsobs/site-pipeline-configs>`_
 repository, e.g. ``satp1/preprocess_config_init.yaml`` +
 ``satp1/preprocess_config_proc.yaml`` (two-layer) and
-``lat/preprocess_config_cmb.yaml`` (single-layer).
+``lat/preprocess_config_cmb_mf.yaml`` / ``lat/preprocess_config_cmb_uhf.yaml``
+(single-layer).
 
 `[TOD Processing] Infrastructure Introduction <https://simonsobs.atlassian.net/wiki/spaces/DM/pages/305627401/TOD+Processing+Infrastructure+Introduction>`_ has a fuller walkthrough (jobdb usage, extensive interactive/Python examples for loading, running, and saving preprocessing archives) that complements this reference page.
 
@@ -66,7 +68,8 @@ Passing ``--run-from-jobdb`` to ``preprocess_tod``/``multilayer_preprocess_tod``
 resumes a batch run from an existing jobdb's run list instead of rebuilding
 one — useful for continuing a large run that was interrupted (e.g. a Slurm
 job hitting its walltime) without redoing already-completed or
-already-known-to-fail work. Jobs can be inspected programmatically via
+already-known-to-fail work. It also starts immediately, since the wafer/band
+groups don't need to be recomputed. Jobs can be inspected programmatically via
 ``sotodlib.site_pipeline.jobdb.JobManager``.
 
 Preprocessing Pipelines
@@ -167,8 +170,8 @@ processing pipeline would look like::
 
     # How to subdivide observations
     subobs:
-        use: detset
-        label: detset
+        use: ["wafer_slot", "wafer.bandpass"]
+        label: "wafer_slot"
 
     # Metadata index & archive filenaming
     archive:
@@ -176,6 +179,7 @@ processing pipeline would look like::
         policy:
             type: 'simple'
             filename: 'preprocess_archive.h5'
+        batch_size: 50
 
     process_pipe:
         - name : "fft_trim"
@@ -209,10 +213,9 @@ processing pipeline would look like::
         
         - name: "calibrate"
           process:
-            kind: "single_value"
-            ## phase_to_pA: 9e6/(2*np.pi)
-            val: 1432394.4878270582
-        
+            kind: "array"
+            cal_array: "det_cal.phase_to_pW"
+
         - name: "psd"
           process:
             detrend: False
@@ -546,13 +549,13 @@ Scan / Turnaround Flags
 Flag Combination (Mapmaking / Splits)
 -------------------------------------
 
-================= ================ =================================================
+================= ================ =====================================================================================
 ``name:``         Class            What it does
-================= ================ =================================================
-``union_flags``   ``UnionFlags``   Do the union of relevant flags for mapping.
-``combine_flags`` ``CombineFlags`` Do the combination of relevant flags for mapping.
+================= ================ =====================================================================================
+``union_flags``   ``UnionFlags``   Deprecated -- use ``combine_flags`` instead. Kept only to load old process archives.
+``combine_flags`` ``CombineFlags`` Do the combination of relevant flags for mapping (generalizes ``union_flags``).
 ``split_flags``   ``SplitFlags``   Get flags used for map splitting/bundling.
-================= ================ =================================================
+================= ================ =====================================================================================
 
 .. autoclass:: sotodlib.preprocess.processes.UnionFlags
 .. autoclass:: sotodlib.preprocess.processes.CombineFlags
