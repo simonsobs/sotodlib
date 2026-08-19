@@ -1,25 +1,36 @@
 import numpy as np
 
 
-def get_apodize_window_for_ends(aman, apodize_samps=1600):
+def get_apodize_window_for_ends(aman, apodize_samps=1600, apo_type='C1'):
     """
     Generate an apodization window using a cosine taper at the beginning and end.
 
     Args:
         aman: An axismanager
         apodize_samps (int): Number of samples to apply the cosine taper to at each end.
+        apo_type (str): Type of apodization window applied to the edges. Options are:
+
+            - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
+              goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
+              apodization region. This is the default.
+            - ``'old_default'``: Legacy quarter-cosine taper, ``cos(x)`` over
+              ``[0, pi/2]``. Retained for backward compatibility.
 
     Returns:
         numpy.ndarray: An array representing the apodization window.
     """
+    if apo_type == 'C1':
+        cosedge = 0.5 * (np.cos(np.linspace(0, np.pi, apodize_samps)) + 1)
+    elif apo_type == 'old_default':
+        cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
+
     w = np.ones(aman.samps.count)
-    cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
     w[-apodize_samps:] = cosedge
     w[:apodize_samps] = np.flip(cosedge)
     return w
 
 
-def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
+def get_apodize_window_from_flags(aman, flags, apodize_samps=200, apo_type='C1'):
     """
     Generate an apodization window based on flag values. Apply cosine tapering every 
     continuous portion of data between flagged region.
@@ -29,6 +40,13 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
         flags (str or RangesMatrix or Ranges): Flags of mask in RangesMatrix/Ranges. If provided by 
             a string, 'aman.flags[flags]' is used for the flags.
         apodize_samps (int): Number of samples to apply the cosine taper.
+        apo_type (str): Type of apodization window applied to the edges. Options are:
+
+            - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
+              goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
+              apodization region. This is the default.
+            - ``'old_default'``: Legacy quarter-cosine taper, ``cos(x)`` over
+              ``[0, pi/2]``. Retained for backward compatibility.
 
     Returns:
         numpy.ndarray: An array representing the apodization window.
@@ -47,9 +65,13 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
         else:
             flag_is_1d = False
 
+    if apo_type == 'C1':
+        cosedge = 0.5 * (np.cos(np.linspace(0, np.pi, apodize_samps)) + 1)
+    elif apo_type == 'old_default':
+        cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
+
     apodizer = ~flags_mask
     apodizer = apodizer.astype(float)
-    cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
 
     if flag_is_1d:
         idxes_left = np.where(np.diff(apodizer) == -1)[0]
@@ -91,7 +113,7 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
 
 
 def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True,
-                   apo_axis='apodized', window=None, flags=None):
+                   apo_axis='apodized', window=None, flags=None, apo_type='C1'):
     """
     Function to smoothly filter the timestream to 0's on the ends with a
     cosine function. If window is provided, multiply the window function to
@@ -105,12 +127,20 @@ def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True
         apo_axis (str): Axis to store the apodized signal if not in place.
         window (numpy.ndarray): Precomputed apodization window.
         flags (str or RangesMatrix or Ranges): flag value to compute apodization window.
+        apo_type (str): Type of apodization window applied to the edges. Options are:
+
+            - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
+              goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
+              apodization region. This is the default.
+            - ``'old_default'``: Legacy quarter-cosine taper, ``cos(x)`` over
+              ``[0, pi/2]``. Retained for backward compatibility.
+
     """
     if window is None:
         if flags is not None:
-            window = get_apodize_window_from_flags(aman, flags, apodize_samps)
+            window = get_apodize_window_from_flags(aman, flags, apodize_samps, apo_type=apo_type)
         else:
-            window = get_apodize_window_for_ends(aman, apodize_samps)
+            window = get_apodize_window_for_ends(aman, apodize_samps, apo_type=apo_type)
 
     if in_place:
         aman[signal_name] *= window
