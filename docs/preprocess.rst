@@ -56,7 +56,35 @@ repository, e.g. ``satp1/preprocess_config_init.yaml`` +
 ``lat/preprocess_config_cmb_mf.yaml`` / ``lat/preprocess_config_cmb_uhf.yaml``
 (single-layer).
 
-`[TOD Processing] Infrastructure Introduction <https://simonsobs.atlassian.net/wiki/spaces/DM/pages/305627401/TOD+Processing+Infrastructure+Introduction>`_ has a fuller walkthrough (jobdb usage, extensive interactive/Python examples for loading, running, and saving preprocessing archives) that complements this reference page.
+`[TOD Processing] Infrastructure Introduction <https://simonsobs.atlassian.net/wiki/spaces/DM/pages/305627401/TOD+Processing+Infrastructure+Introduction>`_ has a fuller walkthrough (jobdb usage, extensive interactive/Python examples for loading, running, and saving preprocessing archives) that complements this reference page -- including a deeper look at first-run-vs-rerun behavior than the summary below.
+
+Running for the first time vs. re-running against an existing archive
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+The ``archive`` config key names two things together: ``archive.index``, a
+ManifestDb sqlite file keyed on ``obs_id`` plus the ``subobs.use`` grouping
+fields (e.g. detset, or ``["wafer_slot", "wafer.bandpass"]``), and
+``archive.policy.filename``, the HDF5 file the actual ``proc_aman`` results
+are written into. Together these are "the archive" for a given config.
+
+- **First run**: ``archive.index`` doesn't exist yet, so
+  :func:`sotodlib.preprocess.preprocess_util.get_preprocess_db` creates a new,
+  empty ManifestDb there. Every obs_id/group the query returns is processed
+  from scratch -- each pipeline step's ``calc_and_save`` runs, and the results
+  are written into the archive as they complete.
+- **Re-running**: if ``archive.index`` already exists, ``preprocess_tod``
+  inspects it first and drops any obs_id/group already present in the archive
+  from the run list, so a second invocation over the same (or an overlapping)
+  observation list only processes what's new -- already-archived
+  observations are left alone rather than recomputed. Pass ``--overwrite`` to
+  force everything in the query to be reprocessed and the existing entries
+  replaced instead.
+- This is also what makes the archive reusable for **simulations**: when
+  :meth:`sotodlib.preprocess.pcore.Pipeline.run` is called with an existing
+  ``proc_aman`` (as loaded from the archive), every step's ``calc_and_save``
+  is skipped and only ``process()`` re-runs on top of the already-computed
+  products -- e.g. reapplying a filter fit on real data to a signal-only sim
+  without redoing the fit.
 
 Preprocessing job tracking (``jobdb``)
 ::::::::::::::::::::::::::::::::::::::
