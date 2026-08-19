@@ -13,6 +13,8 @@ from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
 
 try:
+    # NB: Requires specific version of JBolo
+    # https://github.com/kmharrington/jbolo
     import jbolo.jbolo_funcs as jf
     from jbolo.utils import load_sim
     jbolo_available = True
