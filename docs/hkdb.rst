@@ -1,4 +1,5 @@
 .. py:module:: sotodlib.io.hkdb
+   :no-index:
 
 ============================
 Loading L3 Housekeeping Data

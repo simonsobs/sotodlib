@@ -410,8 +410,9 @@ multiple wafers at once.
 Otherwise, specify a wafer slot or restrict detectors in command line args to debug.
 
 Command Line arguments:
+
 .. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_step1
    :func: get_parser
 
 
@@ -588,17 +589,18 @@ Example NERSC slurm job submission config file
 ``````````````````````````````````````````````
 
 .. code-block:: yaml
+
   #!/bin/bash -l
 
   #SBATCH --qos=shared
   #SBATCH --constraint=cpu
   #SBATCH --nodes=1
   #SBATCH --ntasks=1
-  
+
   #SBATCH --cpus-per-task=14
   #SBATCH --time=00:30:00
-  #SBATCH --mem=220G`` #(may need regular queue & up to 400 Gb for long obs)
-  
+  #SBATCH --mem=220G #(may need regular queue & up to 400 Gb for long obs)
+
   export OMP_NUM_THREADS=1
   set -e
 
@@ -613,13 +615,13 @@ Example NERSC slurm job submission config file
 
   if (($map)); then
     echo submitted map job;
-    srun -n 1 -N 1 -c 14 python3 
+    srun -n 1 -N 1 -c 14 python3
        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile
        --obs_id=${2} --sso_name="moon";
   else
     echo submitted tod job;
-    srun -n 1 -N 1 -c 14 python3 
-        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile 
+    srun -n 1 -N 1 -c 14 python3
+        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile
         --obs_id=${2} --sso_name="moon";
   fi
 
@@ -640,7 +642,7 @@ get_brightsrc_pointing_part2
 See Part 1 for description
 
 .. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_step2
    :func: get_parser
 
 
@@ -729,7 +731,7 @@ To run, this script requires a config file described below. If run without the
 
 .. argparse::
    :module: sotodlib.site_pipeline.update_det_match
-   :func: make_parser
+   :func: get_parser
 
 Generated results
 ```````````````````
@@ -1763,31 +1765,10 @@ config
    :undoc-members:
 
 
-constants
-`````````
-
-.. automodule:: sotodlib.site_pipeline.utils.constants
-   :members:
-   :undoc-members:
-
 depth1_utils
 ````````````
 
 .. automodule:: sotodlib.site_pipeline.utils.depth1_utils
-   :members:
-   :undoc-members:
-
-exceptions
-``````````
-
-.. automodule:: sotodlib.site_pipeline.utils.exceptions
-   :members:
-   :undoc-members:
-
-io
-``
-
-.. automodule:: sotodlib.site_pipeline.utils.io
    :members:
    :undoc-members:
 

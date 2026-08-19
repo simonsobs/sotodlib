@@ -9,6 +9,7 @@ def get_apodize_window_for_ends(aman, apodize_samps=1600, apo_type='C1'):
         aman: An axismanager
         apodize_samps (int): Number of samples to apply the cosine taper to at each end.
         apo_type (str): Type of apodization window applied to the edges. Options are:
+
             - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
               goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
               apodization region. This is the default.
@@ -40,6 +41,7 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200, apo_type='C1')
             a string, 'aman.flags[flags]' is used for the flags.
         apodize_samps (int): Number of samples to apply the cosine taper.
         apo_type (str): Type of apodization window applied to the edges. Options are:
+
             - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
               goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
               apodization region. This is the default.
@@ -126,6 +128,7 @@ def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True
         window (numpy.ndarray): Precomputed apodization window.
         flags (str or RangesMatrix or Ranges): flag value to compute apodization window.
         apo_type (str): Type of apodization window applied to the edges. Options are:
+
             - ``'C1'``: Standard cosine (Hann) taper, i.e. a half-cosine that
               goes smoothly from 1 to 0 as ``0.5 * (1 + cos(x))`` over the
               apodization region. This is the default.

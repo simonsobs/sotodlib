@@ -1144,7 +1144,8 @@ def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     """
     Evaluate white noise and fknee cuts based on provided boundaries.
 
-    Parameters:
+    Parameters
+    ----------
     aman : object
         An object containing noise fit statistics and noise model coefficients.
     low_wn : float or None
@@ -1154,7 +1155,8 @@ def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     high_fk : float or None
         The upper boundary for fknee. If None, fknee flagging is skipped.
 
-    Returns:
+    Returns
+    -------
     tuple or None
         A tuple containing flags for valid white noise and fknee if both boundaries are provided.
         If only one boundary is provided, returns the corresponding flag.
@@ -1189,7 +1191,10 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
                          name="noisy_subscan"):
     """
     Identify and flag bad subscans based on various statistical thresholds.
-    aman : AxisManager 
+
+    Parameters
+    ----------
+    aman : AxisManager
         The tod.
     subscan_stats : dict
         Dictionary containing statistical metrics for subscans. Keys should 

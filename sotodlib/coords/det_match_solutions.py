@@ -18,72 +18,72 @@ import sys
 @dataclass
 class SolutionsCfg:
     """
-    Args
-    ------
-    ctx_path: str
+    Parameters
+    ----------
+    ctx_path : str
         Path to context file to use to pull tod metadata.
-    pointing_results_dir: str
-        Results to directory that contains pointing results.  Files in
-        directory should look like:
-        ```
-        focal_plane_<obs_id>_<wafer_slot>.hdf
-        ```
-    results_dir: str
+    pointing_results_dir : str
+        Results to directory that contains pointing results. Files in
+        directory should look like::
+
+            focal_plane_<obs_id>_<wafer_slot>.hdf
+
+    results_dir : str
         Directory where results should be stored.
-    wafer_info_path: str
+    wafer_info_path : str
         Path to the wafer_info h5 file.
-    tel_type: str
+    tel_type : str
         Tel type for the optics model. Either "SAT" or "LAT"
-    base_obs_id: str
+    base_obs_id : str
         Obs_id to use as a base for matching when merging multiple pointing
         obs_ids for a wafer.  Will default to the pointing obs_id with the
         greatest number of detectors above the min_R2 threshold.
-    zemax_path: str
+    zemax_path : str
         If running for a "LAT" tel_type, the path to the zemax file must be specified.
-    apply_roll: bool
+    apply_roll : bool
         Whether or not to apply the obs_id roll angle.  Some pointing sets
         may already be corrected for roll angle.
-    pointing_field: str
+    pointing_field : str
         Name of sub axis manager in pointing tune axis maanger containng the
         pointing information.
-    site_pipeline_cfg_dir: str
+    site_pipeline_cfg_dir : str
         Path to site-pipeline-config dir. Defaults to the env var
         ``$SITE_PIPELINE_CONFIG_DIR``.
-    finite_xi_thresh: int
+    finite_xi_thresh : int
         Minimum number of dets a pointing result must have to add it to the
         analysis.
-    min_r2: float
+    min_r2 : float
         Minimum R-squared for det pointing to be considered.
-    sel_rad: float
+    sel_rad : float
         Selection radius for grid-based interpolation pointing offset subtraction.
-    unassigned_slots: int:
+    unassigned_slots : int
         Number of additional "unassigned" node to use per-side
-    wafer_map_path: str
+    wafer_map_path : str
         Path to the wafer map file. Defaults to ``<site-pipeline-config>/shared/detmatpping/wafer_map.yaml``.
-    match_pars: dict
+    match_pars : dict
         Dictionary of match parameters to use for pointing obs_id merging and
         each match iteration.  Should have the form::
 
-        match_pars:
-            pointing:
-                freq_width: 0.4
-                dist_width: 2.0
-            match0:
-                freq_width: 200
-                dist_width: 0.4
-            match1:
-                freq_width: 50
-                dist_width: 0.8
-            match2:
-                freq_width: 5
-                dist_width: 0.1
+            match_pars:
+                pointing:
+                    freq_width: 0.4
+                    dist_width: 2.0
+                match0:
+                    freq_width: 200
+                    dist_width: 0.4
+                match1:
+                    freq_width: 50
+                    dist_width: 0.8
+                match2:
+                    freq_width: 5
+                    dist_width: 0.1
 
-    Initial pointing offset: Tuple[float, float]
+    initial_pointing_offset : Tuple[float, float]
         Estimated pointing offset for the boresight. This should be
         (xi_offset, eta_offset) where both are in radians.
-    ufm_to_fp_path: str
+    ufm_to_fp_path : str
         Path to file that maps wafer_slot to position on focal plane.
-    freq_correct_by_muxband: bool
+    freq_correct_by_muxband : bool
         If true, apply the same freq offset correction to all resonators in a mux-band.
     """
 

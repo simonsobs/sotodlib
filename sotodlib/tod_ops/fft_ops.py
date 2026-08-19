@@ -991,7 +991,7 @@ def fit_noise_model(
                             lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
                             full_output=True,
                         )
-                        hessian_ndt, _ = Hfun(res["x"])
+                        hessian_ndt = Hfun(res["x"])[0]
                         covout_i = np.linalg.inv(hessian_ndt)
                     except np.linalg.LinAlgError:
                         errout[i] = 'LinalgError'
