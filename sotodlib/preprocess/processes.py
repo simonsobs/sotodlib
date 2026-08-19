@@ -29,6 +29,13 @@ class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
 
+    Example config block::
+
+      - name: "fft_trim"
+        process:
+          axis: "samps"
+          prefer: "right"
+
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
     name = "fft_trim"
@@ -48,6 +55,13 @@ class FFTTrim(_Preprocess):
 
 class Detrend(_Preprocess):
     """Detrend the signal. All processing configs go to `detrend_tod`
+
+    Example config block::
+
+      - name: "detrend"
+        signal: "signal" # optional
+        process:
+          method: "linear"
 
     .. autofunction:: sotodlib.tod_ops.detrend_tod
     """
@@ -69,7 +83,20 @@ class Detrend(_Preprocess):
 class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
-    in proc_aman under the "det_bias_cuts" field. 
+    in proc_aman under the "det_bias_flags" field.
+
+    Data selection cuts detectors flagged by any of the bias-range checks
+    (see ``get_det_bias_flags`` below for what each checks).
+
+    Example config block::
+
+      - name: "det_bias_flags"
+        calc:
+          rfrac_range: [0.2, 0.8]
+          # psat_range: [0.1, 10]  # optional, required if plot: True
+        save: True
+        select: True
+        plot: True
 
     .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
     """
@@ -494,20 +521,20 @@ class NoiseRatio(_Preprocess):
 
     Example config block::
 
-    - name: "noise_ratio"
-      psd: "psdQ"
-      wrap: "noise_ratio_Q"
-      subscan: False
-      calc:
-        f_sel: [0.04, 0.14]
-        f_wn: [0.6, 1.0]
-      save: True
-      select:
-        r_max: 1.19
-        select_per_detector: True
+      - name: "noise_ratio"
+        psd: "psdQ"
+        wrap: "noise_ratio_Q"
+        subscan: False
+        calc:
+          f_sel: [0.04, 0.14]
+          f_wn: [0.6, 1.0]
+        save: True
+        select:
+          r_max: 1.19
+          select_per_detector: True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
-"""
+    """
     name = "noise_ratio"
 
     def __init__(self, step_cfgs):
@@ -1144,6 +1171,7 @@ class A2Stats(_Preprocess):
     Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
 
     Takes the following ``calc`` config options:
+
     :stat_names: (*list*) List of strings identifying which statistics to calculate.
         Refer to ``sotodlib.tod_ops.flags.get_stats`` (below) for available stats.
         Default is ``["mean", "median", "var", "ptp"]``.
@@ -1317,7 +1345,7 @@ class AzSS(_Preprocess):
           subtract: True
 
     If we estimate and subtract azss in left going scans only,
-    make union of glitch_flags and scan_flags first
+    make union of glitch_flags and scan_flags first::
 
       - name : "union_flags"
         process:
@@ -1493,7 +1521,19 @@ class FlagTurnarounds(_Preprocess):
         All process configs go to ``get_turnaround_flags``. If the ``method`` key
         is not included in the preprocess config file calc configs then it will
         default to 'scanspeed'.
-    
+
+    Saves results in proc_aman under the "turnaround_flags" field, with
+    sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
+
+    Example config block::
+
+      - name: "flag_turnarounds"
+        process:
+          method: "scanspeed"
+        calc:
+          method: "scanspeed"
+        save: True
+
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
@@ -1536,7 +1576,15 @@ class FlagTurnarounds(_Preprocess):
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
         All process configs go to `sotodlib.tod_ops.sub_polyf`.
-    
+
+    Example config block::
+
+      - name: "sub_polyf"
+        process:
+          degree: 0
+          method: "polyfit"
+          in_place: True
+
     .. autofunction:: sotodlib.tod_ops.subscan_polyfilter
     """
     name = 'sub_polyf'
@@ -2676,7 +2724,7 @@ class SplitFlags(_Preprocess):
             central_pixels: 0.071
           save: True
 
-    .. autofunction:: sotodlib.obs_ops.flags.get_split_flags
+    .. autofunction:: sotodlib.obs_ops.splits.get_split_flags
     """
     name = "split_flags"
 
@@ -2700,6 +2748,11 @@ class SplitFlags(_Preprocess):
 class UnionFlags(_Preprocess):
     """Do the union of relevant flags for mapping
     Typically you would include turnarounds, glitches, etc.
+
+    .. deprecated::
+        Use the more general ``CombineFlags`` instead. ``UnionFlags`` is kept
+        only so archives built with older process configs can still be
+        loaded; ``process()`` raises a deprecation warning when run.
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
@@ -2831,6 +2884,12 @@ class RotateFocalPlane(_Preprocess):
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
 
+    ``sign: 1`` (the default) rotates each detector's demodQ/demodU out of
+    its own polarization-angle frame and into the shared telescope frame,
+    zeroing ``focal_plane.gamma`` when ``update_focal_plane: True``.
+    ``sign: -1`` undoes that, rotating back from the shared telescope frame
+    into each detector's own polarization-angle frame.
+
     Example config block::
 
         - name : "rotate_qu"
@@ -2858,6 +2917,15 @@ class RotateQU(_Preprocess):
 class SubtractQUCommonMode(_Preprocess):
     """Subtract Q and U common mode.
 
+    If ``calc`` is set, computes the median Q/U template and each detector's
+    coupling coefficient to it (via
+    :func:`sotodlib.tod_ops.deproject.get_qu_common_mode_coeffs`) and saves
+    them under the ``qu_common_mode_coeffs`` field of ``proc_aman``.
+    ``process`` then subtracts that scaled template from each detector's Q/U
+    signal. If ``calc`` was not run (or its result wasn't saved), ``process``
+    falls back to computing the template/coefficients on the fly from the
+    current ``aman`` instead of using a saved ``proc_aman`` archive.
+
     Example config block::
 
         - name : 'subtract_qu_common_mode'
@@ -2867,28 +2935,29 @@ class SubtractQUCommonMode(_Preprocess):
           calc: True
           save: True
 
+    .. autofunction:: sotodlib.tod_ops.deproject.get_qu_common_mode_coeffs
     .. autofunction:: sotodlib.tod_ops.deproject.subtract_qu_common_mode
     """
     name = "subtract_qu_common_mode"
 
     def __init__(self, step_cfgs):
-        self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
-        self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
+        self.signal_name_Q = step_cfgs.get('signal_name_Q', 'demodQ')
+        self.signal_name_U = step_cfgs.get('signal_name_U', 'demodU')
         self.save_name = "qu_common_mode_coeffs"
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        coeff_aman = get_qu_common_mode_coeffs(aman, Q_signal, U_signal, merge)
-        self.save(proc_aman, aman)
+        coeff_aman = tod_ops.deproject.get_qu_common_mode_coeffs(
+            aman, self.signal_name_Q, self.signal_name_U, merge=False)
+        self.save(proc_aman, coeff_aman)
 
         return aman, proc_aman
 
-    def save(self, proc_aman, aman):
+    def save(self, proc_aman, coeff_aman):
         if not self.save_cfgs:
             return
-        if self.save_cfgs:
-            proc_aman.wrap(self.save_name, aman['qu_common_mode_coeffs'])
+        proc_aman.wrap(self.save_name, coeff_aman)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:
@@ -3016,17 +3085,57 @@ class PointingModel(_Preprocess):
 class BadSubscanFlags(_Preprocess):
     """Identifies and flags bad subscans.
 
-      Example config block::
+    Saves results in proc_aman under the "noisy_subscan_flags" (valid
+    subscans, dets x samps) and "noisy_dets_flags" (valid detectors, dets)
+    fields. ``calc.subscan_stats`` must list signal names whose *last
+    character* (``T``/``Q``/``U``) selects a prior ``tod_stats`` result:
+    for each entry ``sig`` this looks up
+    ``proc_aman[stats_name + "_" + sig[-1]]``, so e.g. ``"demodQ"`` selects
+    ``proc_aman.tod_stats_Q``. This requires ``tod_stats`` (``GetStats``,
+    see above) to have already been run once per signal with a matching
+    ``wrap`` name (``tod_stats_T``/``tod_stats_Q``/``tod_stats_U`` for the
+    default ``stats_name: tod_stats``).
+
+    Example config block::
+
+        - name : "tod_stats"
+          signal: "dsT"
+          wrap: "tod_stats_T"
+          calc:
+            stat_names: ["std", "ptp"]
+            split_subscans: True
+          save: True
+
+        - name : "tod_stats"
+          signal: "demodQ"
+          wrap: "tod_stats_Q"
+          calc:
+            stat_names: ["median", "std", "skew", "kurtosis", "ptp"]
+            split_subscans: True
+          save: True
+
+        - name : "tod_stats"
+          signal: "demodU"
+          wrap: "tod_stats_U"
+          calc:
+            stat_names: ["median", "std", "skew", "kurtosis", "ptp"]
+            split_subscans: True
+          save: True
 
         - name : "noisy_subscan_flags"
-            stats_name: tod_stats # optional
-            calc: 
-                nstd_lim: 5.0 
-                merge: False
-            save: True
-            select: True
-    
-    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
+          stats_name: tod_stats # optional
+          calc:
+            subscan_stats: ["demodQ", "demodU", "dsT"]
+            nstd_lim: 3.0
+            ptp_lim: 0.8
+            kurt_lim: 0.5
+            skew_lim: 0.5
+            noisy_detector_lim: 0.5
+            merge: False
+          save: True
+          select: True
+
+    .. autofunction:: sotodlib.tod_ops.flags.get_noisy_subscan_flags
     """
     name = "noisy_subscan_flags"
 
