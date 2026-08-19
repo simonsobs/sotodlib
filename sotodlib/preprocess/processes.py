@@ -1575,7 +1575,7 @@ class FlagTurnarounds(_Preprocess):
         return aman, proc_aman
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         
         if proc_aman is None:
