@@ -1531,15 +1531,31 @@ class FlagTurnarounds(_Preprocess):
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
+        
         if proc_aman is None:
             proc_aman = meta.preprocess
     
         ta = proc_aman[self.save_name].turnarounds
+        
+        # allows for a minimum number of turnarounds
+        min_ta = 0
+        if isinstance(self.select_cfgs, dict):
+            min_ta = self.select_cfgs.get('min_ta', 0)
+        cut = False
+        if min_ta > 0:
+            cut = np.all(count_cuts(ta) < min_ta)
+        
+        if cut:
+            keep = np.zeros(meta.dets.count, dtype=bool)
+        else:
+            keep = np.ones(meta.dets.count, dtype=bool)
     
-        if np.all(count_cuts(ta) == 0):
-            meta.restrict('dets', meta.dets.vals[:0])
-    
-        return meta
+        if in_place:
+            if cut:
+                meta.restrict('dets', meta.dets.vals[:0])
+            return meta
+        else:
+            return keep
 
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.

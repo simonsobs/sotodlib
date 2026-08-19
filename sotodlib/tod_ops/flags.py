@@ -212,7 +212,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
 
     # If the throw is below the threshold, just output empty flags
     if az_throw < az_throw_threshold:
-        ta_flag = Ranges.from_bitmask(np.zeros(aman.samps.count, dtype=bool))
+        ta_flag = RangesMatrix.zeros(aman.samps.count)
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
         if method == 'scanspeed':
             return ta_exp, ta_exp, ta_exp
