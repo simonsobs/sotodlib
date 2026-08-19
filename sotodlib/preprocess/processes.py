@@ -1525,9 +1525,11 @@ class FlagTurnarounds(_Preprocess):
     Saves results in proc_aman under the "turnaround_flags" field, with
     sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
 
-    Example config block, which includes optional arguments such as t_buffer, 
+    The example block below includes optional arguments such as t_buffer, 
     az_throw_threshold, and a min_ta. The az_throw_threshold and min_ta (minimum number
     of turnarounds) values as shown would cut stare observations.
+    
+    Example config block::
 
       - name: "flag_turnarounds"
         skip_on_sim: False
