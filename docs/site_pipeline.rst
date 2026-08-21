@@ -44,14 +44,15 @@ Pipeline Elements
 Data packaging
 --------------
 
-Six elements make up the Level 2 to Level 3 "data packaging" pipeline that
-runs on each DAQ node: ``update_g3thk_database``, ``update_g3tsmurf_db``,
-``update_book_plan``, ``make_book``, ``update_librarian`` and
-``cleanup_level2``.  They share the G3tSmurf, G3tHk and Imprinter databases
-and must be run in that order.  They are documented together on the
+Six elements make up the Level 2 to Level 3 "data packaging" pipeline:
+``update_g3thk_database``, ``update_g3tsmurf_db``, ``update_book_plan``,
+``make_book``, ``update_librarian`` and ``cleanup_level2``.  They share the
+G3tSmurf, G3tHk and Imprinter databases of a DAQ node and must be run in that
+order; at the site they run as Prefect deployments rather than from the
+command line.  They are documented together on the
 :ref:`Data Packaging <data-packaging>` page, which covers the Book model,
 the shared configuration files, the command line arguments for each script,
-and how to recover from failed Books.
+how the pipeline is deployed, and how to recover from failed Books.
 
 Quick links: :ref:`update_g3thk_database <dpkg-update-g3thk-database>` |
 :ref:`update_g3tsmurf_db <dpkg-update-g3tsmurf-db>` |
