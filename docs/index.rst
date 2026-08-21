@@ -16,6 +16,7 @@ Welcome to SOTODLib's documentation!
    flagman.rst
    context.rst
    g3tsmurf.rst
+   data_packaging.rst
    hwp.rst
    hkdb.rst
    io_ancil.rst
