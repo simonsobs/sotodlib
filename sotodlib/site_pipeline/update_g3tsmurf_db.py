@@ -9,7 +9,6 @@ import argparse
 import logging
 from sqlalchemy import or_
 from typing import Optional
-from pathlib import Path
 
 
 from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
@@ -22,10 +21,41 @@ def main(
     config: Optional[str] = None, update_delay: float = 2,
     from_scratch: bool = False, verbosity: int = 2,
     min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
-    index_via_actions: bool=False, checked_file: Optional[str]=None, 
+    index_via_actions: bool=False, checked_file: Optional[str]=None,
 ):
     """
-    Real logic, wrapped from the profiling code in `main`.
+    Arguments
+    ---------
+    config: string
+        configuration file for G3tSmurf
+    update_delay: float
+        number of days to 'look back' to update observation information
+    from_scratch: bool
+        if True, run database update with minimum ctime of 1.6e9 (all SO time).
+        overrides update_delay
+    verbosity: int
+        0-3, higher numbers = more printouts
+    min_ctime: float
+        minimum ctime to start the search, overrides the time set by
+        update_delay
+    max_ctime: float
+        maximum ctime to search, otherwise searches through 'now'
+    index_via_actions: bool
+        if True, will look through action folders to create observations, this
+        will be necessary for data older than Oct 2022 but creates concurancy
+        issues on systems (like the site) running automatic deletion of level 2
+        data.
+    checked_file: str
+        a file name that contains a list of observations that would by default
+        cause errors to be thrown during this script but have been manually
+        checked and dealt with
+
+    Notes
+    -----
+    The `profile` decorator adds three further keyword arguments, `profile`,
+    `profile_type` and `profile_output`; see
+    `sotodlib.site_pipeline.utils.profiler`. They are added to the command line
+    by `add_profile_args` in `get_parser`.
     """
     show_pb = True if verbosity > 1 else False
 
@@ -162,63 +192,6 @@ def main(
             f"{len(raise_list_readout_ids)} observations without Tunesets"
             f" obs_ids are {raise_list_readout_ids}."
         )
-
-def main(config: Optional[str] = None, update_delay: float = 2,
-         from_scratch: bool = False, verbosity: int = 2,
-         min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
-         index_via_actions: bool=False, checked_file: Optional[str]=None,
-         profile: bool=False, profile_output: Optional[Path]=None):
-    """
-    Arguments
-    ---------
-    config: string
-        configuration file for G3tSmurf
-    update_delay: float
-        number of days to 'look back' to update observation information
-    from_scratch: bool
-        if True, run database update with minimum ctime of 1.6e9 (all SO time).
-        overrides update_delay
-    verbosity: int
-        0-3, higher numbers = more printouts
-    index_via_actions: bool
-        if True, will look through action folders to create observations, this
-        will be necessary for data older than Oct 2022 but creates concurancy
-        issues on systems (like the site) running automatic deletion of level 2
-        data.
-    checked_file: str
-        a file name that contains a list of observations that would by default
-        cause errors to be thrown during this script but have been manually
-        checked and dealt with
-    profile: bool
-        if True, will run the script with pyinstrument and output to profile_output
-    profile_output: str
-        if profile is True, the file name of the directory
-        to output the pyinstrument profiling results to
-    """
-
-    if profile:
-        import pyinstrument
-        timestamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S')
-        filename = f"update_g3tsmurf_db_{timestamp}.html"
-        output_filename = profile_output / filename if profile_output is not None else filename
-        profiler = pyinstrument.Profiler()
-        profiler.start()
-    
-    try:
-        core(
-            config=config, update_delay=update_delay, from_scratch=from_scratch,
-            verbosity=verbosity, index_via_actions=index_via_actions,
-            min_ctime=min_ctime, max_ctime=max_ctime,
-            checked_file=checked_file
-        )
-    finally:
-        if profile:
-            profiler.stop()
-            if profile_output is not None:
-                with open(output_filename, "w") as f:
-                    f.write(profiler.output_html())
-
-  
 
 def get_parser(parser=None):
     if parser is None:
