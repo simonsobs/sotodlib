@@ -20,7 +20,10 @@ import datetime as dt
 from typing import Optional
 
 import sotodlib.io.bookbinder as bbinder
-from sotodlib.io.imprinter import Imprinter, Books, FAILED
+from sotodlib.io.imprinter import (
+    Imprinter, Books, 
+    FAILED, BOUND
+)
 import sotodlib.io.imprinter_utils as utils
 
 def fix_single_book(imprint:Imprinter, book:Books):
@@ -347,7 +350,9 @@ class BadTimeSamples(BookError):
         if np.all([x<=self.max_drops_to_fix for x in self.dropped.values()]):
             utils.set_book_rebind(self.imprint, self.book)        
             self.imprint.bind_book(self.book, allow_bad_timing=True,)
-        
+            if self.book.status == BOUND:
+                return ## simple fix complete
+
         ## if any observations are over the limit, double check it's not a 
         ## SMURF database error 
         dropped_oids = [k for k,x in self.dropped.items() 
@@ -384,7 +389,7 @@ class BadTimeSamples(BookError):
             for oid in remove_oid:
                 self.book = utils.remove_level2_obs_from_book(
                     self.imprint, self.book, oid
-                )
+                )        
                 
     def report_error(self):
         msg = f"{self.book.bid} has dropped time samples\n"
@@ -398,6 +403,10 @@ class BadTimeSamples(BookError):
 class NonMonotonicAncillaryTimes(BookError):
     fields_to_fix = {
         "acu.acu_status.Azimuth_mode": 5,
+        "acu.acu_udp_stream.Corrected_Azimuth": 5,
+        "acu.acu_udp_stream.Corrected_Elevation": 5,
+        "acu.acu_udp_stream.Corrected_Boresight": 5,
+        "acu.acu_status.Corotator_current_position": 5, 
     }
     n_samps = None
     field_dropped = None
