@@ -1525,14 +1525,25 @@ class FlagTurnarounds(_Preprocess):
     Saves results in proc_aman under the "turnaround_flags" field, with
     sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
 
+    The example block below includes optional arguments such as t_buffer, 
+    az_throw_threshold, and a min_ta. The az_throw_threshold and min_ta (minimum number
+    of turnarounds) values as shown would cut stare observations.
+    
     Example config block::
 
       - name: "flag_turnarounds"
+        skip_on_sim: False
         process:
           method: "scanspeed"
+          t_buffer: 4.
+          az_throw_threshold: 1.
         calc:
           method: "scanspeed"
+          t_buffer: 4.
+          az_throw_threshold: 1.
         save: True
+        select:
+          min_ta: 1.
 
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
@@ -1556,7 +1567,8 @@ class FlagTurnarounds(_Preprocess):
         calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
-            calc_aman.wrap('subscan_info', aman.subscan_info)
+            if hasattr(aman, 'subscan_info'):
+                calc_aman.wrap('subscan_info', aman.subscan_info)
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
@@ -1572,6 +1584,35 @@ class FlagTurnarounds(_Preprocess):
             raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         return aman, proc_aman
+    
+    def select(self, meta, proc_aman=None, in_place=True):
+        if not self.select_cfgs:
+            return meta
+        
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+    
+        ta = proc_aman[self.save_name].turnarounds
+        
+        # allows for a minimum number of turnarounds
+        min_ta = 0
+        if isinstance(self.select_cfgs, dict):
+            min_ta = self.select_cfgs.get('min_ta', 0)
+        cut = False
+        if min_ta > 0:
+            cut = np.all(count_cuts(ta) < min_ta)
+        
+        if cut:
+            keep = np.zeros(meta.dets.count, dtype=bool)
+        else:
+            keep = np.ones(meta.dets.count, dtype=bool)
+    
+        if in_place:
+            if cut:
+                meta.restrict('dets', meta.dets.vals[:0])
+            return meta
+        else:
+            return keep
 
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
