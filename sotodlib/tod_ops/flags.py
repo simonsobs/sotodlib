@@ -11,6 +11,8 @@ except ImportError:
 
 from so3g.proj import Ranges, RangesMatrix
 
+import logging
+
 from .. import core
 from .. import coords
 from . import filters
@@ -18,6 +20,7 @@ from . import fourier_filter
 
 from ..core.flagman import flag_array_to_ranges_matrix
 
+logger = logging.getLogger(__name__)
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_range=None,
@@ -211,7 +214,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     turnarounds_in_subscan : bool
         (Optional). Turnarounds are included as part of a subscan.
     az_throw_threshold : float
-        (Optional). Minimum azimuth throw required to attempt turnaround flagging. Returns no turnarounds if below threshold.
+        (Optional). Minimum azimuth throw (deg) required to attempt turnaround flagging. Returns 
+        no turnarounds if below threshold.
 
     Returns
     -------
@@ -228,9 +232,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     if az_throw < az_throw_threshold:
         ta_flag = RangesMatrix.zeros(aman.samps.count)
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
-        if method == 'scanspeed':
-            return ta_exp, ta_exp, ta_exp
-        return ta_exp
+        logger.info("az_throw is below threshold. Flagging zero turnarounds.")
+        return ta_exp, ta_exp, ta_exp
         
         
     if method not in ['az', 'scanspeed']:
