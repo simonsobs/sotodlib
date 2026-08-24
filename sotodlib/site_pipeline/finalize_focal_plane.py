@@ -5,6 +5,7 @@ import os
 from copy import deepcopy
 from importlib import import_module
 from typing import List, Optional
+from tqdm import tqdm
 
 import matplotlib
 matplotlib.use('Agg')
@@ -37,6 +38,7 @@ from sotodlib.io.metadata import read_dataset, write_dataset, ResultSet
 from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "finalize_focal_plane: ")
+metadata.loader.logger.setLevel(logging.ERROR)
 
 
 def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
@@ -218,15 +220,17 @@ def _get_obs_ids(
     return np.intersect1d(obs_ids, all_obs)
 
 
-def _load_ctx(config):
+def _load_ctx(config, obsfile):
     ctx = Context(config["context"]["path"])
     if ctx.obsdb is None:
         raise ValueError("No obsdb!")
+    per_obs = config.get("per_obs", False)
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
     roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
+    roll_range = [float(rr) for rr in roll_range]
     obs_ids = _get_obs_ids(
         ctx,
         [tod_pointing_name, map_pointing_name, pol_name],
@@ -243,12 +247,19 @@ def _load_ctx(config):
     amans = []
     dets = config["context"].get("dets", {})
     failed = []
-    for obs_id in obs_ids:
+    run = []
+    if per_obs and not config.get("overwrite", False):
+        run = np.genfromtxt(obsfile) 
+        
+    for obs_id in tqdm(obs_ids):
+        if obs_id in run:
+            logger.debug("%s has already been run", obs_id)
+            continue
         roll = ctx.obsdb.get(obs_id)["roll_center"]
         if roll is None:
             continue
         if roll < roll_range[0] or roll > roll_range[1]:
-            logger.info("%s has a roll that is out of range", obs_id)
+            logger.debug("%s has a roll that is out of range", obs_id)
             continue
         try:
             aman = ctx.get_meta(obs_id, dets=dets)
@@ -275,7 +286,7 @@ def _load_ctx(config):
         if pol:
             aman.move(pol_name, "polarization")
         else:
-            logger.warning("No polarization data in context")
+            logger.debug("No polarization data in context")
 
         if tod_pointing_name in aman:
             _aman = aman.copy()
@@ -510,6 +521,7 @@ def main():
     outpath = os.path.abspath(os.path.join(outdir, f"{froot}.h5"))
     dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
     logpath = os.path.join(outdir, f"{froot}.log")
+    obspath = os.path.join(outdir, f"{froot}.txt")
     os.makedirs(outdir, exist_ok=True)
     plot_dir_base = config.get("plot_dir", None)
     if plot_dir_base is not None:
@@ -522,6 +534,7 @@ def main():
     # Log file
     logfile = logging.FileHandler(logpath)
     logger.addHandler(logfile)
+    obsfile = open(obspath, "a") 
 
     # Time range
     config["start_time"] = config.get("start_time", 0)
@@ -533,7 +546,7 @@ def main():
     )
 
     # Load data
-    amans, obs_ids, ot_sids = _load_ctx(config)
+    amans, obs_ids, ot_sids = _load_ctx(config, obspath)
     if len(ot_sids) == 0:
         raise ValueError("No stream_ids found!")
     if np.any(ot_sids[:, 0] != ot_sids[0][0]):
@@ -1013,6 +1026,8 @@ def main():
             entry = {"dets:wafer.array": "", "dataset": "fake"}
             entry.update(base) # type: ignore
             db.add_entry(entry, filename=os.path.basename(f.filename), replace=True)
+        obsfile.write("\n"+"\n".join(obs_ids))
+        obsfile.flush()
 
 if __name__ == "__main__":
     main()
