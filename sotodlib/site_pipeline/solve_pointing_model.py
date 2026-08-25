@@ -25,11 +25,15 @@ from sotodlib import core
 from sotodlib.coords import pointing_model as pm
 from sotodlib.coords import fp_containers as fpc
 
+fpc.logger.setLevel(logging.ERROR)
 DEG = np.pi / 180.0
 ARCMIN = DEG / 60
 
 plt.rcParams["axes.grid"] = True
 plt.rcParams["grid.alpha"] = 0.5
+plt.rcParams['figure.dpi'] = 500
+plt.rcParams["figure.constrained_layout.use"] = True
+plt.rcParams['font.size'] = 10
 
 
 def load_per_obs_data(config, t0, tf):
@@ -159,6 +163,8 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
     which_data = config.get("use_as_data")
     which_weights = config.get("use_as_weights", None)
     ctx = core.Context(config["context"]["path"])
+    min_dets = config.get("min_per_obs_dets", 0)
+    weight_cutoff = config.get("weight_cutoff")
 
     if return_all_dets:
         band = None
@@ -182,20 +188,33 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
         if config.get("use_these_files") is not None:
             filelist = [filelist[i] for i in config.get("use_these_files")]
 
-    obs_dets_fits, det_boresight, weights_dets, stream_id_list, ot_list, obs_index = [], [], [], [], [], []
+    obs_dets_fits, det_boresight, weights_dets, stream_id_list, ot_list, obs_index, all_det_ids, all_nom_det_array = [], [], [], [], [], [], [], []
     for i, ffp in enumerate(filelist):
         obs_info = ctx.obsdb.get(ffp)
         this_OT = rxs[ffp].optics_tubes[0]
         for ufm in this_OT.focal_planes:
+            if ufm.padded:
+                continue
             if which_ufm is not None and ufm.stream_id not in which_ufm:
                 continue
             stream_id_list.append(ufm.stream_id)
-            weights = ufm.weights[:, 1] if which_weights == "r2" else ufm.weights[:, 0]
-            weights_dets.append(weights)
+            if which_weights == "r2":
+                weights = ufm.weights[:, 1]
+            elif which_weights == "ffp":
+                weights = ufm.weights[:, 1]
+            elif which_weights == "both":
+                weights = ufm.weights[:, 0] * ufm.weights[:, 1]
+            else:
+                weights = np.ones(len(ufm.weights))
+            wmsk = (weights > weight_cutoff) * np.isfinite(weights)
+            n = np.sum(wmsk)
+            weights_dets.append(weights[wmsk])
             data = ufm.avg_fp if which_data == "raw" else ufm.transformed
-            obs_dets_fits.append(data)
-            obs_index.append(np.repeat(i, len(ufm.weights)))
-            ot_list.append([this_OT.name] * len(data))
+            obs_dets_fits.append(data[wmsk])
+            obs_index.append(np.repeat(i, n))
+            ot_list.append([this_OT.name] * n)
+            all_det_ids.append(ufm.det_ids[wmsk])
+            all_nom_det_array.append(ufm.template_fp[wmsk])
             try:
                 det_pointing = np.rad2deg(ufm.det_boresight)
                 #det_boresight.append(ufm.det_boresight)
@@ -206,10 +225,10 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
                 roll_c = np.ones(np.shape(data)[0]) * obs_info["roll_center"]
                 det_pointing = np.column_stack([az_c, el_c, roll_c])
             det_pointing[:,2] = np.ones(np.shape(data)[0]) * obs_info["roll_center"]
-            det_boresight.append(det_pointing)
+            det_boresight.append(det_pointing[wmsk])
             
-    nom_data = [load_nom_focal_plane_full(config, t0, s) for s in stream_id_list]
-    all_det_ids, all_nom_det_array = map(np.concatenate, zip(*nom_data))
+    all_det_ids = np.concatenate(all_det_ids)
+    all_nom_det_array = np.concatenate(all_nom_det_array, axis=0)
     weights_dets = np.concatenate(weights_dets)
     obs_dets_fits = np.concatenate(obs_dets_fits, axis=0)
     det_boresight = np.concatenate(det_boresight, axis=0)
@@ -219,8 +238,6 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
     #Order: [data fits, detector boresight, weights, nominal, ids, index]
     data_group = [obs_dets_fits, det_boresight, weights_dets, all_nom_det_array, all_det_ids, obs_index, ot_list]
 
-    weights_dets[weights_dets < config.get("weight_cutoff")] = 0.0
-    obs_dets_fits[np.where(weights_dets == 0)] = np.nan
     mask = ~np.isnan(weights_dets)  
     if not no_downsample:
         # Reduce detector counts for computation
@@ -253,7 +270,7 @@ def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_
             filelist,
             obs_ufm_centers,
             weights_ufm,
-            nom_fm_centers,
+            nom_ufm_centers,
             obs_index,
             ot_list,
             ancil,
@@ -334,19 +351,20 @@ def _init_fit_params(config, epochs):
     # Add independant params
     orig_pars = np.array(list(init_params.keys()))
     par_list = orig_pars.copy()
-    added_ots = []
+    all_ots = np.unique(np.concatenate([np.unique(epoch["solver_aman"].ot_list) for epoch in epochs]))
+    if float_ots:
+        for ot in all_ots:
+            ot_float_pars = [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]
+            orig_pars = np.concatenate((orig_pars, ot_float_pars))
+            par_list = np.concatenate((par_list, ot_float_pars))
+            for p, d in zip(ot_float_pars, [0, 0, 0, 1, 1]):
+                init_params[p] = d
     for epoch in epochs: 
         indep_list = epoch["indep_list"]
         if float_ots:
-            for ot in np.unique(epoch["solver_aman"].ot_list):
+            for ot in all_ots:
                 ot_float_pars = [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]
                 indep_list += ot_float_pars 
-                if ot not in added_ots:
-                    orig_pars = np.concatenate((orig_pars, ot_float_pars))
-                    par_list = np.concatenate((par_list, ot_float_pars))
-                    for p, d in zip(ot_float_pars, [0, 0, 0, 1, 1]):
-                        init_params[p] = d
-                added_ots += [ot]
         if np.sum(np.isin(indep_list, par_list)) != len(indep_list):
             raise ValueError(f"Invalid independant parameters in epoch {epoch['name']}")
         indep_list = [f"{n}_{epoch['name']}" for n in indep_list]
@@ -363,6 +381,7 @@ def _init_fit_params(config, epochs):
         pmsk[np.isin(par_list, indep_list)] = False
         pmsk += np.array([epoch["name"] in par for par in par_list])
         if np.sum(pmsk) != len(orig_pars):
+            import ipdb; ipdb.set_trace()
             raise ValueError(f"Epoch {epoch['name']} somehow has the wrong number of parameters!")
         par_count[pmsk] += 1
         epoch["params"] = par_list[pmsk]
@@ -397,6 +416,9 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
         if np.array_equal(ot_pars, ot_float_defaults):
             continue
         msk = (solver_aman.ot_list == ot)
+        msk[msk] *= np.isfinite(xi_mod[msk]) * np.isfinite(eta_mod[msk])
+        if np.sum(msk) == 0:
+            continue
         xi_mod[msk] += ot_pars[0]
         eta_mod[msk] += ot_pars[1]
         theta = ot_pars[2]
@@ -1239,7 +1261,7 @@ class ModelFitsPlotter:
         plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
         plt.legend(fontsize='small')        
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Roll{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Roll{tag}.png")
         plt.close()
             
 
@@ -1269,7 +1291,7 @@ class ModelFitsPlotter:
         plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
         plt.legend(fontsize='small')        
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_El{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_El{tag}.png")
         plt.close()
 
         plt.figure(figsize=(7,5))
@@ -1298,7 +1320,7 @@ class ModelFitsPlotter:
         plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
         plt.legend(fontsize='small')        
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Az{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Az{tag}.png")
         plt.close()
    
             
@@ -1328,7 +1350,7 @@ class ModelFitsPlotter:
         else:
             plt.xlim(-.31, .31);plt.ylim(-.31, .31)
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitResiduals{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitResiduals{tag}.png")
 
     def plot_full_deltas_across_focalplane(self):
         platform = self.platform
@@ -1355,7 +1377,7 @@ class ModelFitsPlotter:
         else:
             plt.xlim(-.31, .31);plt.ylim(-.31, .31)
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitDeltas{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitDeltas{tag}.png")
             
     def plot_full_histogram(self):
         platform = self.platform
@@ -1387,7 +1409,7 @@ class ModelFitsPlotter:
         plt.xlabel('arcmin')
             
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350) 
+            plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png") 
             
     def plot_dets_in_these_obs(self):  
         platform = self.platform
@@ -1424,7 +1446,7 @@ class ModelFitsPlotter:
                 
         plt.suptitle('Detectors hit in these observations')
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_dets_in_these_obs.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_dets_in_these_obs.png")
             plt.close()
     
     def plot_modeled_fits(self):
@@ -1445,10 +1467,11 @@ class ModelFitsPlotter:
         else:
             ufm_list = self.ufms
         plotmask = np.where(weights)
-        nom_array = np.concatenate(
-            [load_nom_focal_plane_full(self.config, self.t0, ufm)[1] for ufm in ufm_list],
-            axis=0,
-        )
+        if ufm_list is not None:
+            nom_array = np.concatenate(
+                [load_nom_focal_plane_full(self.config, self.t0, ufm)[1] for ufm in ufm_list],
+                axis=0,
+            )
         rms = np.round(fit_rms, 4)
         xi_model_fit = modeled_fits.xi
         eta_model_fit = modeled_fits.eta
@@ -1492,14 +1515,15 @@ class ModelFitsPlotter:
             label=f"Model, RMS = {rms}",
             vmax=65,
         )
-        ax.scatter(
-            nom_array[:, 0] / DEG,
-            nom_array[:, 1] / DEG,
-            marker=".",
-            color="r",
-            alpha=0.2,
-            label="Nominal Center",
-        )
+        if ufm_list is not None:
+            ax.scatter(
+                nom_array[:, 0] / DEG,
+                nom_array[:, 1] / DEG,
+                marker=".",
+                color="r",
+                alpha=0.2,
+                label="Nominal Center",
+            )
         offsets = sc3.get_offsets()
         #xmin, ymin = offsets.min(axis=0)
         #xmax, ymax = offsets.max(axis=0)
@@ -1518,9 +1542,9 @@ class ModelFitsPlotter:
         etatoeta[:, 0] = eta_ref / DEG
         etatoeta[:, 1] = eta_model_fit / DEG
         ax.plot(xitoxi.T, etatoeta.T, "k", lw=0.4)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_model_fits{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_model_fits{tag}.png")
             plt.close()
     
     
@@ -1606,9 +1630,9 @@ class ModelFitsPlotter:
             ax[x].set_xlim(-1.05, 0.25)
             ax[x].set_ylim(-0.2, 0.2)
         # plt.subplots_adjust(left=0.1, right=0.90, bottom=0.05, hspace=0.3)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_ws0_model_fits{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_ws0_model_fits{tag}.png")
             plt.close()
     
 
@@ -1658,9 +1682,9 @@ class ModelFitsPlotter:
             ax[i // 4, i % 4].set_title(f"ws{i}")
             ax[i // 4, i % 4].set_aspect('equal', adjustable='box')
         plt.colorbar(im, ax[1, 3], label="Elevation (deg)", fraction=0.046, pad=0.04)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_elevation{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_elevation{tag}.png")
             plt.close()
         #Plot with Roll as colorbar
         fig, ax = plt.subplots(2, 4, figsize=(9, 6))
@@ -1688,8 +1712,8 @@ class ModelFitsPlotter:
             ax[i // 4, i % 4].set_aspect('equal', adjustable='box')
         plt.colorbar(im, ax[1, 3], label=f"{coloredby} (deg)", fraction=0.046, pad=0.04)
         if self.save_figure:
-            plt.tight_layout()
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_roll{tag}.png", dpi=350)
+            # plt.tight_layout()
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_roll{tag}.png")
     
         if "lat" in pm_version:
             markercolor = ancil.corotator_enc[i::7].copy()
@@ -1713,9 +1737,9 @@ class ModelFitsPlotter:
                 ax[i // 4, i % 4].set_title(f"ws{i}")
                 ax[i // 4, i % 4].set_aspect('equal', adjustable='box')
             plt.colorbar(im, ax[1, 3], label=f"{coloredby} (deg)", fraction=0.046, pad=0.04)
-            plt.tight_layout()
+            # plt.tight_layout()
             if self.save_figure:
-                plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_corotator{tag}.png", dpi=350)
+                plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_corotator{tag}.png")
                 plt.close()
 
 
@@ -1767,9 +1791,9 @@ class ModelFitsPlotter:
         ax.set_aspect('equal', adjustable='box')
         ax.set_title(f"Unmodeled fits, by azimuth")
         cb = plt.colorbar(im, fraction=0.046, pad=0.04)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_azimuth{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_azimuth{tag}.png")
             plt.close()   
         fig, ax = plt.subplots(figsize=(9, 6))
         ax.plot(0, 0, "kx", label="Nominal Center")
@@ -1789,9 +1813,9 @@ class ModelFitsPlotter:
         ax.set_aspect('equal', adjustable='box')
         ax.set_title(f"Unmodeled fits, by elevation color")
         cb = plt.colorbar(im, fraction=0.046, pad=0.04)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_elevation{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_elevation{tag}.png")
             plt.close()
     
         fig, ax = plt.subplots(figsize=(9, 6))
@@ -1817,9 +1841,9 @@ class ModelFitsPlotter:
         ax.set_aspect('equal', adjustable='box')
         ax.set_title(f"Unmodeled fits, colored by {coloredby} angle")
         cb = plt.colorbar(im, fraction=0.046, pad=0.04)
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_roll{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_roll{tag}.png")
             plt.close()
     
         if "lat" in pm_version:
@@ -1842,9 +1866,9 @@ class ModelFitsPlotter:
             ax.set_ylim(-1 * plotlims, plotlims)
             ax.set_title(f"Unmodeled fits, colored by {coloredby} angle")
             cb = plt.colorbar(im, fraction=0.046, pad=0.04)
-            plt.tight_layout()
+            # plt.tight_layout()
             if self.save_figure:
-                plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_corotator{tag}.png", dpi=350)
+                plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_corotator{tag}.png")
                 plt.close()
     
     def plot_residuals_vs_ancil(self):
@@ -1934,9 +1958,9 @@ class ModelFitsPlotter:
         ax[1, 0].set_xlabel("Azimuth [deg]")
         ax[1, 1].set_xlabel("Elevation [deg]")
         ax[1, 2].set_xlabel(f"{third_enc_name} [deg]")
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_residuals_vs_ancillary{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_residuals_vs_ancillary{tag}.png")
             plt.close()
      
     def plot_total_residuals(self):
@@ -2038,7 +2062,7 @@ class ModelFitsPlotter:
             ax2.set_xlabel("Data points")
             ax2.set_ylabel(r"$\Delta$ Residuals")
             if self.save_figure:
-                plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png", dpi=350)
+                plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png")
                 plt.close()
         else:
             # Plot first fit iteration residuals only
@@ -2063,7 +2087,7 @@ class ModelFitsPlotter:
             plt.title("Fit Residuals")
             plt.legend(loc=2)
             if self.save_figure:
-                plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png", dpi=350)
+                plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png")
                 plt.close()
             
     
@@ -2103,7 +2127,7 @@ class ModelFitsPlotter:
         plt.title(append)
         plt.legend()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_residuals_hists{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_residuals_hists{tag}.png")
             plt.close()
         
     def plot_xieta_residuals(self):
@@ -2158,9 +2182,9 @@ class ModelFitsPlotter:
             ax[i].set_ylim(-self.plotlims, self.plotlims)
             ax[i].set_xlabel(f"{xlabel} (deg)", fontsize="small")
             ax[i].set_ylabel(f"{ylabel} [arcmin]")
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_xieta_residuals{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_xieta_residuals{tag}.png")
             plt.close()
     
     
@@ -2216,9 +2240,9 @@ class ModelFitsPlotter:
             ax[i].set_ylim(-self.plotlims, self.plotlims)
             ax[i].set_xlabel(f"{xlabel} (deg)", fontsize="small")
         ax[i].set_ylabel(f"{ylabel} [arcmin]")
-        plt.tight_layout()
+        # plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_xieta_cross_residuals{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_xieta_cross_residuals{tag}.png")
             plt.close()
 
     def plot_fit_correlation_matrix(self):
@@ -2252,7 +2276,7 @@ class ModelFitsPlotter:
         ax.spines['right'].set_visible(False)
         plt.grid(False) # Grid usually looks messy on masked heatmaps
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_correlation_matrix{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_correlation_matrix{tag}.png")
             plt.close()        
 ############
 
