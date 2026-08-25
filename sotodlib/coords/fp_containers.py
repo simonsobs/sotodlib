@@ -100,7 +100,7 @@ class Template:
         xieta_spacing = mu.estimate_spacing(self.fp[self.optical, :2])
         # For gamma rather than the spacing in real space we want the difference between bins
         # This is a rough estimate but good enough for us
-        gamma_spacing = np.percentile(np.diff(np.sort(self.fp[2])), 99.9)
+        gamma_spacing = np.percentile(np.diff(np.sort(self.fp[:, 2])), 99.9)
         self.spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
         self.bandpass = np.zeros_like(self.det_ids)
@@ -111,7 +111,7 @@ class Template:
         self.__dict__.pop("id_strs", None)
         self.__dict__.pop("valid_ids", None)
         if not np.all(
-            np.isin(["bandpass", "pol", "rhombus"], list(aman.det_info.wafer.keys()))
+            np.isin(["bandpass", "pol"], list(aman.det_info.wafer.keys()))
         ):
             logger.warning(
                 "det_info.wafer seems to be missing metadata? Safe to ignore in rset mode."
@@ -121,7 +121,8 @@ class Template:
         srt = np.argsort(aman.det_info.det_id)
         self.bandpass[template_msk] = aman.det_info.wafer.bandpass[srt][mapping]
         self.pol[template_msk] = aman.det_info.wafer.pol[srt][mapping]
-        self.rhombus[template_msk] = aman.det_info.wafer.rhombus[srt][mapping]
+        if "rhombus" in aman.det_info.wafer:
+            self.rhombus[template_msk] = aman.det_info.wafer.rhombus[srt][mapping]
 
     @cached_property
     def id_strs(self):
@@ -323,7 +324,7 @@ class FocalPlane:
             f[f"{group}/focal_plane"],
             {"wafer_slot": str(self.wafer_slot), "measured_gamma": self.have_gamma},
         )
-        entry = {"dets:stream_id": self.stream_id, "dataset": f"{group}/focal_plane"}
+        entry = {"dets:wafer.array": self.stream_id, "dataset": f"{group}/focal_plane"}
         entry.update(db_info[1])
         db_info[0].add_entry(entry, filename=os.path.basename(f.filename), replace=True)
 
