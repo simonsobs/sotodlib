@@ -2,7 +2,7 @@ import re
 import logging
 import os
 from dataclasses import InitVar, dataclass, field
-from functools import cached_property, partial
+from functools import cached_property, partial, lru_cache
 from typing import Dict, List, Optional
 
 import h5py
@@ -620,12 +620,13 @@ class Receiver:
         return Receiver(ots, center, include_cm, list(valid_ids), transform)
 
     @classmethod
+    @lru_cache
     def load_file(cls, path):
         with h5py.File(path, "r") as f:
             # Check if its an old file:
             if "transform" in f.keys():
                 return {"": cls.load(f)}
-            return {grp: cls.load(f, grp) for grp in f.keys()}
+            return {grp: cls.load(f, grp) for grp in f.keys() if grp != "fake"}
 
     @property
     def focal_planes(self):
