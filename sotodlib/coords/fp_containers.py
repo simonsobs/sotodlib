@@ -4,6 +4,7 @@ Supports transparent applications of all transforms including pointing model.
 Calculated transforms can either be treated at properties for ease of
 calculations or as static attributes for loading saved results.
 """
+
 # TODO: Function to update pointing model pars that is aware of joint fits
 # TODO: Serialization + ManifestDb
 # TODO: Reprs
@@ -20,11 +21,12 @@ from copy import deepcopy
 from scipy.optimize import minimize
 from sotodlib.coords.pointing_model import apply_pointing_model
 from so3g.proj import quat
-from sotodlib.core import AxisManager, IndexAxis 
+from sotodlib.core import AxisManager, IndexAxis
 from sotodlib.utils import epochs
 from sotodlib.io.metadata import SuperLoader
 from sotodlib.core.metadata import MetadataSpec
 from sotodlib.core.metadata import ManifestDb
+
 
 def gamma_fit(src, dst):
     """
@@ -54,15 +56,21 @@ def gamma_fit(src, dst):
     res = minimize(_gamma_min, (1.0, 0.0), (src, dst))
     return res.x
 
-def _transformed(self : FocalPlane | FocalPlaneCollection, attr_name : str):
+
+def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str):
     to_ret = deepcopy(self.template)
-    to_ret.xyz = mt.apply_transform(self.template.xyz, self.transform.affine, self.transform.shift)
-    to_ret.center = mt.apply_transform(self.template.center, self.transform.affine, self.transform.shift)
+    to_ret.xyz = mt.apply_transform(
+        self.template.xyz, self.transform.affine, self.transform.shift
+    )
+    to_ret.center = mt.apply_transform(
+        self.template.center, self.transform.affine, self.transform.shift
+    )
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
     return to_ret
 
-def _get_aff(self : FocalPlane | FocalPlaneCollection, data_name : str, attr_name : str):
+
+def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name: str):
     affine, shift = mt.get_affine_two_stage(
         self.template.xyz[:, :2],
         getattr(self, data_name).xyz[:, :2],
@@ -73,13 +81,14 @@ def _get_aff(self : FocalPlane | FocalPlaneCollection, data_name : str, attr_nam
     to_ret.affine[:2, :2] = affine
     if not self.fake_gamma:
         to_ret.affine[-1, -1], to_ret.shift[-1] = gamma_fit(
-                    self.template.xyz[:, 2], getattr(self, data_name).xyz[:, 2]
-                )
+            self.template.xyz[:, 2], getattr(self, data_name).xyz[:, 2]
+        )
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
     return to_ret
 
-class StaticOrCached():
+
+class StaticOrCached:
     """
     Wrapper that will get either:
 
@@ -111,7 +120,7 @@ class PointingModel:
     detector offsets. In the future this should also be able to handle
     measurements from things like the starcamera.
 
-    Attributes 
+    Attributes
     ----------
     parameters : dict
         Dictionary of pointing-model parameters accepted by
@@ -121,8 +130,9 @@ class PointingModel:
         If True, ignore the encoder roll angle when applying the pointing
         model and assume a zero-roll boresight solution.
     """
-    parameters : dict
-    force_zero_roll : bool
+
+    parameters: dict
+    force_zero_roll: bool
 
     def apply_det(
         self,
@@ -132,7 +142,7 @@ class PointingModel:
     ) -> DetectorOffsets:
         """
         Apply the pointing model correction to a set of detector offsets.
-    
+
         The correction is computed from the supplied encoder values using
         `apply_pointing_model` and then propagated to each detector through
         quaternion rotations. The returned detector offsets remain in the
@@ -141,10 +151,10 @@ class PointingModel:
 
         If the pointing model contains no parameters, the input detector
         offsets are returned unchanged.
-    
+
         When `force_zero_roll=True`, the encoder roll angle is ignored during
         the correction and a zero-roll boresight solution is assumed.
-    
+
         Parameters
         ----------
         det_off : DetectorOffsets
@@ -159,14 +169,14 @@ class PointingModel:
             If True, ignore detector polarization angles and propagate only
             detector position (`xi`, `eta`). If False, propagate the full
             (`xi`, `eta`, `gamma`) coordinate set.
-    
+
         Returns
         -------
         det_pm : DetectorOffsets
             A copy of `det_off` with the pointing-model correction applied.
             The returned object has the same metadata and detector ordering
             as the input but contains corrected detector coordinates.
-    
+
         Raises
         ------
         ValueError
@@ -176,22 +186,25 @@ class PointingModel:
         if len(self.parameters) == 0:
             return det_off
         if len(det_enc.xyz) != len(det_off.xyz):
-            raise ValueError("Detector offsets and encoder values must have same shape!")
+            raise ValueError(
+                "Detector offsets and encoder values must have same shape!"
+            )
         bs = apply_pointing_model(None, self.parameters, det_off.ancil, False)
         if fake_gamma:
             q_fp = quat.rotation_xieta(det_off.xi, det_off.eta)
         else:
-            q_fp = quat.rotation_xieta(det_off.xi, det_off.eta, det_off.gamma) # type: ignore
+            q_fp = quat.rotation_xieta(det_off.xi, det_off.eta, det_off.gamma)  # type: ignore
         to_ret = deepcopy(det_off)
         xi, eta, gamma = quat.decompose_xieta(
             ~quat.euler(2, bs.roll)
-            * ~quat.rotation_lonlat(-1*bs.az, bs.el) # type: ignore
+            * ~quat.rotation_lonlat(-1 * bs.az, bs.el)  # type: ignore
             * quat.rotation_lonlat(-1 * det_enc.az, det_enc.el)
             * quat.euler(2, (not self.force_zero_roll) * det_enc.roll)
             * q_fp
         )
         to_ret.xyz = np.column_stack((xi, eta, gamma))
         return to_ret
+
 
 @dataclass
 class Transform:
@@ -205,8 +218,9 @@ class Transform:
     affine : Float[np.ndarray, "ndim ndim"]
         The affine transformation matrix.
     """
-    shift : Float[np.ndarray, "ndim"]
-    affine : Float[np.ndarray, "ndim ndim"]
+
+    shift: Float[np.ndarray, "ndim"]
+    affine: Float[np.ndarray, "ndim ndim"]
 
     def __setattr__(self, name: str, value: Any, /) -> None:
         if name in ("shift", "affine"):
@@ -260,6 +274,7 @@ class Transform:
     def rot(self):
         return self.decompose[2]
 
+
 @dataclass
 class DetectorOffsets:
     """
@@ -292,11 +307,12 @@ class DetectorOffsets:
         The coordinate system that these are in.
         Should be `xieta` or `horizon`.
     """
-    xyz : Float[np.ndarray, "ndet 3"]
-    det_id : Shaped[np.ndarray, "ndet"]
-    split : Shaped[np.ndarray, "ndet"]
-    center : Optional[Float[np.ndarray, "3"]]
-    coordsys : str
+
+    xyz: Float[np.ndarray, "ndet 3"]
+    det_id: Shaped[np.ndarray, "ndet"]
+    split: Shaped[np.ndarray, "ndet"]
+    center: Optional[Float[np.ndarray, "3"]]
+    coordsys: str
 
     def __post_init__(self):
         if self.coordsys not in ("xieta", "horizon"):
@@ -306,7 +322,6 @@ class DetectorOffsets:
         if name in ("xyz"):
             self.__dict__.pop("ancil", None)
         return super().__setattr__(name, value)
-
 
     @property
     def xi(self):
@@ -350,7 +365,7 @@ class DetectorOffsets:
         ancil.wrap("az_enc", np.rad2deg(self.az))
         ancil.wrap("el_enc", np.rad2deg(self.el))
         ancil.wrap("roll_enc", np.rad2deg(self.roll))
-        ancil.wrap("boresight_enc", -1*np.rad2deg(self.roll)) # for SATs
+        ancil.wrap("boresight_enc", -1 * np.rad2deg(self.roll))  # for SATs
         return ancil
 
 
@@ -424,29 +439,42 @@ class FocalPlane:
     pm_resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data_pm` and `pm_transformed`.
     """
-    name : str
-    meas_id : str
-    data : DetectorOffsets
-    enc : DetectorOffsets
-    weights : Float[np.ndarray, "ndet"]
-    template : DetectorOffsets
-    pointing_model : PointingModel
-    static : bool
-    autofreeze : bool
-    fake_gamma : bool
-    data_pm : DetectorOffsets = cast(DetectorOffsets,StaticOrCached("data_pm"))
-    transform : Transform = cast(Transform, StaticOrCached("transform"))
-    transformed : DetectorOffsets = cast(DetectorOffsets,StaticOrCached("transformed"))
-    pm_transform : Transform = cast(Transform, StaticOrCached("pm_transform"))
-    pm_transformed : DetectorOffsets = cast(DetectorOffsets, StaticOrCached("pm_transformed"))
+
+    name: str
+    meas_id: str
+    data: DetectorOffsets
+    enc: DetectorOffsets
+    weights: Float[np.ndarray, "ndet"]
+    template: DetectorOffsets
+    pointing_model: PointingModel
+    static: bool
+    autofreeze: bool
+    fake_gamma: bool
+    data_pm: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("data_pm"))
+    transform: Transform = cast(Transform, StaticOrCached("transform"))
+    transformed: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("transformed"))
+    pm_transform: Transform = cast(Transform, StaticOrCached("pm_transform"))
+    pm_transformed: DetectorOffsets = cast(
+        DetectorOffsets, StaticOrCached("pm_transformed")
+    )
     _data_pm_stat: DetectorOffsets = field(init=False)
-    _transform_stat : Transform = field(init=False)
-    _transformed_stat : DetectorOffsets = field(init=False)
-    _pm_transform_stat : Transform = field(init=False)
-    _pm_transformed_stat : DetectorOffsets = field(init=False)
+    _transform_stat: Transform = field(init=False)
+    _transformed_stat: DetectorOffsets = field(init=False)
+    _pm_transform_stat: Transform = field(init=False)
+    _pm_transformed_stat: DetectorOffsets = field(init=False)
 
     @classmethod
-    def from_aman(cls, name : str, meas_id : str, aman : AxisManager, template : DetectorOffsets, pointing_model : PointingModel, autofreeze: bool=False, fake_gamma: bool = True, weight_factor: float = 1000.) -> FocalPlane:
+    def from_aman(
+        cls,
+        name: str,
+        meas_id: str,
+        aman: AxisManager,
+        template: DetectorOffsets,
+        pointing_model: PointingModel,
+        autofreeze: bool = False,
+        fake_gamma: bool = True,
+        weight_factor: float = 1000.0,
+    ) -> FocalPlane:
         """
         Create a `FocalPlane` instance from a context loaded AxisManager.
         Here we make the following assumptions:
@@ -474,9 +502,9 @@ class FocalPlane:
         fake_gamma : bool, default: True
             See class docstring.
             If True will also set `gamma` to `nan`.
-        weight_factor : float, default: 1000 
+        weight_factor : float, default: 1000
             Scaling factor applied to spacing when computing weights.
-        
+
         Returns
         -------
         focal_plane : FocalPlane
@@ -494,23 +522,37 @@ class FocalPlane:
         data = deepcopy(template)
         xi = np.array(aman.focal_plane.xi)
         eta = np.array(aman.focal_plane.eta)
-        gamma = np.array(aman.focal_plane.gamma) if not fake_gamma else np.nan*np.ones_like(xi)
+        gamma = (
+            np.array(aman.focal_plane.gamma)
+            if not fake_gamma
+            else np.nan * np.ones_like(xi)
+        )
         data.xyz[template_msk] = np.column_stack((xi, eta, gamma))[msk][srt][mapping]
         data.xyz[~template_msk] = np.nan
 
         # Setup enc
         enc = deepcopy(template)
         enc.coordsys = "horizon"
-        az = np.array(aman.focal_plane.az) if "az" in aman.focal_plane else np.deg2rad(np.array(aman.obs_info.az_center))*np.ones_like(xi)
-        el = np.array(aman.focal_plane.el) if "el" in aman.focal_plane else np.deg2rad(np.array(aman.obs_info.el_center))*np.ones_like(xi)
-        roll = np.array(aman.focal_plane.roll) if "roll" in aman.focal_plane else np.deg2rad(np.array(aman.obs_info.roll_center))*np.ones_like(xi)
+        az = (
+            np.array(aman.focal_plane.az)
+            if "az" in aman.focal_plane
+            else np.deg2rad(np.array(aman.obs_info.az_center)) * np.ones_like(xi)
+        )
+        el = (
+            np.array(aman.focal_plane.el)
+            if "el" in aman.focal_plane
+            else np.deg2rad(np.array(aman.obs_info.el_center)) * np.ones_like(xi)
+        )
+        roll = (
+            np.array(aman.focal_plane.roll)
+            if "roll" in aman.focal_plane
+            else np.deg2rad(np.array(aman.obs_info.roll_center)) * np.ones_like(xi)
+        )
         enc.xyz[template_msk] = np.column_stack((az, el, roll))[msk][srt][mapping]
         enc.xyz[~template_msk] = np.nan
 
         # Compute weights
-        aff, sft = mt.get_rigid(
-                data.xyz[:, :2], template.xyz[template_msk, :2]
-            )
+        aff, sft = mt.get_rigid(data.xyz[:, :2], template.xyz[template_msk, :2])
         aligned = mt.apply_transform(data.xyz[:, :2], aff, sft)
         xieta_spacing = mu.estimate_spacing(template.xyz[:, :2])
         # For gamma rather than the spacing in real space we want the difference between bins
@@ -519,9 +561,7 @@ class FocalPlane:
         spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
         if not fake_gamma:
-            gscale, gsft = gamma_fit(
-                data.xyz[:, 2], template.xyz[template_msk, 2]
-            )
+            gscale, gsft = gamma_fit(data.xyz[:, 2], template.xyz[template_msk, 2])
             weights = mu.gen_weights(
                 np.column_stack((aligned, gscale * data.xyz[:, 2] + gsft)),
                 template.xyz[template_msk],
@@ -537,10 +577,20 @@ class FocalPlane:
         # ~1 sigma cut
         weights[weights < 0.61] = np.nan
 
-        return cls(name, meas_id, data, enc, weights, template, pointing_model, False, autofreeze, fake_gamma)
+        return cls(
+            name,
+            meas_id,
+            data,
+            enc,
+            weights,
+            template,
+            pointing_model,
+            False,
+            autofreeze,
+            fake_gamma,
+        )
 
-
-    def freeze(self, static : bool):
+    def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
 
@@ -549,7 +599,7 @@ class FocalPlane:
         static : bool
             What to set `self.static` to after freezing.
         """
-        self._data_pm_stat = self._data_pm_dyn 
+        self._data_pm_stat = self._data_pm_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
         self._pm_transform_stat = self._pm_transform_dyn
@@ -592,28 +642,28 @@ class FocalPlane:
 class FocalPlaneCollection:
     """
     Container for multiple measurements of the same focal plane.
-    
+
     A `FocalPlaneCollection` combines several `FocalPlane` instances that
     share a common detector template and identical detector set. All
     measurements are expected to contain the same detectors in
     the same ordering.
-    
+
     Individual measurements are merged using their detector weights to
     produce a weighted-average focal plane, which can then be compared
     against the reference template through a single affine transform.
-    
+
     The collection operates on the pointing model corrected detector
     positions (`FocalPlane.data_pm`) from each measurement.
     Detector locations and weights are combined on a per-detector
     basis, missing values should be filled with `nan`s.
-    
+
     As with `FocalPlane`, derived quantities can be evaluated dynamically
     or stored as static values. When `static=True`, the public properties
     return frozen values previously stored by `freeze`. When
     `static=False`, quantities are recomputed on access. If
     `autofreeze=True`, newly computed values are automatically cached into
     the corresponding static fields.
-    
+
     Attributes
     ----------
     name : str
@@ -650,23 +700,26 @@ class FocalPlaneCollection:
     resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data` and `transformed`.
     """
-    name : str
-    focal_planes : list[FocalPlane] 
-    template : DetectorOffsets
-    static : bool
-    autofreeze : bool
-    pad : bool
-    fake_gamma : bool
-    data : DetectorOffsets = cast(DetectorOffsets, StaticOrCached("data"))
-    weights : Float[np.ndarray, "ndet"] = cast(Float[np.ndarray, "ndet"], StaticOrCached("weights"))
-    transform : Transform = cast(Transform, StaticOrCached("transform"))
-    transformed : DetectorOffsets = cast(DetectorOffsets, StaticOrCached("transformed"))
-    _data_stat: DetectorOffsets = field(init=False)
-    _weights_stat : Float[np.ndarray, "ndet"] = field(init=False)
-    _transform_stat : Transform = field(init=False)
-    _transformed_stat : DetectorOffsets = field(init=False)
 
-    def freeze(self, static : bool):
+    name: str
+    focal_planes: list[FocalPlane]
+    template: DetectorOffsets
+    static: bool
+    autofreeze: bool
+    pad: bool
+    fake_gamma: bool
+    data: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("data"))
+    weights: Float[np.ndarray, "ndet"] = cast(
+        Float[np.ndarray, "ndet"], StaticOrCached("weights")
+    )
+    transform: Transform = cast(Transform, StaticOrCached("transform"))
+    transformed: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("transformed"))
+    _data_stat: DetectorOffsets = field(init=False)
+    _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
+    _transform_stat: Transform = field(init=False)
+    _transformed_stat: DetectorOffsets = field(init=False)
+
+    def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
 
@@ -675,7 +728,7 @@ class FocalPlaneCollection:
         static : bool
             What to set `self.static` to after freezing.
         """
-        self._data_stat = self._data_dyn 
+        self._data_stat = self._data_dyn
         self._weights_stat = self._weights_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
@@ -684,8 +737,10 @@ class FocalPlaneCollection:
     @property
     def _data_dyn(self) -> DetectorOffsets:
         to_ret = deepcopy(self.template)
-        dat_full = np.array([fp.data_pm.xyz * fp.weights[..., None] for fp in self. focal_planes])
-        to_ret.xyz = np.nansum(dat_full, axis=-1)/self.weights[..., None]
+        dat_full = np.array(
+            [fp.data_pm.xyz * fp.weights[..., None] for fp in self.focal_planes]
+        )
+        to_ret.xyz = np.nansum(dat_full, axis=-1) / self.weights[..., None]
         to_ret.center = None
         if self.autofreeze:
             self._data_stat = to_ret
@@ -693,7 +748,7 @@ class FocalPlaneCollection:
 
     @property
     def _weights_dyn(self) -> Float[np.ndarray, "ndet"]:
-        weights_full = np.array([fp.weights for fp in self. focal_planes])
+        weights_full = np.array([fp.weights for fp in self.focal_planes])
         to_ret = np.nansum(weights_full, axis=-1)
         if self.autofreeze:
             self._weights_stat = to_ret
@@ -711,11 +766,12 @@ class FocalPlaneCollection:
     def resid(self):
         return self.data.xyz - self.transformed.xyz
 
+
 @dataclass
 class OpticsTube:
     """
     An `OpticsTube` groups one or more `FocalPlaneCollection` instances
-    associated with the same optics tube and 
+    associated with the same optics tube and
     calculates tube-level common-mode transforms. These common-mode
     transforms capture distortions that are shared across the focal planes
     within the tube and can be used to separate optics-tube effects from
@@ -759,15 +815,16 @@ class OpticsTube:
         common mode removed. This quantity is not computed dynamically and
         is updated only through `remove_rx`.
     """
-    name : str
-    focal_planes : list[FocalPlaneCollection]
-    wafer_slots : list[str]
-    static : bool
-    autofreeze : bool
-    allpad : bool
-    cm_transform : Transform = cast(Transform, StaticOrCached("cm_transform"))
-    cm_transform_norx : Transform = field(init=False)
-    _cm_transform_stat : Transform = field(init=False)
+
+    name: str
+    focal_planes: list[FocalPlaneCollection]
+    wafer_slots: list[str]
+    static: bool
+    autofreeze: bool
+    allpad: bool
+    cm_transform: Transform = cast(Transform, StaticOrCached("cm_transform"))
+    cm_transform_norx: Transform = field(init=False)
+    _cm_transform_stat: Transform = field(init=False)
 
     def __getitem__(self, key):
         if key in self.wafer_slots:
@@ -777,7 +834,7 @@ class OpticsTube:
             return self.focal_planes[fp_names.index(key)]
         raise IndexError(f"Invalid key: {key}")
 
-    def freeze(self, static : bool):
+    def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
 
@@ -791,7 +848,9 @@ class OpticsTube:
 
     @property
     def _cm_transform_dyn(self) -> Transform:
-        transforms = [fp.transform.affine for fp in self.focal_planes if fp.pad is False]
+        transforms = [
+            fp.transform.affine for fp in self.focal_planes if fp.pad is False
+        ]
         shifts = [fp.transform.shift for fp in self.focal_planes if fp.pad is False]
         allpad = False
         if len(transforms) == 0:
@@ -808,18 +867,18 @@ class OpticsTube:
             self.allpad = allpad
         return to_ret
 
-    def remove_rx(self, rx_cm : Transform):
+    def remove_rx(self, rx_cm: Transform):
         """
         Remove the receiver common-mode transform from the optics tube
         common-mode transform.
-    
+
         Unlike `cm_transform`, the receiver-corrected transform is not a
         dynamic property and is updated only when this method is called.
 
         If `allpad=True`, no valid focal-plane collections are available for
         this optics tube and `cm_transform_norx` is set to the identity
         transform.
-    
+
         Parameters
         ----------
         rx_cm : Transform
@@ -829,12 +888,13 @@ class OpticsTube:
         if self.allpad:
             self.cm_transform_norx = Transform.identity()
         aff, sft = mt.decompose_transform(
-                self.cm_transform.affine,
-                self.cm_transform.shift,
-                rx_cm.affine,
-                rx_cm.shift,
-            )
+            self.cm_transform.affine,
+            self.cm_transform.shift,
+            rx_cm.affine,
+            rx_cm.shift,
+        )
         self.cm_transform_norx = Transform(sft, aff)
+
 
 @dataclass
 class Receiver:
@@ -879,12 +939,13 @@ class Receiver:
         Receiver-level common-mode transform derived from the common-mode
         transforms of all optics tubes containing valid data.
     """
-    name : str
-    optics_tubes : list[OpticsTube]
-    static : bool
-    autofreeze : bool
-    cm_transform : Transform = cast(Transform, StaticOrCached("cm_transform"))
-    _cm_transform_stat : Transform = field(init=False)
+
+    name: str
+    optics_tubes: list[OpticsTube]
+    static: bool
+    autofreeze: bool
+    cm_transform: Transform = cast(Transform, StaticOrCached("cm_transform"))
+    _cm_transform_stat: Transform = field(init=False)
 
     def __getitem__(self, key):
         ot_names = [ot.name for ot in self.optics_tubes]
@@ -892,7 +953,7 @@ class Receiver:
             return self.optics_tubes[ot_names.index(key)]
         raise IndexError(f"Invalid key: {key}")
 
-    def freeze(self, static : bool):
+    def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
 
@@ -906,8 +967,12 @@ class Receiver:
 
     @property
     def _cm_transform_dyn(self) -> Transform:
-        transforms = [ot.cm_transform.affine for ot in self.optics_tubes if ot.allpad is False]
-        shifts = [ot.cm_transform.shift for ot in self.optics_tubes if ot.allpad is False]
+        transforms = [
+            ot.cm_transform.affine for ot in self.optics_tubes if ot.allpad is False
+        ]
+        shifts = [
+            ot.cm_transform.shift for ot in self.optics_tubes if ot.allpad is False
+        ]
         if len(transforms) == 0:
             iden = Transform.identity()
             cm_shift, cm_aff = iden.shift, iden.affine
@@ -923,7 +988,7 @@ class Receiver:
     def remove_rx_all(self):
         """
         Remove the current receiver common mode from all optics tubes.
-        
+
         This method calls `OpticsTube.remove_rx` for every optics tube in the
         receiver using the current value of `cm_transform`. After execution,
         each optics tube stores a receiver-corrected common-mode transform in
@@ -956,24 +1021,58 @@ class PointingSystem:
         This computes the chisq from the residuals for each `FocalPlaneCollection`,
         not the individual `FocalPlane` measurements.
     """
-    era : epochs.Era
-    pointing_models : tuple[PointingModel, ...]
-    receivers : tuple[Receiver, ...]
+
+    era: epochs.Era
+    pointing_models: tuple[PointingModel, ...]
+    receivers: tuple[Receiver, ...]
 
     def __post_init__(self):
-        if len(self.era.epochs) != len(self.pointing_models) or len(self.era.epochs) != len(self.receivers):
+        if len(self.era.epochs) != len(self.pointing_models) or len(
+            self.era.epochs
+        ) != len(self.receivers):
             raise ValueError("Should have one pointing model and receiver per epoch!")
 
     @property
     def chisq(self) -> float:
-        chisq = 0.
+        chisq = 0.0
         for rx in self.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
-                    chisq += np.nansum((fp.weights * fp.resid)**2).item()
+                    chisq += np.nansum((fp.weights * fp.resid) ** 2).item()
         return chisq
 
-    def load_pm_from_mdb(self, mdb : ManifestDb):
+    def chisq_cm_prior(
+        self, sft_tol: float, rot_tol: float, scl_tol: float, shr_tol: float
+    ) -> float:
+        """
+        Compute the chisq of the full pointing system but with strong priors on to reject
+        any common mode transformations across the receiver.
+        These are rectangular priors defined by a tolerance against the null space of the affine transform.
+        Any common mode out of tolerance will return a chisq of infinity.
+
+        Parameters
+        ----------
+        sft_tol : float
+            Tolerance in shift away from 0.
+        rot_tol : float
+            Tolerance in rotation away from 0.
+        scl_tol : float
+            Tolerance in scale away from 1.
+        shr_tol : float
+            Tolerance in shear away from 0.
+        """
+        for rx in self.receivers:
+            if np.any(rx.cm_transform.shift > sft_tol):
+                return np.inf
+            if np.any(rx.cm_transform.rot > rot_tol):
+                return np.inf
+            if np.any(np.abs(rx.cm_transform.scale - 1) > scl_tol):
+                return np.inf
+            if np.any(rx.cm_transform.shear > shr_tol):
+                return np.inf
+        return self.chisq
+
+    def load_pm_from_mdb(self, mdb: ManifestDb):
         """
         Load pointing model parameters from a ManifestDb into the current era.
 
@@ -1006,17 +1105,24 @@ class PointingSystem:
             If different intervals within an epoch resolve to inconsistent matches.
         """
         loader = SuperLoader()
-        mspec = MetadataSpec.from_dict({"db" : mdb, "unpack":"pointing_model"})
-        if mdb.scheme.get_required_params() != ['obs:timestamp']:
+        mspec = MetadataSpec.from_dict({"db": mdb, "unpack": "pointing_model"})
+        if mdb.scheme.get_required_params() != ["obs:timestamp"]:
             raise ValueError("Unsupported scheme for pointing model db!")
         for i, epoch in enumerate(self.era.epochs):
             matches = []
             for interval in epoch.covers:
-                matches += [mdb.match({"obs:timestamp":interval.start}), mdb.match({"obs:timestamp":interval.stop-1})]
+                matches += [
+                    mdb.match({"obs:timestamp": interval.start}),
+                    mdb.match({"obs:timestamp": interval.stop - 1}),
+                ]
             if len(matches) == 0:
                 raise ValueError(f"No matches for epoch: {str(epoch)}")
             if not all(x == matches[0] for x in matches):
-                raise ValueError(f"Not all intervals have the same match in epoch: {str(epoch)}")
-            pm_aman = loader.load_one(mspec, {"obs:timestamp":epoch.covers[0].start}, [])
-            pm_dict = {key : pm_aman[key] for key in pm_aman.keys()}
+                raise ValueError(
+                    f"Not all intervals have the same match in epoch: {str(epoch)}"
+                )
+            pm_aman = loader.load_one(
+                mspec, {"obs:timestamp": epoch.covers[0].start}, []
+            )
+            pm_dict = {key: pm_aman[key] for key in pm_aman.keys()}
             self.pointing_models[i].parameters = pm_dict
