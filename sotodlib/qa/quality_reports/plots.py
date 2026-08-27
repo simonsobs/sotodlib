@@ -349,6 +349,9 @@ def wafer_obs_efficiency(d: ReportData, nsegs: int=2000, good_pwv_lim: float=3) 
     heatmap.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         height=height,
+        xaxis=dict(
+            nticks=20,
+        ),
     )
 
     return ObsEfficiencyPlots(pie=pie, pie_good_pwv=pie_good_pwv, heatmap=heatmap)
