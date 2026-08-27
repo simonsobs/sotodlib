@@ -547,7 +547,7 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
     return xi, eta, gamma
 
 
-def latr_tilt_shift_to_xieta(zemax_path, tilt_x=0.0, tilt_y=0.0, shift_x=0.0, shift_y=0.0, front_to_sec=0.0, roll=0.0):
+def latr_tilt_shift_to_xieta(zemax_path, tilt_x=0.0, tilt_y=0.0, shift_x=0.0, shift_y=0.0, front_to_sec=200.0, roll=0.0):
     """
     Compute the sky offset from a rigid-body tilt and shift of the LATR.
     Note that the coordinates here are the same convention as focal plane coordinates.
