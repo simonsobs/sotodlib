@@ -68,8 +68,8 @@ def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
 
 
 def _avg_focalplane(full_fp, tot_weight, dists):
-    if np.sum(np.isfinite(dists)) > 5:
-        msk = (dists - np.nanmedian(dists)) > 3 * np.nanstd(dists)
+    if np.sum(np.isfinite(dists)) > 1:
+        msk = (dists - np.nanmin(dists))/np.nanstd(dists) > 3 
         msk *= np.isnan(dists)
         full_fp[:, :, msk] = np.nan
     # Figure out how many good pointings we have for each det
@@ -249,12 +249,10 @@ def _load_ctx(config, obsfile):
     failed = []
     run = []
     if per_obs and not config.get("overwrite", False):
-        run = np.genfromtxt(obsfile) 
+        run = np.genfromtxt(obsfile, dtype=str) 
+    obs_ids = np.setdiff1d(obs_ids, run)
         
     for obs_id in tqdm(obs_ids):
-        if obs_id in run:
-            logger.debug("%s has already been run", obs_id)
-            continue
         roll = ctx.obsdb.get(obs_id)["roll_center"]
         if roll is None:
             continue
@@ -770,7 +768,7 @@ def main():
             logger.info("\t%d points from %d obs in fit", tot_points, n_obs)
             if tot_points < min_points:
                 logger.error("\tToo few points! Skipping...")
-                if config.get("pad", False):
+                if config.get("pad", False) and focal_plane.stream_id not in rx.ot_dict[ot].fp_dict:
                     logger.info("\tPadding output with template")
                     focal_plane.transformed = focal_plane.template.fp
                     focal_plane.tot_weight = None
