@@ -1,6 +1,5 @@
 import os
-import pickle
-import math
+import sys
 import h5py
 import argparse
 import yaml
@@ -10,7 +9,6 @@ import so3g.proj.quat as quat
 
 import lmfit
 from lmfit import minimize, Parameters, fit_report
-import time
 import shutil
 
 import matplotlib
@@ -336,6 +334,7 @@ def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_
         aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
         aman.wrap("obs_index", obs_index, [(0, "samps")])
         aman.wrap("ot_list", ot_list, [(0, "samps")])
+        aman.wrap("unq_ots", np.unique(ot_list))
 
         return aman
 
@@ -347,6 +346,8 @@ def _init_fit_params(config, epochs):
     float_ots = config.get("float_ots", False)
     init_params = pm.param_defaults[pm_version]
     init_params.update(initial_params)
+    init_min = {key:-np.inf for key in init_params.keys()}
+    init_max = {key:np.inf for key in init_params.keys()}
 
     # Add independant params
     orig_pars = np.array(list(init_params.keys()))
@@ -357,20 +358,26 @@ def _init_fit_params(config, epochs):
             ot_float_pars = [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]
             orig_pars = np.concatenate((orig_pars, ot_float_pars))
             par_list = np.concatenate((par_list, ot_float_pars))
-            for p, d in zip(ot_float_pars, [0, 0, 0, 1, 1]):
+            for p, d, mi, ma in zip(ot_float_pars, [0, 0, 0, 1, 1], [-.05, -.05, -np.pi, .9, .9], [.05, .05, np.pi, 1.1, 1.1]):
                 init_params[p] = d
+                init_min[p] = mi
+                init_max[p] = ma
     for epoch in epochs: 
         indep_list = epoch["indep_list"]
         if float_ots:
             for ot in all_ots:
                 ot_float_pars = [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]
                 indep_list += ot_float_pars 
+                if ot not in epoch["solver_aman"].ot_list:
+                    fixed_params += [f"{n}_{epoch['name']}" for n in ot_float_pars]
         if np.sum(np.isin(indep_list, par_list)) != len(indep_list):
             raise ValueError(f"Invalid independant parameters in epoch {epoch['name']}")
         indep_list = [f"{n}_{epoch['name']}" for n in indep_list]
         par_list = np.hstack((par_list, indep_list))
         for ipar, par in zip(indep_list, epoch["indep_list"]):
             init_params[ipar] = init_params[par]
+            init_min[ipar] = init_min[par]
+            init_max[ipar] = init_max[par]
     par_count = np.zeros(len(par_list))
     all_indep_list = []
     for epoch in epochs: 
@@ -381,7 +388,6 @@ def _init_fit_params(config, epochs):
         pmsk[np.isin(par_list, indep_list)] = False
         pmsk += np.array([epoch["name"] in par for par in par_list])
         if np.sum(pmsk) != len(orig_pars):
-            import ipdb; ipdb.set_trace()
             raise ValueError(f"Epoch {epoch['name']} somehow has the wrong number of parameters!")
         par_count[pmsk] += 1
         epoch["params"] = par_list[pmsk]
@@ -393,7 +399,7 @@ def _init_fit_params(config, epochs):
     for p in init_params.keys():
         if p in all_indep_list and np.sum(all_indep_list == p) == len(epochs):
             continue
-        fit_params.add(p, value=init_params[p], vary=True)
+        fit_params.add(p, value=init_params[p], vary=True, min=init_min[p], max=init_max[p])
     # Turn off various parameters depending on platform
     for fix in fixed_params:
         if fix in fit_params:
@@ -404,14 +410,16 @@ def _init_fit_params(config, epochs):
 
 def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
     # For simplicity we do the floating of OTs to just the model
-    # We are recomputing information that should just be cached here...
-    # TODO: Fix that
     ot_float_pars = ["xioff", "etaoff", "rot", "xiscale", "etascale"]
     ot_float_defaults = np.array([0., 0., 0., 1., 1.])
-    ot_pars_full = np.array([[params.get(f"{n}_{ot}", d) for n, d in zip(ot_float_pars, ot_float_defaults)] for ot in np.unique(solver_aman.ot_list)])
+    ot_pars_full = np.array([[params.get(f"{n}_{ot}", d) for n, d in zip(ot_float_pars, ot_float_defaults)] for ot in solver_aman.unq_ots])
     # To avoid the fitter using this to eat up encoder offsets we remove a common mode
     ot_pars_full[:, :3] -= np.mean(ot_pars_full[:, :3], axis=0)
-    for i, ot in enumerate(np.unique(solver_aman.ot_list)):
+    for i, ot in enumerate(solver_aman.unq_ots):
+        if not np.all(np.isfinite(ot_pars_full[i])):
+            raise ValueError(
+                f"Non-finite OT parameters for {ot}: {ot_pars_full[i]}"
+            )
         ot_pars = ot_pars_full[i]
         if np.array_equal(ot_pars, ot_float_defaults):
             continue
@@ -451,29 +459,26 @@ def objective_model_func_lmfit(
     dist = np.sqrt((xi_ref - xi_mod) ** 2 + (eta_ref - eta_mod) ** 2)
     weights_array = solver_aman.weights if weights else np.ones(len(dist))
 
-    return (dist * np.sqrt(weights_array))
+    return (np.nan_to_num(dist, False, 1e10) * np.sqrt(weights_array))
 
 
 def objective_model_func_lmfit_joint(
     params, pm_version, epochs, xieta_model, fit_method, weights=True
 ):
     params = params.valuesdict()
-    if fit_method == "leastsq" or fit_method == "least_squares":
-        all_residuals=[]
-        for epoch in epochs:
-            epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
-            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
-            all_residuals.append(res)
-        return np.concatenate(all_residuals)
-        
-    else: 
-        chisq = 0 
-        for epoch in epochs:
-            epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
-            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
+    chisq = 0 
+    all_residuals=[]
+    for epoch in epochs:
+        epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
+        res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
+        # res = 60*np.rad2deg(res)
+        if fit_method == "leastsq" or fit_method == "least_squares":
+                all_residuals.append(res)
+        else:
             chisq += np.nansum(res**2)
-            
-        return chisq
+    if fit_method == "leastsq" or fit_method == "least_squares":
+        return np.concatenate(all_residuals)
+    return chisq
     
 
 def model_template_xieta(params, pm_version, aman):
@@ -539,6 +544,7 @@ def calc_RMS_and_residuals(modeled_fits, model_reference, weights, use_inds=None
     if use_inds is not None:
         diff = diff[use_inds]
         weights = weights[use_inds]
+    diff[weights == 0] = np.nan
     return np.sqrt(np.nansum(diff * weights) / np.nansum(weights)), diff**0.5
 
     
@@ -744,7 +750,7 @@ def main(config_path: str):
             'Not recognized xieta_model. \
                      Only "measured" or "template" accepted'
         )
-        exit
+        sys.exit()
         
     epochs = config.get("epochs")
     for epoch in epochs:
@@ -754,7 +760,7 @@ def main(config_path: str):
             epoch["indep_list"] = []
     if epochs is None:
         raise ValueError("No epochs provided")
-        
+
     if config.get("just_test_params"):
         logger.info("Will test initial_parameters against pointing data.")
         for epoch in epochs:
@@ -844,6 +850,20 @@ def main(config_path: str):
     # Initialize Parameters to Fit with Model
     fit_params, epochs = _init_fit_params(config, epochs)
     logger.info("Initialized fit parameters")
+    
+    init_cut = config.get("init_cut", -1)
+    if init_cut > 0:
+        params = fit_params.valuesdict()
+        for epoch in epochs:
+            epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
+            res = 60*np.rad2deg(objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, False))
+            fres = 60*np.rad2deg(objective_model_func_lmfit(epoch_params, pm_version, epoch["fitcheck_aman"], xieta_model, False))
+            fmed = np.median(fres)
+            msk = res - fmed > init_cut
+            fmsk = fres - fmed > init_cut
+            logger.info("Cutting %d (%d in full) samples that are more than %f arcmin away from median resid in epoch %s", int(np.sum(msk)), int(np.sum(fmsk)), init_cut, epoch['name'])
+            epoch["solver_aman"].weights[msk] = 0
+            epoch["fitcheck_aman"].weights[fmsk] = 0
 
     # Solve for Model Parameters
     # use chosen xieta_model to solve for parameters
@@ -991,7 +1011,7 @@ def main(config_path: str):
                                                         use_inds=good_fit_inds)
                 
                 logger.info("RMS on initial fit without outliers: %f arcmin", masked_rms)
-                epoch["solver_aman"].weights[bad_fit_inds] = 0.0
+                epoch["solver_aman"].weights[bad_fit_inds] = 0
             epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
             
         if tot_bad == 0:
@@ -999,7 +1019,7 @@ def main(config_path: str):
     if tot_bad > 0:
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
-            fit_params,
+            model_solved_params.params,
             method=fit_method,
             nan_policy="omit",
             args=(pm_version, epochs, xieta_model, fit_method, use_weights),
@@ -1124,12 +1144,13 @@ def main(config_path: str):
         h5_filename = os.path.join(save_dir, h5_rel)
         dbfile = "db.sqlite"
         db = _create_db(dbfile, save_dir)
+        all_ots = np.unique(np.concatenate([epoch["solver_aman"].unq_ots for epoch in epochs]))
         for epoch in epochs:
             solver_aman = epoch["solver_aman"]
             # Remove OT float parameters
             if config.get("float_ots", False):
                 ot_float_aman = core.AxisManager()
-                for ot in np.unique(solver_aman.ot_list):
+                for ot in all_ots:
                     for par in [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]:
                         if par not in solver_aman.pointing_model._assignments:
                             continue
