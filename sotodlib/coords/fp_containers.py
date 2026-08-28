@@ -641,10 +641,10 @@ class Receiver:
 
     @property
     def lims(self):
-        xmax = np.max([np.nanmax(fp.template.fp[:, 0]) for fp in self.focal_planes])
-        xmin = np.min([np.nanmin(fp.template.fp[:, 0]) for fp in self.focal_planes])
-        ymax = np.max([np.nanmax(fp.template.fp[:, 1]) for fp in self.focal_planes])
-        ymin = np.min([np.nanmin(fp.template.fp[:, 1]) for fp in self.focal_planes])
+        xmax = np.max([np.nanmax(fp.template_fp[:, 0]) for fp in self.focal_planes])
+        xmin = np.min([np.nanmin(fp.template_fp[:, 0]) for fp in self.focal_planes])
+        ymax = np.max([np.nanmax(fp.template_fp[:, 1]) for fp in self.focal_planes])
+        ymin = np.min([np.nanmin(fp.template_fp[:, 1]) for fp in self.focal_planes])
         return (xmin, xmax), (ymin, ymax)
 
     @property
@@ -764,7 +764,7 @@ def plot_by_gamma(focal_plane, plot_dir):
     dist_thresh = np.percentile(focal_plane.dist[focal_plane.isfinite], 97)
     msk = (focal_plane.dist < dist_thresh) + focal_plane.isfinite
     rhombi = np.unique(focal_plane.template.rhombus)
-    gammas = (focal_plane.template.fp[msk, 2] * 180 / np.pi) % 180.0
+    gammas = (focal_plane.template_fp[msk, 2] * 180 / np.pi) % 180.0
     bins = np.linspace(0, 180, 13)
     for i, name in enumerate(("xi", "eta", "gamma")):
         d = focal_plane.diff[msk, i] * 180 * 60 * 60 / np.pi
@@ -853,8 +853,8 @@ def plot_receiver(receiver, plot_dir):
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
             cf = axs[nax * i + 0].scatter(
-                fp.template.fp[msk, 0],
-                fp.template.fp[msk, 1],
+                fp.template_fp[msk, 0],
+                fp.template_fp[msk, 1],
                 c = diff[msk, 0],
                 marker=".",
                 vmin=-1 * max_diff,
@@ -863,8 +863,8 @@ def plot_receiver(receiver, plot_dir):
                 alpha=.5
             )
             cf = axs[nax * i + 1].scatter(
-                fp.template.fp[msk, 0],
-                fp.template.fp[msk, 1],
+                fp.template_fp[msk, 0],
+                fp.template_fp[msk, 1],
                 c = diff[msk, 1],
                 marker=".",
                 vmin=-1 * max_diff,
@@ -874,8 +874,8 @@ def plot_receiver(receiver, plot_dir):
             )
             if fp.have_gamma:
                 cf = axs[nax * i + 2].scatter(
-                    fp.template.fp[msk, 0],
-                    fp.template.fp[msk, 1],
+                    fp.template_fp[msk, 0],
+                    fp.template_fp[msk, 1],
                     c = diff[msk, 2],
                     marker=".",
                     vmin=-1 * max_diff,
