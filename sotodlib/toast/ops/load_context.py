@@ -68,6 +68,8 @@ class LoadContext(Operator):
     key.  For example, the shared smurfgap flags are named after the UFM (array
     name).  So you can import the correct field name for all observations with:
 
+    .. code-block:: python
+
         ax_flags=[
             (
                 "smurfgaps_ufm_{det_info:wafer:array}",
@@ -166,7 +168,7 @@ class LoadContext(Operator):
     )
 
     ignore_preprocess_archive = Bool(
-        False,
+        True,
         help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 

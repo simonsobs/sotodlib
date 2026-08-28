@@ -4,27 +4,58 @@ is specifically designed to work when the data is dynamically coming in. Meaning
 is designed to work from something like a cronjob.
 """
 import os
-from pathlib import Path
-import yaml
 import datetime as dt
-import numpy as np
 import argparse
 import logging
-from sqlalchemy import not_, or_, and_
+from sqlalchemy import or_
 from typing import Optional
+
+
+from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
 
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 from sotodlib.io.datapkg_utils import load_configs
 
-
-def core(
+@profile("update_g3tsmurf_db")
+def main(
     config: Optional[str] = None, update_delay: float = 2,
     from_scratch: bool = False, verbosity: int = 2,
     min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
-    index_via_actions: bool=False, checked_file: Optional[str]=None, 
+    index_via_actions: bool=False, checked_file: Optional[str]=None,
 ):
     """
-    Real logic, wrapped from the profiling code in `main`.
+    Arguments
+    ---------
+    config: string
+        configuration file for G3tSmurf
+    update_delay: float
+        number of days to 'look back' to update observation information
+    from_scratch: bool
+        if True, run database update with minimum ctime of 1.6e9 (all SO time).
+        overrides update_delay
+    verbosity: int
+        0-3, higher numbers = more printouts
+    min_ctime: float
+        minimum ctime to start the search, overrides the time set by
+        update_delay
+    max_ctime: float
+        maximum ctime to search, otherwise searches through 'now'
+    index_via_actions: bool
+        if True, will look through action folders to create observations, this
+        will be necessary for data older than Oct 2022 but creates concurancy
+        issues on systems (like the site) running automatic deletion of level 2
+        data.
+    checked_file: str
+        a file name that contains a list of observations that would by default
+        cause errors to be thrown during this script but have been manually
+        checked and dealt with
+
+    Notes
+    -----
+    The `profile` decorator adds three further keyword arguments, `profile`,
+    `profile_type` and `profile_output`; see
+    `sotodlib.site_pipeline.utils.profiler`. They are added to the command line
+    by `add_profile_args` in `get_parser`.
     """
     show_pb = True if verbosity > 1 else False
 
@@ -57,12 +88,15 @@ def core(
     
     ## make sure we don't have a gap between currently finalized time and when we're 
     ## starting updates now
-    current_time = SMURF.last_update
-    if min_ctime > current_time:
-        raise ValueError(
-            f"min_ctime {min_ctime} is higher than current database coverage"
-            f" {current_time}"
-        )
+    if not from_scratch:
+        current_time = SMURF.last_update
+        if min_ctime > current_time:
+            raise ValueError(
+                f"min_ctime {min_ctime} is higher than current database coverage"
+                f" {current_time}"
+            )
+    else:
+        current_time = None
     logger.info(
         f"G3tSmurf is updated through {current_time}. Beginning updates"
         f" from {min_ctime} to {max_ctime}"
@@ -159,66 +193,10 @@ def core(
             f" obs_ids are {raise_list_readout_ids}."
         )
 
-def main(config: Optional[str] = None, update_delay: float = 2,
-         from_scratch: bool = False, verbosity: int = 2,
-         min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
-         index_via_actions: bool=False, checked_file: Optional[str]=None,
-         profile: bool=False, profile_output: Optional[Path]=None):
-    """
-    Arguments
-    ---------
-    config: string
-        configuration file for G3tSmurf
-    update_delay: float
-        number of days to 'look back' to update observation information
-    from_scratch: bool
-        if True, run database update with minimum ctime of 1.6e9 (all SO time).
-        overrides update_delay
-    verbosity: int
-        0-3, higher numbers = more printouts
-    index_via_actions: bool
-        if True, will look through action folders to create observations, this
-        will be necessary for data older than Oct 2022 but creates concurancy
-        issues on systems (like the site) running automatic deletion of level 2
-        data.
-    checked_file: str
-        a file name that contains a list of observations that would by default
-        cause errors to be thrown during this script but have been manually
-        checked and dealt with
-    profile: bool
-        if True, will run the script with pyinstrument and output to profile_output
-    profile_output: str
-        if profile is True, the file name of the directory
-        to output the pyinstrument profiling results to
-    """
-
-    if profile:
-        import pyinstrument
-        timestamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S')
-        filename = f"update_g3tsmurf_db_{timestamp}.html"
-        output_filename = profile_output / filename if profile_output is not None else filename
-        profiler = pyinstrument.Profiler()
-        profiler.start()
-    
-    try:
-        core(
-            config=config, update_delay=update_delay, from_scratch=from_scratch,
-            verbosity=verbosity, index_via_actions=index_via_actions,
-            min_ctime=min_ctime, max_ctime=max_ctime,
-            checked_file=checked_file
-        )
-    finally:
-        if profile:
-            profiler.stop()
-            if profile_output is not None:
-                with open(output_filename, "w") as f:
-                    f.write(profiler.output_html())
-
-  
-
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
+    
     parser.add_argument('config', help="g3tsmurf db configuration file")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
@@ -226,10 +204,6 @@ def get_parser(parser=None):
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                         default=2, type=int)
-    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
-                        action="store_true")
-    parser.add_argument("--checked-file",
-        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
     parser.add_argument("--min_ctime",
         help="minimum ctime to start search, overrides time set by update-delay",
         default=None, type=int
@@ -238,9 +212,13 @@ def get_parser(parser=None):
         help="maximum ctime to search, otherwise searches through 'now'",
         default=None, type=int
     )
-    parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
-    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
-                        type=Path)
+    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+                        action="store_true")
+    parser.add_argument("--checked-file",
+        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
+    
+    add_profile_args(parser)
+
     return parser
 
 if __name__ == '__main__':

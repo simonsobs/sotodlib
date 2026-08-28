@@ -1,6 +1,7 @@
 # Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import os
 import numpy as np
 import toast.rng
 from astropy import units as u
@@ -11,72 +12,42 @@ from toast.timing import function_timer, Timer
 from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
 
+try:
+    # NB: Requires specific version of JBolo
+    # https://github.com/kmharrington/jbolo
+    import jbolo.jbolo_funcs as jf
+    from jbolo.utils import load_sim
+    jbolo_available = True
+except:
+    jbolo_available = False
+
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
-# https://github.com/simonsobs/bolocalc-so-model/blob/master/V3r7/V3r7_Baseline
-# Total optical power in pW
-P_OPT = {
-    "SAT_f030" : 0.158,
-    "SAT_f040" : 0.267,
-    "SAT_f090" : 1.51,
-    "SAT_f150" : 2.69,
-    "SAT_f230" : 7.27,
-    "SAT_f290" : 11.18,
-    "LAT_f030" : 0.21,
-    "LAT_f040" : 1.02,
-    "LAT_f090" : 1.04,
-    "LAT_f150" : 2.23,
-    "LAT_f230" : 7.50,
-    "LAT_f290" : 12.48,
+# JBolo sims to use
+JBOLO_MODELS = {
+    'SAT_LF' : os.path.expandvars("$JBOLO_MODELS_PATH/V3r7_JBolo/V3r7_Baseline/SAT/V3r7_Baseline_SAT_LF.yaml"),
+    'SAT_MF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_MF.yaml"),
+    'SAT_UHF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/SAT/V4r0_Baseline_SAT_UHF.yaml"),
+    'LAT_LF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_LF.yaml"),
+    'LAT_MF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_MF.yaml"),
+    'LAT_UHF' : os.path.expandvars("$JBOLO_MODELS_PATH/V4r0/V4r0_Baseline/LAT/V4r0_Baseline_LAT_UHF.yaml")
 }
 
-# Optical power due to standard atmosphere
-P_ATM = {
-    "SAT_f030" : 0.059685257,
-    "SAT_f040" : 0.618673466,
-    "SAT_f090" : 0.811076040,
-    "SAT_f150" : 1.343902747,
-    "SAT_f230" : 4.118517930,
-    "SAT_f290" : 7.056159517,
-    "LAT_f030" : 0.042984911,
-    "LAT_f040" : 0.495809196,
-    "LAT_f090" : 0.509838815,
-    "LAT_f150" : 1.000122526,
-    "LAT_f230" : 3.359030038,
-    "LAT_f290" : 6.284548710,
+JBOLO_CHANNELS = {
+    "SAT_f030" : "LF_1",
+    "SAT_f040" : "LF_2",
+    "SAT_f090" : "MF_1",
+    "SAT_f150" : "MF_2",
+    "SAT_f230" : "UHF_1",
+    "SAT_f290" : "UHF_2",
+    "LAT_f030" : "LF_1",
+    "LAT_f040" : "LF_2",
+    "LAT_f090" : "MF_1",
+    "LAT_f150" : "MF_2",
+    "LAT_f230" : "UHF_1",
+    "LAT_f290" : "UHF_2"
 }
 
-# Optical effiency between the detector and the atmosphere
-ETA_ATM = {
-    "SAT_f030" : 0.160,
-    "SAT_f040" : 0.278,
-    "SAT_f090" : 0.206,
-    "SAT_f150" : 0.267,
-    "SAT_f230" : 0.310,
-    "SAT_f290" : 0.344,
-    "LAT_f030" : 0.115,
-    "LAT_f040" : 0.216,
-    "LAT_f090" : 0.130,
-    "LAT_f150" : 0.199,
-    "LAT_f230" : 0.252,
-    "LAT_f290" : 0.305,
-}
-
-# Saturation power [pW]
-P_SAT = {
-    "SAT_f030" : 1.08,
-    "SAT_f040" : 4.62,
-    "SAT_f090" : 3.42,
-    "SAT_f150" : 9.37,
-    "SAT_f230" : 29.4,
-    "SAT_f290" : 31.8,
-    "LAT_f030" : 1.08,
-    "LAT_f040" : 4.62,
-    "LAT_f090" : 3.42,
-    "LAT_f150" : 9.37,
-    "LAT_f230" : 29.4,
-    "LAT_f290" : 31.8,
-}
 # Bolometer Resistance [Ohm]
 R_BOLO = 0.008
 # Readout noise fraction
@@ -181,7 +152,7 @@ class SimMuMUXCrosstalk(Operator):
 
         return Phi0
 
-    def _evaluate_dPhi0dT(self, obs, signal, detectors, rows, Phi0):
+    def _evaluate_dPhi0dT(self, obs, signal, detectors, rows, Phi0, pwv, elevation):
         """ Estimate how the SQUID phase in each detector changes
         with the sky temperature
         """
@@ -195,6 +166,12 @@ class SimMuMUXCrosstalk(Operator):
         else:
             common_good = np.ones(obs.n_local_samples, dtype=bool)
 
+        # Create dicts for JBolo values
+        P_opts = {}
+        P_atm_refs = {}
+        efficiencies = {}
+        P_sats = {}
+
         dPhi0dT = {}
         for row, det in zip(rows, detectors):
             band = focalplane[det]["band"]
@@ -205,15 +182,49 @@ class SimMuMUXCrosstalk(Operator):
             )
             #import pdb
             #pdb.set_trace()
-            median_signal = np.median(signal[row][good])
-            P_opt = P_OPT[band] * 1e-12  # W
-            P_atm_ref = P_ATM[band] * 1e-12  # W
-            efficiency = ETA_ATM[band]
-            P_sat = P_SAT[band] * 1e-12  # W
+            ## Calculate a global median 
+            local_good = signal[row][good]
+            if obs.comm.comm_group is not None:
+                all_good = obs.comm.comm_group.gather(local_good, root=0)
+                if obs.comm.group_rank == 0:
+                    median_signal = np.median(np.concatenate(all_good))
+                else:
+                    median_signal = None
+                median_signal = obs.comm.comm_group.bcast(median_signal, root=0)
+            else:
+                median_signal = np.median(local_good)
+            ##
+
+            if band not in P_opts.keys():
+                # Compute detector properties using JBolo
+                jbolo_channel = JBOLO_CHANNELS[band]
+                jbolo_model   = JBOLO_MODELS[band[:4] + jbolo_channel.split('_')[0]]
+                jsim = load_sim(jbolo_model)
+                jsim['sources']['atmosphere']['elevation'] = elevation # Degrees
+                jsim['sources']['atmosphere']['pwv'] = int(pwv) # Microns
+                jf.run_optics(jsim)
+                jf.run_bolos(jsim)
+                P_opts[band] = float(jsim['outputs'][jbolo_channel]['P_opt']) # W
+                P_atm_refs[band] = float(jsim['outputs'][jbolo_channel]['sources']['atmosphere']['P_opt']) # W
+                efficiencies[band] = float(jsim['outputs'][jbolo_channel]['sources']['atmosphere']['effic_cumul_avg'])
+                P_sats[band] = float(jsim['outputs'][jbolo_channel]['P_sat']) # W
+
+            # Pull from cached values
+            P_opt = P_opts[band]
+            P_atm_ref = P_atm_refs[band]
+            efficiency = efficiencies[band]
+            P_sat = P_sats[band]
+            
+            # Compute conversion
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
             R_TES = R_FRAC * R_BOLO
+
+            # Check for saturated detectors, flag if so
+            if P_sat < P_opt:
+                obs.detdata[self.det_flags][det] |= self.det_flag_mask
+
             I_TES = np.sqrt((P_sat - P_opt) / R_TES)
             dIdP = -1 / (I_TES * (R_TES - R_SHUNT))  # W -> A
             dPhi0dI = 1 / 9e-6  # A -> [rad]
@@ -229,6 +240,17 @@ class SimMuMUXCrosstalk(Operator):
         if detectors is not None:
             raise RuntimeError(
                 "SimMuMUXCrosstalk cannot be run on subsets of detectors"
+            )
+
+        # Check for JBOLO installation
+        if not jbolo_available:
+            raise RuntimeError(
+                "Cannot calculate detector parameters -- no JBolo installation"
+            )
+        # Check for JBOLO data path
+        if 'JBOLO_PATH' not in os.environ.keys() or 'JBOLO_MODELS_PATH' not in os.environ.keys():
+            raise RuntimeError(
+                "Cannot calculate detector parameters -- no JBolo models available"
             )
 
         for obs in data.obs:
@@ -267,15 +289,23 @@ class SimMuMUXCrosstalk(Operator):
             input_data = det_data.data.copy() * det_scale
             output_data = det_data.data  # just a reference
 
+            # Get observation parameters for dPhi0dT calculation
+            pwv = obs.telescope.site.weather.pwv.to_value(u.um)
+            el  = obs["scan_el"].to_value(u.degree)
+
             Phi0 = self._draw_Phi0(temp_obs, focalplane, detectors)
             dPhi0dT = self._evaluate_dPhi0dT(
-                temp_obs, input_data, detectors, rows, Phi0
+                temp_obs, input_data, detectors, rows, Phi0, pwv, el
             )
 
             # For each detector-detector pair:
             #     Get crosstalk strength, chi
             #     Generate output data by mixing input data
             for row_target, det_target in zip(rows, detectors):
+                # Skip crosstalk for saturated detectors
+                if np.isnan(dPhi0dT[det_target]):
+                    continue
+
                 crosstalk = np.zeros_like(input_data[row_target])
                 target_squid_phase = self._temperature_to_squid_phase(
                     input_data[row_target],
@@ -292,8 +322,8 @@ class SimMuMUXCrosstalk(Operator):
                         Phi0[det_source],
                         dPhi0dT[det_source],
                     )
-                    # Add crosstalk if not collided resonator
-                    if not np.isnan(chi):
+                    # Add crosstalk if not collided resonator or saturated detector
+                    if not (np.isnan(chi) or np.isnan(dPhi0dT[det_source])):
                         crosstalk += chi * np.sin(
                             source_squid_phase - target_squid_phase
                         )
