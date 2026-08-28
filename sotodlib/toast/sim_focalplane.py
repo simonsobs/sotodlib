@@ -537,7 +537,9 @@ def load_wafer_detectors(
     return dets
 
 
-def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=False):
+def sim_telescope_detectors(
+        hw, tele, tube_slots=None, det_info=None, no_darks=False, verbose=False
+):
     """Update hardware model with simulated or loaded detector positions.
 
     Given a Hardware model, generate all detector properties for the specified
@@ -602,6 +604,9 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         tubeprops = hw.data["tube_slots"][tube_slots[0]]
         waferspace = tubeprops["waferspace"] * platescale
 
+        if verbose:
+            print(f"    {tube_slots[0]}")
+
         # This is the per-wafer rotation at it tube location.
         wafer_slot_ang_deg = tubeprops["wafer_slot_angle"]
         wafer_slot_ang_rad = np.radians(wafer_slot_ang_deg)
@@ -659,6 +664,9 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             centers[windx, :] = qa.mult(wquat, wrot)
 
         for windx, wafer_slot in enumerate(tubeprops["wafer_slots"]):
+            if verbose:
+                print(f"        {wafer_slot}")
+
             if det_info_file is not None:
                 dets = load_wafer_detectors(
                     hw,
@@ -695,6 +703,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         tcenters = np.array([q["quat"] for p, q in tube_quats.items()])
 
         for tindx, tube_slot in enumerate(tube_slots):
+            if verbose:
+                print(f"    {tube_slot}")
             tubeprops = hw.data["tube_slots"][tube_slot]
             waferspace = tubeprops["waferspace"]
             location = tubeprops["toast_hex_pos"]
@@ -733,6 +743,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
                 )
 
             for windx, wafer_slot in enumerate(tubeprops["wafer_slots"]):
+                if verbose:
+                    print(f"        {wafer_slot}")
                 if det_info_file is not None:
                     dets = load_wafer_detectors(
                         hw,
