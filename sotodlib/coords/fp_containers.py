@@ -172,7 +172,7 @@ class FocalPlane:
     def template_fp(self):
         if self.template is not None:
             return self.template.fp
-        logger.warning(
+        logger.debug(
             "No template in focal plane %s, reconstructing from transformed. This will be wrong with_cm is set wrong!",
             self.stream_id,
         )
@@ -556,11 +556,16 @@ class OpticsTube:
         center = group.attrs["center"]
         transform = Transform.load(group["transform"])
         transform_fullcm = Transform.load(group["transform"], "_fullcm")
-        fps = [
-            FocalPlane.load(group[grp], include_cm)
-            for grp in group.keys()
-            if "transform" not in grp
-        ]
+        fps = []
+        for grp in group.keys():
+            if "transform" in grp:
+                continue
+            try:
+                fp = FocalPlane.load(group[grp], include_cm)
+            except:
+                logger.warning("Couldn't load focal plane from %s", grp)
+                continue
+            fps += [fp]
 
         return OpticsTube(name, center, transform, transform_fullcm, fps)
 
