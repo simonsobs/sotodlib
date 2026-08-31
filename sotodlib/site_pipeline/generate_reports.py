@@ -102,10 +102,10 @@ class GenerateReportConfig:
         platform: Literal["satp1", "satp2", "satp3", "lat"],
         site_url: str,
         report_interval: Literal["range", "daily", "weekly", "monthly"],
-        start_time: Union[dt.datetime, float, str],
+        start_time: Union[dt.datetime, int, float, str],
         output_root: str,
         data_config: Dict[str, Any],
-        stop_time: Union[dt.datetime, float, str, None] = None,
+        stop_time: Union[dt.datetime, int, float, str, None] = None,
         overwrite_html: bool = False,
         overwrite_data: bool = False,
         skip_html: bool = False,
@@ -116,7 +116,7 @@ class GenerateReportConfig:
         self.report_interval = report_interval
 
         def convert_to_datetime(
-            time: Union[dt.datetime, float, str, None],
+            time: Union[dt.datetime, int, float, str, None],
         ) -> dt.datetime:
             if isinstance(time, type(None)):
                 return dt.datetime.now(tz=dt.timezone.utc)
@@ -475,7 +475,7 @@ def render_report(
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
             "Median Obs PWV (mm)": np.round(np.nanmedian([o.pwv for o in unique_obs]), 3),
-            "Stddev Obs PWV (mm)": np.round(np.std([o.pwv for o in unique_obs]), 3),
+            "Stddev Obs PWV (mm)": np.round(np.nanstd([o.pwv for o in unique_obs]), 3),
         }
     }
 
@@ -483,7 +483,6 @@ def render_report(
         jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "wiregrid" in o.obs_tags])) / 3600, 1)
     elif cfg.platform == "lat":
         jinja_data["general_stats"]["Time Spent on Stimulator Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "stimulator" in o.obs_tags])) / 3600, 1)
-
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
@@ -504,8 +503,8 @@ def get_parser(
 
 def main(
     cfg: str,
-    start_time: Optional[Union[dt.datetime, float, str]] = None,
-    stop_time: Optional[Union[dt.datetime, float, str]] = None,
+    start_time: Optional[Union[dt.datetime, int, float, str]] = None,
+    stop_time: Optional[Union[dt.datetime, int, float, str]] = None,
     report_interval: Optional[str] = None,
     overwrite_html: Optional[bool] = None,
     overwrite_data: Optional[bool] = None,
