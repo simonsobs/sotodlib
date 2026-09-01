@@ -79,28 +79,25 @@ def create_manifest(base_dir: str, output_file: str):
                 start=base_dir,
             ).replace(os.sep, "/")
 
-            report_rel_path = f"../../{rel_path}"
 
             entries.append({
                 "label": f"{cadence} / {folder_name}",
                 "rel_path": rel_path,
-                "report_path": report_rel_path,
             })
 
             start, end = parse_range(folder_name)
 
             if end is not None:
                 candidates.append(
-                    (end, start, rel_path, report_rel_path)
+                    (end, start, rel_path)
                 )
 
         if candidates:
-            _, _, latest_path, latest_report_path = max(candidates)
+            _, _, latest_path = max(candidates)
 
             entries.insert(0, {
                 "label": f"{cadence} / latest",
                 "rel_path": latest_path,
-                "report_path": latest_report_path,
             })
 
         manifest.extend(entries)
