@@ -17,6 +17,8 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from ..qa.metrics import _get_tag, _has_tag
+
 from sotodlib.preprocess import preprocess_util as pp_util
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
@@ -709,7 +711,10 @@ class Noise(_Preprocess):
 
     Saves the results into the "noise" field of proc_aman.
 
-    Can run data selection of a "max_noise" value.
+    Can select detectors on the minimum and maximum white noise (``min_noise``
+    and ``max_noise`` respectively) and with a maximum allowed fknee value
+    (``max_fknee``; only if fitting).  These may be passed as scalars or as a
+    dictionary where the keys are the bandpass names.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
     axis manager containing an array named ``white_noise``. If not specified,
@@ -729,12 +734,16 @@ class Noise(_Preprocess):
             wn_est: noise
             fixed_param: 'wn'
             binning: True
-            fit_method: log_curve_fit #or likelihood 
+            fit_method: log_curve_fit # or likelihood
             curve_fit_kwargs:
                 maxfev: 20000
           save: True
           select:
-            max_noise: 2000
+            min_noise:
+               f090: 18e-6
+               f150: 18e-6
+            max_noise: 80e-6
+            max_fknee: 7
             require_finite_fit: True
 
     Set ``select.require_finite_fit`` to ``True`` to drop detectors whose fit
@@ -756,7 +765,7 @@ class Noise(_Preprocess):
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
     :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
-    
+
     """
     name = "noise"
     _influx_field = "median_white_noise"
@@ -894,13 +903,61 @@ class Noise(_Preprocess):
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
             if fk is not None:
                 fk = np.nanmean(fk, axis=-1) # Mean over subscans
+
         keep = np.ones_like(wn, dtype=bool)
-        if "max_noise" in self.select_cfgs.keys():
-            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+
+        if _has_tag(meta.det_info, "wafer.bandpass"):
+            bandpasses = meta.det_info.wafer.bandpass
+        elif _has_tag(meta, "det_cal.bandpass"):
+            bandpasses = meta.det_cal.bandpass
+        else:
+            bandpasses = None
+
         if "min_noise" in self.select_cfgs.keys():
-            keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            if isinstance(self.select_cfgs["min_noise"], (int, float)):
+                keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            elif isinstance(self.select_cfgs["min_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for min_noise dict"
+                    )
+                for k, v in self.select_cfgs["min_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] >= v)
+            else:
+                raise TypeError("invalid type for min_noise")
+
+        if "max_noise" in self.select_cfgs.keys():
+            if isinstance(self.select_cfgs["max_noise"], (int, float)):
+                keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+            elif isinstance(self.select_cfgs["max_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_noise dict"
+                    )
+                for k, v in self.select_cfgs["max_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] <= v)
+            else:
+                raise TypeError("invalid type for max_noise")
+
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
-            keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            if isinstance(self.select_cfgs["max_fknee"], (int, float)):
+                keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            elif isinstance(self.select_cfgs["max_fknee"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_fknee dict"
+                    )
+                for k, v in self.select_cfgs["max_fknee"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (fk[mask] <= np.float64(v))
+            else:
+                raise TypeError("invalid type for max_fknee")
+
         if self.fit and self.select_cfgs.get("require_finite_fit", False):
             fit_vals = np.asarray(noise_aman.fit)
             fit_flat = fit_vals.reshape(fit_vals.shape[0], -1)
@@ -1052,7 +1109,6 @@ class EstimateHWPSS(_Preprocess):
         """
         # record one metric per wafer_slot per bandpass
         # add specified tags
-        from ..qa.metrics import _get_tag, _has_tag
         tag_keys = {
             "wafer_slot": "wafer_slot",
             "tel_tube": "tel_tube",
