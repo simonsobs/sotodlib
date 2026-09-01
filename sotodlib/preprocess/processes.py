@@ -709,7 +709,10 @@ class Noise(_Preprocess):
 
     Saves the results into the "noise" field of proc_aman.
 
-    Can run data selection of a "max_noise" value.
+    Can select detectors on the minimum and maximum white noise (``min_noise``
+    and ``max_noise`` respectively) and with a maximum allowed fknee value
+    (``max_fknee``; only if fitting).  These may be passed as scalars or as a
+    dictionary where the keys are the bandpass names.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
     axis manager containing an array named ``white_noise``. If not specified,
@@ -734,7 +737,8 @@ class Noise(_Preprocess):
                 maxfev: 20000
           save: True
           select:
-            max_noise: 2000
+            max_noise: 2000 # can also be dict of bandpass specific values
+            max_fknee: 7
             require_finite_fit: True
 
     Set ``select.require_finite_fit`` to ``True`` to drop detectors whose fit
