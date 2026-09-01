@@ -56,7 +56,8 @@ def create_manifest(base_dir: str, output_file: str):
 
     for cadence in ["weekly", "monthly"]:
         parent = os.path.join(base_dir, cadence)
-        if not os.path.exists(parent):
+
+        if not os.path.isdir(parent):
             continue
 
         entries = []
@@ -64,35 +65,41 @@ def create_manifest(base_dir: str, output_file: str):
 
         for folder_name in sorted(os.listdir(parent)):
             folder_path = os.path.join(parent, folder_name)
+
             if not os.path.isdir(folder_path):
                 continue
 
-            index_path = os.path.join(folder_path, "report.html")
-            if not os.path.exists(index_path):
+            report_path = os.path.join(folder_path, "report.html")
+
+            if not os.path.isfile(report_path):
                 continue
 
-            rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
-            rel_path = f"../../{rel_path}"
+            rel_path = os.path.relpath(
+                report_path,
+                start=base_dir,
+            ).replace(os.sep, "/")
 
             entries.append({
                 "label": f"{cadence} / {folder_name}",
-                "rel_path": rel_path
+                "rel_path": rel_path,
             })
 
             start, end = parse_range(folder_name)
+
             if end is not None:
                 candidates.append((end, start, rel_path))
 
         if candidates:
             _, _, latest_path = max(candidates)
+
             entries.insert(0, {
                 "label": f"{cadence} / latest",
-                "rel_path": latest_path
+                "rel_path": latest_path,
             })
 
         manifest.extend(entries)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
 
@@ -310,6 +317,25 @@ def _main(
             n_failed += 1
 
     create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
+
+    env = Environment(loader=FileSystemLoader(cfg.template_dir))
+
+    platforms = ["satp1", "satp2", "satp3", "lat"]
+
+    template = env.get_template("platform_index.html")
+    with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
+        output_file.write(
+            template.render(
+                platform=cfg.platform,
+                platforms=["satp1", "satp2", "satp3", "lat"],
+                reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
+            )
+        )
+
+    print(os.path.dirname(cfg.output_root))
+    template = env.get_template("index.html")
+    with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
+        output_file.write(template.render(platforms=platforms))
 
     if n_failed > 0:
         raise RuntimeError(f"{n_failed} reports failed to generate")
