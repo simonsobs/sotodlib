@@ -17,6 +17,8 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from ..qa.metrics import _get_tag, _has_tag
+
 from sotodlib.preprocess import preprocess_util as pp_util
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
@@ -737,7 +739,10 @@ class Noise(_Preprocess):
                 maxfev: 20000
           save: True
           select:
-            max_noise: 2000 # can also be dict of bandpass specific values
+            min_noise:
+               f090: 18e-6
+               f150: 18e-6
+            max_noise: 80e-6
             max_fknee: 7
             require_finite_fit: True
 
@@ -901,32 +906,54 @@ class Noise(_Preprocess):
 
         keep = np.ones_like(wn, dtype=bool)
 
-        if "max_noise" in self.select_cfgs.keys():
-            if isinstance(self.select_cfgs["max_noise"], (int, float)):
-                keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
-            elif isinstance(self.select_cfgs["max_noise"], dict):
-                for k, v in self.select_cfgs["max_noise"].items():
-                    mask = (meta.det_cal.bandpass == k)
-                    keep[mask] &= (wn[mask] <= v)
-            else:
-                raise TypeError("invalid type for max_noise")
+        if _has_tag(meta.det_info, "wafer.bandpass"):
+            bandpasses = meta.det_info.wafer.bandpass
+        elif _has_tag(meta, "det_cal"):
+            bandpasses = meta.det_cal.bandpass
+        else:
+            bandpasses = None
 
         if "min_noise" in self.select_cfgs.keys():
             if isinstance(self.select_cfgs["min_noise"], (int, float)):
                 keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
             elif isinstance(self.select_cfgs["min_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for min_noise dict"
+                    )
                 for k, v in self.select_cfgs["min_noise"].items():
-                    mask = (meta.det_cal.bandpass == k)
+                    mask = (bandpasses == k)
                     keep[mask] &= (wn[mask] >= v)
             else:
                 raise TypeError("invalid type for min_noise")
+
+        if "max_noise" in self.select_cfgs.keys():
+            if isinstance(self.select_cfgs["max_noise"], (int, float)):
+                keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+            elif isinstance(self.select_cfgs["max_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_noise dict"
+                    )
+                for k, v in self.select_cfgs["max_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] <= v)
+            else:
+                raise TypeError("invalid type for max_noise")
 
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
             if isinstance(self.select_cfgs["max_fknee"], (int, float)):
                 keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
             elif isinstance(self.select_cfgs["max_fknee"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_fknee dict"
+                    )
                 for k, v in self.select_cfgs["max_fknee"].items():
-                    mask = (meta.det_cal.bandpass == k)
+                    mask = (bandpasses == k)
                     keep[mask] &= (fk[mask] <= np.float64(v))
             else:
                 raise TypeError("invalid type for max_fknee")
@@ -1082,7 +1109,6 @@ class EstimateHWPSS(_Preprocess):
         """
         # record one metric per wafer_slot per bandpass
         # add specified tags
-        from ..qa.metrics import _get_tag, _has_tag
         tag_keys = {
             "wafer_slot": "wafer_slot",
             "tel_tube": "tel_tube",
