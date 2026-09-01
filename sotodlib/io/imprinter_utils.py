@@ -264,7 +264,7 @@ def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
 
     obs_id: level 2 obs_id that overlaps multiple observations
     """
-    obsset = imprint.update_bookdb_from_g3tsmurf(
+    obsset, _ = imprint.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         return_obsset=True,
     )
