@@ -79,22 +79,28 @@ def create_manifest(base_dir: str, output_file: str):
                 start=base_dir,
             ).replace(os.sep, "/")
 
+            report_rel_path = f"../../{rel_path}"
+
             entries.append({
                 "label": f"{cadence} / {folder_name}",
                 "rel_path": rel_path,
+                "report_path": report_rel_path,
             })
 
             start, end = parse_range(folder_name)
 
             if end is not None:
-                candidates.append((end, start, rel_path))
+                candidates.append(
+                    (end, start, rel_path, report_rel_path)
+                )
 
         if candidates:
-            _, _, latest_path = max(candidates)
+            _, _, latest_path, latest_report_path = max(candidates)
 
             entries.insert(0, {
                 "label": f"{cadence} / latest",
                 "rel_path": latest_path,
+                "report_path": latest_report_path,
             })
 
         manifest.extend(entries)
@@ -327,15 +333,15 @@ def _main(
         output_file.write(
             template.render(
                 platform=cfg.platform,
-                platforms=["satp1", "satp2", "satp3", "lat"],
+                platforms=platforms,
                 reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
             )
         )
 
-    print(os.path.dirname(cfg.output_root))
-    template = env.get_template("index.html")
-    with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
-        output_file.write(template.render(platforms=platforms))
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html")):
+        template = env.get_template("index.html")
+        with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
+            output_file.write(template.render(platforms=platforms))
 
     if n_failed > 0:
         raise RuntimeError(f"{n_failed} reports failed to generate")
