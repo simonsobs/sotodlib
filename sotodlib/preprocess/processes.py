@@ -927,7 +927,7 @@ class Noise(_Preprocess):
             elif isinstance(self.select_cfgs["max_fknee"], dict):
                 for k, v in self.select_cfgs["max_fknee"].items():
                     mask = (meta.det_cal.bandpass == k)
-                    keep[mask] &= (fk[mask] <= v)
+                    keep[mask] &= (fk[mask] <= np.float64(v))
             else:
                 raise TypeError("invalid type for max_fknee")
 
