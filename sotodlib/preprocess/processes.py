@@ -908,7 +908,7 @@ class Noise(_Preprocess):
 
         if _has_tag(meta.det_info, "wafer.bandpass"):
             bandpasses = meta.det_info.wafer.bandpass
-        elif _has_tag(meta, "det_cal"):
+        elif _has_tag(meta, "det_cal.bandpass"):
             bandpasses = meta.det_cal.bandpass
         else:
             bandpasses = None
