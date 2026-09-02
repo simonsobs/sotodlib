@@ -706,7 +706,7 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     axis of TOD and the array gives the group name for each detector.
 
     Returns:
-      dict: map from group label to RangesMatrix
+      dict: dict mapping group label (str) to RangesMatrix
         Each value is a RangesMatrix to be used as cuts to apply
         during mapmaking.  The RangesMatrix will have each detector
         either fully cut (flagged) or fully uncut.
