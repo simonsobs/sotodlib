@@ -5,6 +5,7 @@
 
 """
 
+import os
 import unittest
 
 import astropy.units as u
@@ -18,14 +19,13 @@ try:
 
     import sotodlib.toast as sotoast
     import sotodlib.toast.ops as so_ops
+    from sotodlib.toast.ops import detmap_available, pos_to_chi, jbolo_available
     toast_available = True
 except ImportError as e:
     toast_available = False
 
 from ._helpers import (calibration_schedule, close_data_and_comm,
                       simulation_test_data)
-
-from sotodlib.toast.ops import detmap_available, pos_to_chi
 
 
 class SimMuMUXCrosstalkTest(unittest.TestCase):
@@ -34,9 +34,16 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
-        if not detmap_available:
+        if not detmap_available or not jbolo_available:
             print(
-                "DetMap cannot be imported- skipping muMUX unit tests",
+                "DetMap / jbolo cannot be imported- skipping muMUX unit tests",
+                flush=True,
+            )
+            return
+
+        if "JBOLO_PATH" not in os.environ or "JBOLO_MODELS_PATH" not in os.environ:
+            print(
+                "JBOLO environment variables not set- skipping muMUX unit tests",
                 flush=True,
             )
             return
