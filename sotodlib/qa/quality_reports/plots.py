@@ -250,7 +250,11 @@ def wafer_obs_efficiency(d: ReportData, nsegs: int=2000, good_pwv_lim: float=3) 
 
     # All data pie chart
     times = pd.date_range(d.cfg.start_time, d.cfg.stop_time, nsegs)
-    tstamps = times.astype(np.int64) / 1e9
+    tstamps = np.linspace(
+        d.cfg.start_time.timestamp(),
+        d.cfg.stop_time.timestamp(),
+        nsegs,
+    )
 
     data = np.full((len(wafers), nsegs), obs_values["idle"], dtype=int)
     fill_obs_array(data, tstamps, d, wafers, obs_values)
@@ -279,7 +283,11 @@ def wafer_obs_efficiency(d: ReportData, nsegs: int=2000, good_pwv_lim: float=3) 
     good = np.isfinite(data_pwv) & (data_pwv < good_pwv_lim)
 
     pwv_times = pd.date_range(start, stop, nsegs_pwv)
-    pwv_tstamps = pwv_times.astype(np.int64) / 1e9
+    pwv_tstamps = np.linspace(
+        start.timestamp(),
+        stop.timestamp(),
+        nsegs_pwv,
+    )
 
     data_good_pwv = np.full((len(wafers), nsegs_pwv), obs_values["idle"], dtype=int)
     fill_obs_array(data_good_pwv, pwv_tstamps, d, wafers, obs_values)
@@ -341,6 +349,9 @@ def wafer_obs_efficiency(d: ReportData, nsegs: int=2000, good_pwv_lim: float=3) 
     heatmap.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         height=height,
+        xaxis=dict(
+            nticks=20,
+        ),
     )
 
     return ObsEfficiencyPlots(pie=pie, pie_good_pwv=pie_good_pwv, heatmap=heatmap)
