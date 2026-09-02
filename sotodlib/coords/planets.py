@@ -494,22 +494,22 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
 def get_source_azel(source_name, timestamp, site='_default'):
     """
-    Get the apparent azimuth and elevation of a celestial source at a 
+    Get the apparent azimuth and elevation of a celestial source at a
     specific timestamp and observing site. Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
 
     Args:
         source_name: Planet name; in capitalized format, e.g. "Jupiter"
-        timestamp (float): The Unix timestamp representing the time for 
+        timestamp (float): The Unix timestamp representing the time for
           which to calculate azimuth and elevation.
         site (str or so3g.proj.EarthlySite): if this is a string, the
-        site will be looked up in so3g.proj.SITES dict.
+          site will be looked up in so3g.proj.SITES dict.
 
     Returns:
-      az (float): in radians.
-      el (float): in radians.
-      distance (float): in AU.
+      tuple[float, float, float]: (az, el, distance)
+        With az and el in radians, and distance in AU.
+
     """
     planets, amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
@@ -706,10 +706,10 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     axis of TOD and the array gives the group name for each detector.
 
     Returns:
-      data_splits (dict of RangesMatrix): Each entry of the dict is a
-        RangesMatrix that can be interpreted as cuts to apply during
-        mapmaking.  In this case the RangesMatrix will simply mark
-        each detector as either fully cut (flagged) or fully uncut.
+      dict: map from group label to RangesMatrix
+        Each value is a RangesMatrix to be used as cuts to apply
+        during mapmaking.  The RangesMatrix will have each detector
+        either fully cut (flagged) or fully uncut.
 
     """
     from sotodlib.io import metadata
