@@ -451,9 +451,8 @@ def get_source_pos(source_name, timestamp, site='_default'):
         site will be looked up in so3g.proj.SITES dict.
 
     Returns:
-      ra (float): in radians.
-      dec (float): in radians.
-      distance (float): in AU.
+      tuple[float, float, float]: RA in radians, dec in radians,
+        distance in AU.
 
     Note:
 
