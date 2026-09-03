@@ -18,7 +18,15 @@ from .. import core, tod_ops, coords
 logger = logging.getLogger(__name__)
 
 
-# Default source list
+# Default source list -- the primary purpose to be used by
+# preprocessing for auto-masking bright sources. But it also defines
+# names of fixed sources that can be used through get_source_pos (and
+# things that call it such as SlowSource.for_named_source).
+#
+# Entries in this list should be either a string (indicating a solar
+# system object, to be found in ephemeris) or else a tuple (name,
+# ra_deg, dec_deg).
+
 SOURCE_LIST = ['mercury',
                'venus',
                'moon',
@@ -429,36 +437,53 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
 
 
 def get_source_pos(source_name, timestamp, site='_default'):
-    """Get the equatorial coordinates of a planet (or fixed-position
-    source, see note) at some time.  Returns the apparent position,
-    accounting for geographical position on earth, but assuming no
-    atmospheric refraction.
-    
+    """Get the equatorial coordinates of a planet or fixed-position
+    source at some time.  Returns the apparent position, accounting
+    for geographical position on earth, but assuming no atmospheric
+    refraction.
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
-        or fixed source specification.
+        or fixed source specification, or name of other known distant
+        bright source.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
 
     Returns:
-      ra (float): in radians.
-      dec (float): in radians.
-      distance (float): in AU.
+      tuple[float, float, float]: (RA, dec, distance)
+        With RA and dec in radians, and distance in AU.
 
     Note:
 
-      Before checking in the ephemeris, the source_name will be
-      matched against a regular expression and if it has the format
-      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
-      fixed-position source at RA,Dec = xxx,yyy in degrees will be
-      processed.  In that case, the distance is returned as Inf.
+      The source_name is interpreted as follows:
+
+      1. If the source_name matches the "fixed source" specification
+         of :func:`match_fixed_source` (preferred format
+         'Jxxx[+-pmn]yyy', where xxx and yyy give RA and dec in
+         decimal degrees), then the coordinates specified in that
+         string are returned.
+
+      2. If the source_name matches a fixed source tuple declared in
+         the SOURCES_LIST, in this module, then its coordinates as
+         stated in that list are returned.
+
+      3. If neither of the preceding checks produced a match, the
+         source_name is passed to an ephemeris (so hopefully it's the
+         name of a planet).
 
     """
     # Check against fixed-position template...
     ra, dec, m = match_fixed_source(source_name)
     if m:
         return ra * coords.DEG, dec * coords.DEG, float('inf')
+
+    # Check against named sources (with fixed positions) in
+    # SOURCE_LIST.
+    for source in SOURCE_LIST:
+        if isinstance(source, tuple) and source[0].lower() == source_name.lower():
+            ra, dec = source[1:]
+            return ra * coords.DEG, dec * coords.DEG, float('inf')
 
     # Derive from skyfield astrometric object
     planets, amet0 = _get_astrometric(source_name, timestamp, site)
@@ -469,22 +494,22 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
 def get_source_azel(source_name, timestamp, site='_default'):
     """
-    Get the apparent azimuth and elevation of a celestial source at a 
+    Get the apparent azimuth and elevation of a celestial source at a
     specific timestamp and observing site. Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
 
     Args:
         source_name: Planet name; in capitalized format, e.g. "Jupiter"
-        timestamp (float): The Unix timestamp representing the time for 
+        timestamp (float): The Unix timestamp representing the time for
           which to calculate azimuth and elevation.
         site (str or so3g.proj.EarthlySite): if this is a string, the
-        site will be looked up in so3g.proj.SITES dict.
+          site will be looked up in so3g.proj.SITES dict.
 
     Returns:
-      az (float): in radians.
-      el (float): in radians.
-      distance (float): in AU.
+      tuple[float, float, float]: (az, el, distance)
+        With az and el in radians, and distance in AU.
+
     """
     planets, amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
@@ -681,10 +706,10 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     axis of TOD and the array gives the group name for each detector.
 
     Returns:
-      data_splits (dict of RangesMatrix): Each entry of the dict is a
-        RangesMatrix that can be interpreted as cuts to apply during
-        mapmaking.  In this case the RangesMatrix will simply mark
-        each detector as either fully cut (flagged) or fully uncut.
+      dict: dict mapping group label (str) to RangesMatrix
+        Each value is a RangesMatrix to be used as cuts to apply
+        during mapmaking.  The RangesMatrix will have each detector
+        either fully cut (flagged) or fully uncut.
 
     """
     from sotodlib.io import metadata
