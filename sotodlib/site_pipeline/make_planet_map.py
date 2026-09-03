@@ -1,5 +1,6 @@
 # To make atmic planet map in detector-centered coordinate system
 import yaml, os, time, datetime, traceback
+from typing import Optional, Union, Callable
 import numpy as np
 from argparse import ArgumentParser
 from typing import Optional, List, Callable
@@ -19,9 +20,10 @@ def future_write_to_log(e, errlog):
 
 def main(
     config_path: str,
-    verbosity: int,
     executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     as_completed_callable: Callable) -> None:
+
+    verbosity = 2
 
     # Load the configuration file
     configs = planet_mapmaker.read_configs(config_path)
@@ -135,4 +137,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    main_launcher(main, get_parser)
+    main_launcher(cli_main, get_parser)
