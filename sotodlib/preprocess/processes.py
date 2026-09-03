@@ -926,7 +926,7 @@ class Noise(_Preprocess):
                     mask = (bandpasses == k)
                     keep[mask] &= (wn[mask] >= np.float64(v))
             else:
-                raise TypeError(f"invalid type for min_noise")
+                raise TypeError("invalid type for min_noise")
 
         if "max_noise" in self.select_cfgs.keys():
             if isinstance(self.select_cfgs["max_noise"], (int, float, str)):
