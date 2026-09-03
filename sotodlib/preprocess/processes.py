@@ -914,7 +914,7 @@ class Noise(_Preprocess):
             bandpasses = None
 
         if "min_noise" in self.select_cfgs.keys():
-            if isinstance(self.select_cfgs["min_noise"], (int, float)):
+            if isinstance(self.select_cfgs["min_noise"], (int, float, str)):
                 keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
             elif isinstance(self.select_cfgs["min_noise"], dict):
                 if bandpasses is None:
@@ -924,12 +924,12 @@ class Noise(_Preprocess):
                     )
                 for k, v in self.select_cfgs["min_noise"].items():
                     mask = (bandpasses == k)
-                    keep[mask] &= (wn[mask] >= v)
+                    keep[mask] &= (wn[mask] >= np.float64(v))
             else:
                 raise TypeError("invalid type for min_noise")
 
         if "max_noise" in self.select_cfgs.keys():
-            if isinstance(self.select_cfgs["max_noise"], (int, float)):
+            if isinstance(self.select_cfgs["max_noise"], (int, float, str)):
                 keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
             elif isinstance(self.select_cfgs["max_noise"], dict):
                 if bandpasses is None:
@@ -939,12 +939,12 @@ class Noise(_Preprocess):
                     )
                 for k, v in self.select_cfgs["max_noise"].items():
                     mask = (bandpasses == k)
-                    keep[mask] &= (wn[mask] <= v)
+                    keep[mask] &= (wn[mask] <= np.float64(v))
             else:
                 raise TypeError("invalid type for max_noise")
 
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
-            if isinstance(self.select_cfgs["max_fknee"], (int, float)):
+            if isinstance(self.select_cfgs["max_fknee"], (int, float, str)):
                 keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
             elif isinstance(self.select_cfgs["max_fknee"], dict):
                 if bandpasses is None:
