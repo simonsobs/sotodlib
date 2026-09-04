@@ -325,7 +325,7 @@ class Era:
         """
         starts = [x[0] for x in self._lookup]
         j = bisect_right(starts, timestamp) - 1
-        if j >= 0 and timestamp <= self._lookup[j][1]:
+        if j >= 0 and timestamp < self._lookup[j][1]:
             return self._lookup[j][2]
         return None
 

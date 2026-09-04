@@ -15,12 +15,12 @@ from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Optional, Self, cast
+from typing import Any, Literal, Optional, Self, cast, overload
 
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
-from jaxtyping import Float, Shaped
+from jaxtyping import Float, Integer, Shaped
 from scipy.optimize import minimize
 from so3g.proj import quat
 from sotodlib.coords.pointing_model import apply_pointing_model, param_defaults
@@ -861,7 +861,7 @@ class OpticsTube:
 
     @property
     def allpad(self):
-        if len(fps) == 0:
+        if len(self.focal_planes) == 0:
             return True
         return np.all([fp.pad for fp in self.focal_planes])
 
@@ -871,9 +871,7 @@ class OpticsTube:
             fp.transform.affine for fp in self.focal_planes if fp.pad is False
         ]
         shifts = [fp.transform.shift for fp in self.focal_planes if fp.pad is False]
-        allpad = False
         if len(transforms) == 0:
-            allpad = True
             iden = Transform.identity()
             cm_shift, cm_aff = iden.shift, iden.affine
         elif len(transforms) == 1:
@@ -883,7 +881,6 @@ class OpticsTube:
         to_ret = Transform(cm_shift, cm_aff)
         if self.autofreeze:
             self._cm_transform_stat = to_ret
-            self.allpad = allpad
         return to_ret
 
     def remove_rx(self, rx_cm: Transform):
@@ -1039,6 +1036,14 @@ class PointingSystem:
         Pointing model associated with each epoch.
     receivers : tuple[Receiver, ...]
         Receiver and focal-plane data associated with each epoch.
+    parameter_names : tuple[str, ...]
+        The names of all pointing model parameters.
+        Names with parenthesis apply only to the epochs within the parenthesis.
+        Names without parenthesis apply to all other epochs.
+    parameter_map : tuple[Integer[np.ndarray, "?npar_mapped"], ...]
+        Mapping between parameters and what pointing models to apply them to.
+    parameters : Float[np.ndarray, "npar"]
+        The current values of the parameters.
     chisq : float
         The chisq of the current system.
         This computes the chisq from the residuals for each `FocalPlaneCollection`,
@@ -1048,12 +1053,29 @@ class PointingSystem:
     era: epochs.Era
     pointing_models: tuple[PointingModel, ...]
     receivers: tuple[Receiver, ...]
+    parameter_names: tuple[str, ...]
+    parameter_map: tuple[Integer[np.ndarray, "?npar"], ...]
 
     def __post_init__(self):
-        if len(self.era.epochs) != len(self.pointing_models) or len(
-            self.era.epochs
-        ) != len(self.receivers):
-            raise ValueError("Should have one pointing model and receiver per epoch!")
+        # Force consistancy
+        self.update_parameters(self.parameters)
+
+    @property
+    def parameters(self) -> Float[np.ndarray, "npar"]:
+        return np.array(
+            [
+                self.pointing_models[par_map[0]].parameters[par.split("(")[0]]
+                for par, par_map in zip(self.parameter_names, self.parameter_map)
+            ]
+        )
+
+    def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
+        for val, par, par_map in zip(
+            new_pars, self.parameter_names, self.parameter_map
+        ):
+            name = par.split("(")[0]
+            for idx in par_map:
+                self.pointing_models[idx].parameters[name] = val
 
     @property
     def chisq(self) -> float:
@@ -1095,15 +1117,25 @@ class PointingSystem:
                 return np.inf
         return self.chisq
 
+    @overload
     def search(
-        self, field: str, timestamp: float
+        self, field: Literal["pointing_models"], timestamp: float
+    ) -> Optional[PointingModel]: ...
+
+    @overload
+    def search(
+        self, field: Literal["receivers"], timestamp: float
+    ) -> Optional[Receiver]: ...
+
+    def search(
+        self, field: Literal["pointing_models", "receivers"], timestamp: float
     ) -> Optional[PointingModel | Receiver]:
         """
         Get the first object associated with a specifc timestamp.
 
         Parameters
         ----------
-        field: str
+        field: Literal["pointing_models", "receivers"]
             The field to search in.
             Valid options are: "receivers" and "pointing_models".
         timestamp : float
@@ -1118,7 +1150,7 @@ class PointingSystem:
         if field not in ["pointing_models", "receivers"]:
             raise ValueError(f"Invalud field to search in: {field}.")
         dat = getattr(self, field)
-        epoch = era.find_epoch(timestamp)
+        epoch = self.era.find_epoch(timestamp)
         if epoch is None:
             return None
         hits = [d for d in dat if epoch.name in d.epoch]
@@ -1144,6 +1176,8 @@ class PointingSystem:
 
         Note that here we also assume that the loaded pointing model has a flat structure
         where each element is a scalar that maps to a pointing model parameter.
+        Note also here that for pointing models that join multiple epochs we use
+        the value from the latest epoch.
 
         Parameters
         ----------
@@ -1162,7 +1196,7 @@ class PointingSystem:
         mspec = MetadataSpec.from_dict({"db": mdb, "unpack": "pointing_model"})
         if mdb.scheme.get_required_params() != ["obs:timestamp"]:
             raise ValueError("Unsupported scheme for pointing model db!")
-        for i, epoch in enumerate(self.era.epochs):
+        for epoch in self.era.epochs:
             matches = []
             for interval in epoch.covers:
                 matches += [
@@ -1179,7 +1213,14 @@ class PointingSystem:
                 mspec, {"obs:timestamp": epoch.covers[0].start}, []
             )
             pm_dict = {key: pm_aman[key] for key in pm_aman.keys()}
-            self.pointing_models[i].parameters = pm_dict
+            pm = self.search("pointing_models", epoch.covers[0].start)
+            if pm is None:
+                raise ValueError(
+                    f"Can't find pointing model for this epoch: {epoch.name}"
+                )
+            pm.parameters = pm_dict
+        # Force consistancy
+        self.update_parameters(self.parameters)
 
     @classmethod
     def empty(cls, era: epochs.Era, cfg: Namespace) -> Self:
@@ -1210,8 +1251,9 @@ class PointingSystem:
         ------
         ValueError
             If `era` has missing or inconsistent `ws_mapping` data.
-            If receiver or pointing model groups contain overlapping epochs.
-            If a receiver or pointing model group contains an unknown epoch.
+            If any groups contain overlapping epochs.
+            If any groups contais an unknown epoch.
+            If an unknown pointing model parameter is passed.
         """
         if not era.check_data("ws_mapping", True):
             raise ValueError(
@@ -1263,10 +1305,33 @@ class PointingSystem:
         rxs = _group_epochs(rxs, cfg.rx_groups, "receiver")
         pms = _group_epochs(pms, cfg.pm_group, "pointing model")
 
+        par_names = []
         for pm in pms:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
+            par_names += list(pars.keys())
             pars["version"] = pm_ver
             pm.pars = pars
+        par_names = np.unique(par_names).tolist()
+        par_map = [np.arange(len(pms), dtype=int).tolist()] * len(par_names)
+        pm_epochs = [pm.epoch for pm in pms]
+        par: str
+        for par, groups in cfg.par_groups.items():
+            if par not in par_names:
+                raise ValueError(f"Unknown parameter {par}")
+            u, c = np.unique(np.concatenate(groups), return_counts=True)
+            if np.any(c > 1):
+                raise ValueError(f"Overlapping epochs in par group for {par}")
+            if np.any(~np.isin(u, pm_epochs)):
+                raise ValueError(f"Unknown epoch in par_group for {par}")
+            par_idx = par_names.index(par)
+            for grp in groups:
+                epc_idxs = [pm_epochs.index(epc) for epc in grp]
+                par_map[par_idx] = [i for i in par_map[par_idx] if i not in epc_idxs]
+                par_names += [par + "(" + ",".join(grp) + ")"]
+                par_map += [[epc_idxs]]
+        n_mapped = [len(pmap) for pmap in par_map]
+        par_names = tuple(name for name, n in zip(par_names, n_mapped) if n > 0)
+        par_map = tuple(np.array(pmap) for pmap, n in zip(par_map, n_mapped) if n > 0)
 
-        return cls(era, tuple(pms), tuple(rxs))
+        return cls(era, tuple(pms), tuple(rxs), par_names, par_map)
