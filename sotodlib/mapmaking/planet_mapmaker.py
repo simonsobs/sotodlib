@@ -28,17 +28,30 @@ from ..site_pipeline.utils import logging
 
 
 def save_pkl(data, path):
+    """
+    Function to save data to a pickle file.
+    """
     with open(path, "wb") as f:
         pickle.dump(data, f)
 
 
 def read_pkl(path):
+    """
+    Function to read data from a pickle file.
+    """
     with open(path, "rb") as f:
         ret = pickle.load(f)
     return ret
 
 
 def FWHM2sigma(FWHM):
+    """
+    Function to convert FWHM to sigma.
+    Args:
+        FWHM: Full width at half maximum.
+    Returns:
+        sigma: Sigma of Gaussian.
+    """
     fac = np.sqrt(8 * np.log(2))
     return FWHM / fac
 
@@ -65,7 +78,8 @@ def expand(obj, vars):
 
 
 def read_configs(config_path):
-    """Function to read the configuration file with expanding variables.
+    """
+    Function to read the configuration file with expanding variables.
     Args:
         config_path (str): Path to the configuration file.
     Returns:
@@ -79,6 +93,16 @@ def read_configs(config_path):
 
 
 def get_inv_var(configs, aman, full, logger, uniform=False):
+    """
+    Function to calculate the inverse variance for each detector.
+    Calculated inverse variance is stored in aman.inv_var.
+    Args:
+        configs (dict): Config file.
+        aman: Axis manager stored TODs.
+        full: Axis manager stored in preprocess information.
+        logger: Logger.
+        uniform (bool): If True, set the inverse variance to 1 for all detectors.
+    """
     if not uniform:
         ipipe = configs["mapmaking"]["inv_var"]
         if ipipe["signal"] == "demodQU":
@@ -127,11 +151,13 @@ def planet_mapmake_single_obs(
     config_path, obs_id, wafer_info, verbosity=3, debug=False
 ):
     """
-    Function to process planet_mapmaking for single observation.
+    Function to process planet_mapmaking for a single observation.
+    Running single observation per wafer/band/telescope is assumed.
     Args:
         config_path (str): Path to the configuration file.
-        obs_is (str): Observation ID.
-        wafer_info (dict): Wafer information including wafer slot and bandpass. e.g., {'wafer_slot': wafer, 'wafer.bandpass': band}
+        obs_id (str): Observation ID.
+        wafer_info (dict): Wafer information including wafer slot and bandpass.
+            e.g., {'wafer_slot': wafer, 'wafer.bandpass': band}
     Returns:
         dbinfo: Database information object.
     """
@@ -288,7 +314,9 @@ def planet_mapmake_single_obs(
 
 def make_planet_center(aman, config, logger, rot_q=None, debug=False, fits_name=None):
     """
-    Function to make Q/U maps of a slow moving source (i.e. not fixed on the celestial sphere). NOTE: demodulation must have been done to use this function. Unlike the above mapping function, this horizon version creates a projection matrix with
+    Function to make Q/U maps of a slow moving source (i.e. not fixed on the celestial sphere).
+    NOTE: demodulation must have been done to use this function.
+    Unlike the above mapping function, this horizon version creates a projection matrix with
     all detectors in horizon coordinates, so that planets and other structures attached to the instrument do not rotate with the celestial sphere.
 
     Args:
@@ -1315,7 +1343,10 @@ def apply_todfit_selection(
         toddbpath: path to todfit database
         thoreshold_path: path to selection threshold for todfit results
         logger: logger for logging info
-        apply_selection: list of parameters to apply selection on. Possible parameters include 'amplitude', 'xo', 'yo', 'sigmax', 'sigmay', 'defla', 'deflp'. For 'defla', it will apply selection on the absolute value of deflection amplitude. For 'deflp', it will apply selection on deflection phase modulo pi.
+        apply_selection: list of parameters to apply selection on.
+            Possible parameters include 'amplitude', 'xo', 'yo', 'sigmax', 'sigmay', 'defla', 'deflp'.
+            For 'defla', it will apply selection on the absolute value of deflection amplitude.
+            For 'deflp', it will apply selection on deflection phase modulo pi.
     Returns:
         num_det_before: number of dets before applying selection
     """
