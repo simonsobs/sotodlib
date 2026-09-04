@@ -739,6 +739,7 @@ class ScalarLastQuat(np.ndarray):
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
 
+
 def get_deflected_quat(aman, wobble_meta=None, params=None):
     """
     Constructs a deflected quaternion using HWP-synchronous
@@ -790,6 +791,7 @@ def get_deflected_quat(aman, wobble_meta=None, params=None):
     deta = -amp * np.sin(aman.hwp_angle - phase)
     deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
     return deflq
+
 
 def get_deflected_sightline(aman, wobble_meta=None, params=None, sight=None, site='so', weather='typical'):
     """
