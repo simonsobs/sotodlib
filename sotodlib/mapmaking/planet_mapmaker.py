@@ -795,80 +795,20 @@ def execute_todfit(aman, dbpath, center_on, Tsignal='dsT', flags=None, centroid_
                 pass
     return 
 
-def get_defl_quat(aman, band=None, ws=None, telescope=None, params=None):
-    """Get deflection quaternion
+def get_defl_quat(aman, params=None):
+    """Get deflection quaternion. If params is None, use default deflection parameters stored in axis manager from wobble metadata.
+    Assuming axismanager is consist of single wafer/band/telescope because wobble params are currently per-wafer/band/telescope.
     Args:
         aman: axis manager
-        band: frequency band, e.g., 'f090'
-        ws: wafer slot, e.g., 'ws0'
-        telescope: telescope name, e.g., 'satp3'
-        params: (amplitude in arcmin, phase in radian) of wobble
+        params: (amplitude [arcmin], phase [radian]) of wobble model.
     Returns:
         deflection quaternions
     """
-    # This is based on TOD fits summarized here: https://docs.google.com/presentation/d/1DPBeMX9ZPHwQyi9-s5orfRZIYcRLXaejFWOtlsflgUU/edit?usp=sharing
-    # amplitude below is in arcmin, phase in radian
-    amp_satp1 = {'f090': {'ws0': 0.3945,
-                          'ws1': 0.3996,
-                          'ws2': 0.3991,
-                          'ws3': 0.4043,
-                          'ws5': 0.3994,
-                          'ws6': 0.4001},
-                 'f150': {'ws0': 0.3989,
-                          'ws1': 0.3938,
-                          'ws2': 0.4011,
-                          'ws3': 0.4051,
-                          'ws5': 0.3974,
-                          'ws6': 0.3984}
-                 }
-    phase_satp1 = {'f090': {'ws0': 4.3180,
-                            'ws1': 4.3175,
-                            'ws2': 4.3122,
-                            'ws3': 4.3086,
-                            'ws5': 4.3021,
-                            'ws6': 4.3161},
-                   'f150': {'ws0': 4.2988,
-                            'ws1': 4.2858,
-                            'ws2': 4.2883,
-                            'ws3': 4.2906,
-                            'ws5': 4.2788,
-                            'ws6': 4.2864}
-                }
-
-    amp_satp3 = {'f090': {'ws0': 2.8158,
-                          'ws1': 2.8740,
-                          'ws2': 2.8664,
-                          'ws6': 2.8676},
-                 'f150': {'ws0': 2.9635,
-                          'ws1': 2.9970,
-                          'ws2': 3.0019,
-                          'ws6': 2.9956}
-                 }
-    phase_satp3 = {'f090': {'ws0': 4.0654,
-                            'ws1': 4.0623,
-                            'ws2': 4.0609,
-                            'ws6': 4.0616},
-                   'f150': {'ws0': 4.0784,
-                            'ws1': 4.0779,
-                            'ws2': 4.0792,
-                            'ws6': 4.0789}
-                }
     
     if params is None:
-        if telescope == 'satp3':
-            amp = amp_satp3
-            phase = phase_satp3
-        elif telescope == 'satp1':
-            amp = amp_satp1
-            phase = phase_satp1
-        else:
-            print('Telescope does not matched to satp1 or satp3')
-        if ws in amp[band].keys():
-            ph_def = amp[band][ws]/60*coords.DEG # convert to radian
-            ph_hwp = phase[band][ws] # already in radian
-        else:
-            ph_def = np.mean(list(amp[band].values()))/60*coords.DEG # convert to radian
-            ph_hwp = np.mean(list(phase[band].values())) # already in radian
+        assert hasattr(aman, "wobble_params"), "wobble metadata is not found in axis manager. Please provide params."
+        ph_def = aman.wobble_params['amp'][0]/60*coords.DEG # convert to radian
+        ph_hwp = aman.wobble_params['phase'][0]
     else:
         ph_def, ph_hwp = params
         ph_def = ph_def/60*coords.DEG # convert to radian
@@ -879,7 +819,7 @@ def get_defl_quat(aman, band=None, ws=None, telescope=None, params=None):
     return deflq
 
 def defl_fit_model(xieta_theta, amplitude, xo, yo, sigma_x, sigma_y, theta, ph_def, ph_hwp):
-    """ Fit model that accounts for pointing deflection. Offset is set to 0.
+    """ Fit model that accounts for pointing deflection. Offset is set to be 0.
     Args:
         xieta_theta: (xi, eta, theta) in radian
         amplitude: amplitude of Gaussian
@@ -1734,11 +1674,11 @@ def get_obsinfo(aman):
 def test1():
     print('test1')
     config_path = '/home/ys5857/workspace/script/pwg-scripts/flp/planet_mapmaker/example_satp3_detcen2.yaml'
-    obs_id = 'obs_1723460332_satp3_1111111' # this is jupiter for ws0
-    ws = 'ws0'
+    obs_id = 'obs_1723111505_satp3_1011111' # this is jupiter for ws0
+    ws = 'ws6'
     band = 'f150'
     dets={'wafer_slot': ws, 'wafer.bandpass': band, }
-    planet_mapmake_eachobs(config_path, obs_id, dets, verbosity = 3)
+    planet_mapmake_eachobs(config_path, obs_id, dets, verbosity = 3, debug=True)
 
 if __name__ == '__main__':
     import argparse
