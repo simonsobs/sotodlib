@@ -247,7 +247,7 @@ def make_planet_center(aman, config, logger, rot_q=None, debug = False, fits_nam
     if config['deflection_correction']['process'] & config['deflection_correction']['wafer_base']:
         logger.debug('Deflection correction is done each wafer')
         assert hasattr(aman, "wobble_params"), "wobble_param is required"
-        deflq = coords.helpers.get_deflected_quat(aman, params=params)
+        deflq = coords.helpers.get_deflected_quat(aman)
         sight.Q = sight.Q * ~deflq
         
     # select detectors based on fitted values or fit False
@@ -485,7 +485,7 @@ def make_instrument_center_each(aman, obsid, band, ws, idetid, azpl, elpl, sight
         logger.debug('Deflection correction is done each detector')
         fitinfo = get_db_planettod(config['fittod']['dbpath'], obs_id = obsid, freq_channel = band, wafer = ws, detid = idetid)[0]
         params = (fitinfo.defla, fitinfo.deflp)
-        deflq = get_defl_quat(aman, params = params)
+        deflq = coords.helpers.get_deflected_quat(aman, params = params)
         sight.Q = sight.Q * ~deflq
 
     if config['map']['coordinate'] == 'boresight_center':
