@@ -1,4 +1,4 @@
-__all__ = ['planet_mapmake_eachobs']
+__all__ = ['planet_mapmake_single_obs']
 import os, time, gc, yaml, datetime, re, json, copy, pickle, math
 import numpy as np
 from sqlalchemy import create_engine, exc
@@ -86,9 +86,9 @@ def get_inv_var(configs, aman, full, logger, uniform=False):
         aman.wrap('inv_var', np.ones(aman.dets.count), [(0, 'dets')])
     return 
 
-def planet_mapmake_eachobs(config_path, obs_id, wafer_info, verbosity = 3, debug = False):
+def planet_mapmake_single_obs(config_path, obs_id, wafer_info, verbosity = 3, debug = False):
     """
-    Function to process planet_mapmaking for each observation.
+    Function to process planet_mapmaking for single observation.
     Args:
         config_path (str): Path to the configuration file.
         obs_is (str): Observation ID.
@@ -245,7 +245,7 @@ def make_planet_center(aman, config, logger, rot_q=None, debug = False, fits_nam
         sight.Q = sight.Q * ~rot_q
 
     if config['deflection_correction']['process'] & config['deflection_correction']['wafer_base']:
-        logger.debug('Deflection correction is done each wafer')
+        logger.debug('Wafer based deflection correction is applied')
         assert hasattr(aman, "wobble_params"), "wobble_param is required"
         deflq = coords.helpers.get_deflected_quat(aman)
         sight.Q = sight.Q * ~deflq
@@ -294,7 +294,7 @@ def make_planet_center(aman, config, logger, rot_q=None, debug = False, fits_nam
         detids = []
         for i, idetid in enumerate(aman.det_info.det_id):
             iaman = aman.restrict('dets', aman.det_info.det_id == idetid, in_place=False)
-            isight = copy.copy(sight) # need to copy sight for each detector because it is modified in map_make_detcen_horizon_each
+            isight = copy.copy(sight) # need to copy sight for each detector because it will be modified
             deflq = coords.helpers.get_deflected_quat(aman, params = defl_params[i])
             isight.Q = rot * ~pq * isight.Q * ~deflq
             P = coords.P.for_tod(iaman, sight=isight, geom=geom, hwp=True, comps='TQU', cuts=iaman.flags[config['map']['flags']])
@@ -382,7 +382,7 @@ def make_instrument_center(aman, config, logger, rot_q=None, debug=False, fits_n
         sight.Q = sight.Q * ~rot_q
         
     if config['deflection_correction']['process'] & config['deflection_correction']['wafer_base']:
-        logger.debug('Deflection correction is done each wafer')
+        logger.debug('Wafer based deflection correction is applied')
         assert hasattr(aman, "wobble_params"), "wobble_params is required"
         deflq = coords.helpers.get_deflected_quat(aman)
         sight.Q = sight.Q * ~deflq
@@ -396,9 +396,9 @@ def make_instrument_center(aman, config, logger, rot_q=None, debug=False, fits_n
     logger.info(f'Length of aman = {aman.dets.count}')
     for idetid in aman.det_info.det_id:
         iaman = aman.restrict('dets', aman.det_info.det_id == idetid, in_place=False)
-        isight = copy.copy(sight) # need to copy sight for each detector because it is modified in map_make_detcen_horizon_each
+        isight = copy.copy(sight) # need to copy sight for each detector because it is modified in make_instrument_center_single
         try:
-            iresult = make_instrument_center_each(iaman, iobsid, iband, iws, idetid,
+            iresult = make_instrument_center_single(iaman, iobsid, iband, iws, idetid,
                                                 azpl = azpl, elpl = elpl,
                                                 sight = isight, config = config,
                                                 logger = logger)
@@ -458,8 +458,8 @@ def make_instrument_center(aman, config, logger, rot_q=None, debug=False, fits_n
         return dets_used, yc, xc, map_vars
 
 
-def make_instrument_center_each(aman, obsid, band, ws, idetid, azpl, elpl, sight, config, logger):
-    """Make a map in instrument-centered coordinates for each detector.
+def make_instrument_center_single(aman, obsid, band, ws, idetid, azpl, elpl, sight, config, logger):
+    """Make a map in instrument-centered coordinates for a single detector.
     Args:
         aman: axis manager that include one detector.
         obsid: observation id
@@ -482,7 +482,7 @@ def make_instrument_center_each(aman, obsid, band, ws, idetid, azpl, elpl, sight
 
 
     if config['deflection_correction']['process'] and not config['deflection_correction']['wafer_base']:
-        logger.debug('Deflection correction is done each detector')
+        logger.debug('Detector based deflection correction is applied')
         fitinfo = get_db_planettod(config['fittod']['dbpath'], obs_id = obsid, freq_channel = band, wafer = ws, detid = idetid)[0]
         params = (fitinfo.defla, fitinfo.deflp)
         deflq = coords.helpers.get_deflected_quat(aman, params = params)
@@ -494,7 +494,7 @@ def make_instrument_center_each(aman, obsid, band, ws, idetid, azpl, elpl, sight
         boresight_center = False
     else:
         raise ValueError(f"Unknown coordinate system: {config['map']['coordinate']}")
-    P = coords.planets.get_each_instrument_P(aman, azpl, elpl, sight = sight, size=config['map']['size'] * coords.DEG,
+    P = coords.planets.get_single_instrument_P(aman, azpl, elpl, sight = sight, size=config['map']['size'] * coords.DEG,
                             res=config['map']['res'] * coords.DEG,
                             flags=aman.flags[config['map']['flags']],
                             boresight_centered = boresight_center)
@@ -732,7 +732,7 @@ def execute_todfit(aman, dbpath, center_on, Tsignal='dsT', flags=None, centroid_
     signal = signal.copy()
     time = aman.timestamps
     
-    # fit for each detector
+    # fit each detector
     for i in range(aman.dets.count):
         isignal = signal[i]
         imaskbg = source_flag_bgest.mask()[i]
@@ -956,7 +956,7 @@ def fit_selection_each(thoreshold, fit_result, apply_selection = ['amplitude', '
 
 #### database function
 
-def save_info(info, dbpath = '/home/ys5857/workspace/jupyter/2025/05/dbtest/db.sqlite'):
+def save_info(info, dbpath):
     """Save Database at a given path.
     Args:
         info: instance of database class.
@@ -1185,7 +1185,7 @@ def get_apex_data(start_date=datetime.datetime(2024,5,19),
                'pwv':data['pwv']}
     return outdata
 
-def save_apex_data(sy, sm, ey, em, savepath='/scratch/gpfs/SIMONSOBS/users/ys5857/share/pwv_apex/apex_data.pkl'):
+def save_apex_data(sy, sm, ey, em, savepath):
     """Save apex data
     Args:
         sy, sm, ey, em: start year, start month, end year, end month
@@ -1196,7 +1196,7 @@ def save_apex_data(sy, sm, ey, em, savepath='/scratch/gpfs/SIMONSOBS/users/ys585
     data = get_apex_data(start_date=start_date, end_date=end_date)
     np.savez(savepath, timestamp=data['timestamps'], pwv=data['pwv'])
 
-def load_apex_pwv_range(start_ts, end_ts, data_dir = "/scratch/gpfs/SIMONSOBS/users/ys5857/share/pwv_apex/"):
+def load_apex_pwv_range(start_ts, end_ts, data_dir):
     """Load apex data that pre-saved in data_dir
     Args:
         start_ts, end_ts: start and end unix timestamp
@@ -1645,7 +1645,7 @@ def test1():
     ws = 'ws6'
     band = 'f150'
     dets={'wafer_slot': ws, 'wafer.bandpass': band, }
-    planet_mapmake_eachobs(config_path, obs_id, dets, verbosity = 3, debug=True)
+    planet_mapmake_single_obs(config_path, obs_id, dets, verbosity = 3, debug=True)
 
 if __name__ == '__main__':
     import argparse

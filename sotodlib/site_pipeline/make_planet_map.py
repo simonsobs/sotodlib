@@ -1,4 +1,103 @@
-# To make atmic planet map in detector-centered coordinate system
+"""
+This script makes an atmic planet map in instrument/planet-centered coordinate system based on a provided config file.
+First make runlist for each observation/wafer/band, then parallelize the map making work for each observation/wafer/band.
+Output is atomic planet maps and an assosiate database.
+TOD fitting can be performed before map making if you need, and the results will be stored in a separate database.
+Main function is sotodlib.mapmaking.planet_mapmaker.planet_mapmake_eachobs.
+
+Example config file
+---------------------
+context_file: "/home/ys5857/workspace/script/planet_config/ys_planet_260212/contexts/satp3/use_this_local_251215.yaml" # path to the context file, same as 251215 for comparing this with 2025/12/15 result
+
+base_dir: '/scratch/gpfs/SIMONSOBS/users/ys5857/workspace/output/test/2026/09/03'
+save_dir: '{base_dir}/detcen_jupiter/'
+errlogpath: "{save_dir}/err/satp3_detcen_jupiter_errlog.txt"
+# database paths
+dbpath: "{save_dir}/db/detcen_coadd_map.sqlite"
+todfit_dbpath: "{save_dir}/db/todfit.sqlite"
+single_dbpath: "{save_dir}/db/detcen_single_detector_map.sqlite"
+overwrite: True # overwrite maps even if they already exist
+
+query:
+    start: '2024/7/22'
+    end: '2026/1/1'
+    tags: ['jupiter', 'taua']
+    all_wafers: True # whether to include all wafers in obs or only the ones with tags. If True, it will include all wafers in obs regardless of tags. If False, it will only include wafers with tags.
+    specific_wafers: [0, 1]  #or None # if all_wafers is False, then include only these particular wafers, replace 0,1 with any waferslot number or None
+
+mapmaking:
+    map_PCA: False # whether to map PCA modes instead of actual signal, if True, the PCA modes will be mapped and the aman.signal, aman.dsT, aman.demodQ, aman.demodU will be replaced by the PCA mode signal before making maps.
+    inv_var:
+      signal: 'demodQU' # Which signal to use for inverse variance: 'demodQ','demodU' or 'demodQU'.
+    fittod:
+      process: False # False for not performing the fit
+      Tsignal: "signal" # name of Tsignal. Usually "dsT" or "signal", but you can use anthing if you make special Tsignal.
+      dbpath: "{todfit_dbpath}"
+      #flags: "planet_mapmaking"
+      r_use: 1.0 # degrees, the radius of the circle used for process
+      r_fit: 0.8 # degrees, the radius of the circle used for fit
+      mask_res: 2 # arcmin, the resolution of the map for making flags
+      detrend_eachscan: True # whether to detrend each set of scan
+      npoly: 0 # order of polynomial for detrending
+      deflection_model: True # whether to use pointing deflection model for todfit
+      fitselection: False # Whether to apply selection based on todfit results. If True, it will apply selection based on todfit residuals. If False, it will not apply any selection.
+      #threshold_path: '/scratch/gpfs/SIMONSOBS/users/ys5857/workspace/output/2025/12/15/detcen_jupiter/todfit_selection_threshold.pkl'
+    xieta_correction:
+      process: False # True, apply xi/eta correciton based on todfit
+    deflection_correction:
+      process: True # True, apply pointing deflection correction
+      wafer_base: True # True, apply wafer-base correction. False and process is True, apply pointing deflection correction for every single detector based on todfit
+    map:
+      coordinate: "detector_center" # "detector_center" or "boresight_center" or "planet_equatorial" or "planet_horizon"
+      recv_coords: False # Whether to use receiver coordinates system, only works with "planet_horizon"
+      source: "jupiter"
+      res: 2/60 # degrees
+      size: 5 # degrees
+      proj: "car"
+      flags: "planet_mapmaking" # define the flags used in mapmaking
+      Tsignal: "signal" # name of Tsignal. Usually "dsT" or "signal", but you can use anthing if you make special Tsignal.
+      recenter: False # whether to recenter output maps
+      var_minr: 50 # arcmin, minimum radius for calculating map variance
+      var_maxr: 72 # arcmin, maximum radius for calculating map variance
+      save_dire: "{save_dir}"
+      single_save: False # Save single map or not, currently only works with "detector_center" or "boresight_center" coordinate
+      single_db: "{single_dbpath}" # database path for saving single maps
+    bootstrap: # this is only for boresight_center/detector_center for now.
+      process: False # True, apply bootstrap correction
+      N_bootstrap: 10 # numeber of bootstrap realizations
+      save_dire: "{base_dir}/detcen_jupiter/bootstrap/"
+      save_map: False
+      fit_map: False # Whether or not fitting the bootstrap coadded map
+      fitthre: 1.2 # fitting radius threshold in deg
+      sig_ran: 1.0 # signal range in deg. sig_ran < r < fitthre is used to estimate the background(i.e., offset)
+
+
+process_pipe:
+    - name: "pointing_model"
+      process: True
+
+    - name: "hwp_angle_model"
+      process: True
+      calc:
+        on_sign_ambiguous: 'fail'
+      save: True
+
+    - name: "correct_iir_params"
+      process: True
+
+    - name: "smurfgaps_flags"
+      calc:
+        buffer: 200
+        name: "smurfgaps"
+        merge: True
+      save: True
+    
+    More process steps can be added here if needed, following the same structure as above.
+    See preprocess.py for more details on available process steps and their configurations 
+    or configs/example_satp3_planet_map.yaml for an example configuration file.
+"""
+
+
 import yaml, os, time, datetime, traceback
 from typing import Optional, Union, Callable
 import numpy as np
@@ -63,7 +162,7 @@ def main(
         tags = obs['tags']
         subs = 'ws'
         if configs['query'].get('all_wafers', False):
-            obs_wafers = [f'ws{i}' for i in range(7)]
+            obs_wafers = obs['wafer_slots_list']
         else:
             specific_wafers = configs['query'].get('specific_wafers')
             if specific_wafers is not None:
@@ -73,7 +172,6 @@ def main(
         
         bands = configs['query'].get('bands', bands)
         for band in bands:
-            # add function for overwrite
             for wafer in obs_wafers: 
                 if configs['overwrite']:
                     irunlist = {'obs_id':obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}

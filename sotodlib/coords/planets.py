@@ -901,7 +901,7 @@ def xieta0(q):
     theta = 2 * np.arctan2((b**2 + c**2)**.5, (a**2 + d**2)**.5)
     return so3g.proj.quat.euler(2, phi) * so3g.proj.quat.euler(1, theta) * so3g.proj.quat.euler(2, -phi)
 
-def get_each_instrument_P(tod, azpl, elpl, sight = None, size=None, res=None, proj = 'car', flags=None, boresight_centered = False):
+def get_single_instrument_P(tod, azpl, elpl, sight = None, size=None, res=None, proj = 'car', flags=None, boresight_centered = False):
     """Get a standard Projection Matrix for detector-centered/boresight-centered coordinates.
     This is mainly used for beam characterization.
     Currently this must be done every single detector. See "coadded_maps()" in detail 
