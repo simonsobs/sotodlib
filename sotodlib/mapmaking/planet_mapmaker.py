@@ -246,13 +246,8 @@ def make_planet_center(aman, config, logger, rot_q=None, debug = False, fits_nam
 
     if config['deflection_correction']['process'] & config['deflection_correction']['wafer_base']:
         logger.debug('Deflection correction is done each wafer')
-        if hasattr(aman, "wobble_params") and aman.wobble_params:
-            logger.debug("Use wobble params stored in metadata")
-            params = (aman.wobble_params['amp'][0], aman.wobble_params['phase'][0])
-            deflq = get_defl_quat(aman, params=params)
-        else:
-            logger.debug('No wobble params found in metadata. Using default deflection parameters.')
-            deflq = get_defl_quat(aman, iband, iws, telescope=itele)
+        assert hasattr(aman, "wobble_params"), "wobble_param is required"
+        deflq = coords.helpers.get_deflected_quat(aman, params=params)
         sight.Q = sight.Q * ~deflq
         
     # select detectors based on fitted values or fit False
@@ -300,7 +295,7 @@ def make_planet_center(aman, config, logger, rot_q=None, debug = False, fits_nam
         for i, idetid in enumerate(aman.det_info.det_id):
             iaman = aman.restrict('dets', aman.det_info.det_id == idetid, in_place=False)
             isight = copy.copy(sight) # need to copy sight for each detector because it is modified in map_make_detcen_horizon_each
-            deflq = get_defl_quat(aman, params = defl_params[i])
+            deflq = coords.helpers.get_deflected_quat(aman, params = defl_params[i])
             isight.Q = rot * ~pq * isight.Q * ~deflq
             P = coords.P.for_tod(iaman, sight=isight, geom=geom, hwp=True, comps='TQU', cuts=iaman.flags[config['map']['flags']])
             iresult = coords.demod.make_map(iaman, P=P, dsT=iaman[config['map']['Tsignal']], det_weights_demod=iaman.inv_var)
@@ -388,13 +383,8 @@ def make_instrument_center(aman, config, logger, rot_q=None, debug=False, fits_n
         
     if config['deflection_correction']['process'] & config['deflection_correction']['wafer_base']:
         logger.debug('Deflection correction is done each wafer')
-        if hasattr(aman, "wobble_params") and aman.wobble_params:
-            logger.debug("Use wobble params stored in metadata")
-            params = (aman.wobble_params['amp'][0], aman.wobble_params['phase'][0])
-            deflq = get_defl_quat(aman, params=params)
-        else:
-            logger.debug('No wobble params found in metadata. Using default deflection parameters.')
-            deflq = get_defl_quat(aman, iband, iws, telescope=itele)
+        assert hasattr(aman, "wobble_params"), "wobble_params is required"
+        deflq = coords.helpers.get_deflected_quat(aman)
         sight.Q = sight.Q * ~deflq
 
     # calculate planet in horizon coordinates (az/el)
@@ -794,29 +784,6 @@ def execute_todfit(aman, dbpath, center_on, Tsignal='dsT', flags=None, centroid_
             except Exception as e:
                 pass
     return 
-
-def get_defl_quat(aman, params=None):
-    """Get deflection quaternion. If params is None, use default deflection parameters stored in axis manager from wobble metadata.
-    Assuming axismanager is consist of single wafer/band/telescope because wobble params are currently per-wafer/band/telescope.
-    Args:
-        aman: axis manager
-        params: (amplitude [arcmin], phase [radian]) of wobble model.
-    Returns:
-        deflection quaternions
-    """
-    
-    if params is None:
-        assert hasattr(aman, "wobble_params"), "wobble metadata is not found in axis manager. Please provide params."
-        ph_def = aman.wobble_params['amp'][0]/60*coords.DEG # convert to radian
-        ph_hwp = aman.wobble_params['phase'][0]
-    else:
-        ph_def, ph_hwp = params
-        ph_def = ph_def/60*coords.DEG # convert to radian
-        
-    dxi = ph_def*np.cos(aman.hwp_angle-ph_hwp) #params calculated in a planet centered coordinate system
-    deta = -ph_def*np.sin(aman.hwp_angle-ph_hwp)
-    deflq = so3g.proj.quat.rotation_xieta(xi = dxi, eta = deta)
-    return deflq
 
 def defl_fit_model(xieta_theta, amplitude, xo, yo, sigma_x, sigma_y, theta, ph_def, ph_hwp):
     """ Fit model that accounts for pointing deflection. Offset is set to be 0.
