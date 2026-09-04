@@ -276,7 +276,9 @@ def planet_mapmake_single_obs(
         )
     else:
         raise ValueError(
-            "Unknown coordinate system: {}. Must be one of ['detector_center', 'boresight_center', 'planet_horizon', 'planet_equatorial']".format(
+            "Unknown coordinate system: {}. Must be one of "
+            "['detector_center', 'boresight_center', 'planet_horizon', "
+            "'planet_equatorial']".format(
                 configs["mapmaking"]["map"]["coordinate"]
             )
         )
@@ -317,7 +319,8 @@ def make_planet_center(aman, config, logger, rot_q=None, debug=False, fits_name=
     Function to make Q/U maps of a slow moving source (i.e. not fixed on the celestial sphere).
     NOTE: demodulation must have been done to use this function.
     Unlike the above mapping function, this horizon version creates a projection matrix with
-    all detectors in horizon coordinates, so that planets and other structures attached to the instrument do not rotate with the celestial sphere.
+    all detectors in horizon coordinates,
+    so that planets and other structures attached to the instrument do not rotate with the celestial sphere.
 
     Args:
         aman: axis manager
