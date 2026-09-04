@@ -882,3 +882,190 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             'P': P,
             'det_weights': det_weights,
             }
+
+def xieta0(q):
+    """Calculate the xieta rotation quaternion with setting zero gamma angle.
+    This is needed to make detector/instrument-centered coordinate system that follows Ludwig3-I.
+    so3.proj.quat.decompose_xieta/rotation_xieta does not cover pointing where opposite half sphere.
+    This function extend it to be able to apply 4pi sky.
+    Args:
+      param q: quaternion to be decomposed
+    Returns:
+      Input quaternion but gamma = 0
+    """
+    if isinstance(q, so3g.proj.quat.quat):
+        a,b,c,d = q.a, q.b, q.c, q.d
+    else:
+        a,b,c,d = np.transpose(q)
+    phi = np.arctan2(c*d-a*b, a*c+b*d)
+    theta = 2 * np.arctan2((b**2 + c**2)**.5, (a**2 + d**2)**.5)
+    return so3g.proj.quat.euler(2, phi) * so3g.proj.quat.euler(1, theta) * so3g.proj.quat.euler(2, -phi)
+
+def get_single_instrument_P(tod, azpl, elpl, sight = None, size=None, res=None, proj = 'car', flags=None, boresight_centered = False):
+    """Get a standard Projection Matrix for detector-centered/boresight-centered coordinates.
+    This is mainly used for beam characterization.
+    Currently this must be done every single detector. See "coadded_maps()" in detail 
+    Args:
+      tod (float): axis manager that include one detector.
+      azpl (float): planet azimuth, in radians.
+      elpl (float): planet elevation, in radians.
+      sight: CelestialSightLine object.
+      size (float): size of output Projection Matrix, in radians.
+      res (float): resolution output Projection Matrix, in radians.
+      proj (str): Default is CAR.
+      flags: flags that use for map-making
+      boresight_centered (bool): if True, the output map is in boresight-centered coordinate system instead.
+    Returns a Projection Matrix
+    """
+    if res is None:
+        res = 0.01 * coords.DEG
+    if size is None:
+        size = 5 * coords.DEG
+
+    xi = tod.focal_plane.xi[0]
+    eta = tod.focal_plane.eta[0]
+    if sight is None:
+        sight = so3g.proj.CelestialSightLine.for_horizon(tod.timestamps, tod.boresight.az, tod.boresight.el, roll= tod.boresight.roll)
+
+    # planet quaternion in Horizontal coordinate
+    pq = so3g.proj.quat.rotation_lonlat(-azpl, elpl)
+    xieta_gamma0 = so3g.proj.quat.rotation_xieta(xi,eta,0)
+    if boresight_centered:
+        detQ = ~sight.Q * pq # Boresight-centered coordinate
+    else:
+        detQ = ~xieta_gamma0 * ~sight.Q * pq # Detector-centered coordinate
+    sight.Q = xieta0(detQ) * ~xieta_gamma0
+
+    # cut the gamma so that reference/cross polarization follows Ludwig 3-I definition.
+    # additional `~xieta_gamma0` here is used for cancelling the one that will be accounted for in so3g by default.
+    # This will be improved once so3g incorporates this instrument centered coordinate system.
+    rot = so3g.proj.quat.rotation_lonlat(0, 0)
+    box = np.array([[-1, -1], [1, 1]]) * size
+    geom = enmap.geometry(pos=box, res=res, proj = proj)
+    P = coords.P.for_tod(tod, sight=sight, rot=rot,  geom=geom, hwp=True, comps='TQU', cuts=flags)
+    return P
+
+def calc_planet_azel_approx(tss, source=None, site='_default', weather='typical', ds_factor=500):
+    """Calculate az, el of a planet at given timestamps.
+    If source is a planet, use skyfield azel calculation with interpolation.
+    If source is not a planet, get ra/dec first, then convert them to az,el with so3g sightline iteratively.
+    Args:
+        tss: timestamps (e.g., aman.timestamps)
+        source: name of the planet. 'moon', 'mars', 'jupiter', 'taua', see more detail SOURCE_LIST in sotodlib.proj.coords.planets.py
+        site: observation site. default = '_default' (i.e., 'so_lat'), see more detail in so3g.proj.coords.py
+        weather: weather condition. default = 'typical' (i.e., 'toco'), see more detail in so3g.proj.coords.py
+    Returns:
+        az: planet azimuth in radians
+        el: planet elevation in radians
+    """
+    pinfo = coords.planets.get_source_list_fromstr(source)
+    if isinstance(pinfo, str):
+        # source is a planet. So use skyfield azel calculation with interpolation.
+        paz, pel, _ = np.array([coords.planets.get_source_azel(source, t) for t in tss[::ds_factor]]).T
+        azpl = np.mod(np.interp(tss, tss[::ds_factor], np.unwrap(paz)), 2 * np.pi)
+        elpl = np.interp(tss, tss[::ds_factor], pel)
+    else:
+        # source is not a planet. So get ra/dec first and convert to azel.
+        azpl = []
+        elpl = []
+        planet = get_planet(tss[0], source)
+        iras, idecs = planet.pos(tss)
+        az, el, _ = horizon_iter(tss, iras, idecs, nite=3, site = site, weather = weather)
+        azpl.append(az)
+        elpl.append(el)
+        azpl = np.concatenate(azpl)%(2*np.pi)
+        elpl = np.concatenate(elpl)
+
+    return azpl, elpl
+
+def calc_planet_radec_approx(tss, source=None, interval=10):
+    """Calculate ra, dec of a planet at given timestamps
+    Args:
+        tss: timestamps (e.g., aman.timestamps)
+        source: name of the planet. 'moon', 'mars', 'jupiter', '
+        interval: interval [s] to divide timestamps for SlowSource
+    Returns:
+        ra: planet RA in radians
+        dec: planet DEC in radians
+    """
+    if source == 'moon':
+        print('Source is the Moon. Will use SlowSource by deviding timestamps into subchunk')
+        # Need interval = 10 sec for sub-arcsec accuracy.
+        divnum = int((tss[-1] - tss[0])/interval)
+        print(f'Total data duration = {tss[-1] - tss[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
+        ts = np.array_split(tss, divnum)
+    else:
+        ts = [tss]
+
+    rapl = []
+    decpl = []
+    for its in ts:
+        planet = get_planet(its[0], source)
+        iras, idecs = planet.pos(its)
+        rapl.append(iras)
+        decpl.append(idecs)
+    rapl = np.concatenate(rapl)%(2*np.pi)
+    decpl = np.concatenate(decpl)
+
+    return rapl, decpl
+
+def get_planet(ts, source):
+    """Get planet name/tuple from source name(string)
+    Args:
+        ts: single timestamp 
+        source: source name(string)
+    Returns:
+        planet: SlowSource object
+    """
+    pinfo = coords.planets.get_source_list_fromstr(source)
+    if isinstance(pinfo, tuple):
+        planet = coords.planets.SlowSource(ts, pinfo[1]*DEG, pinfo[2]*DEG)
+    elif isinstance(pinfo, str):
+        planet = coords.planets.SlowSource.for_named_source(pinfo, ts)
+    else:
+        raise ValueError('source is not matched tuple or string')
+    return planet
+
+def horizon_direct(t, ra, dec, az_ref=0, el_ref=np.pi/2, site='_default', weather='typical'):
+    """Convert ra,dec to az,el,phi at a given time t with reference az,el.
+    Proper Aberration correction needs actual az,el.
+    Args:
+        t: time in seconds (e.g., aman.timestamps)
+        ra: right ascension in radians
+        dec: declination in radians
+        az_ref: reference azimuth in radians
+        el_ref: reference elevation in radians
+        site: observation site. default = '_default' (i.e., 'so_lat'),
+        weather: weather condition. default = 'typical' (i.e., 'toco'), see more detail in so3g.proj.coords.py
+    Returns:
+        az: azimuth in radians
+        el: elevation in radians
+        phi: phi in radians
+    """
+    z = np.zeros(len(t))
+    Q0 = so3g.proj.quat.rotation_lonlat(-az_ref, el_ref)
+    csl = so3g.proj.CelestialSightLine.az_el(t, z + az_ref, z + el_ref, site=site, weather=weather)                                                                             
+    neg_az, el, phi = so3g.proj.quat.decompose_lonlat(
+        Q0 * ~csl.Q * so3g.proj.quat.rotation_lonlat(ra, dec)) # ra/dec --> zenith --> azel
+    return -neg_az, el, phi
+
+def horizon_iter(t, ra, dec, nite = 3, site='_default', weather='typical'):
+    """Convert ra,dec to az,el,phi at a given time t iteratively.
+    Proper Aberration correction needs actual az,el. So iteratively calculate az,el from ra,dec.
+    nite = 3 is enough for sub arcsec accuracy.
+    Args:
+        t: time in seconds (e.g., aman.timestamps)
+        ra: right ascension in radians
+        dec: declination in radians
+        nite: number of iteration
+        site: observation site. default = '_default' (i.e., 'so_lat'), see more detail in so3g.proj.coords.py
+        weather: weather condition. default = 'typical' (i.e., 'toco'), see more detail in so3g.proj.coords.py
+    Returns:
+        az: azimuth in radians
+        el: elevation in radians
+        phi: phi in radians
+    """
+    az, el, phi = horizon_direct(t, ra, dec, site=site, weather=weather)
+    for i in range(nite):
+        az, el, phi = horizon_direct(t, ra, dec, az_ref=az, el_ref=el, site=site, weather=weather)
+    return az, el, phi
