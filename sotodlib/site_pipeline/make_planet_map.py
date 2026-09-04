@@ -194,7 +194,7 @@ def main(
     
     logger.debug('Parallelizing the map making work')
     future_to_rl = {executor.submit(planet_mapmaker.planet_mapmake_eachobs, config_path=config_path, obs_id = rl['obs_id'], 
-                            wafer_info = rl['wafer_info'], verbosity = verbosity, debug = debug): rl for rl in runlist}
+                            wafer_info = rl['wafer_info'], verbosity = verbosity): rl for rl in runlist}
     futures = list(future_to_rl)
 
     n = 0

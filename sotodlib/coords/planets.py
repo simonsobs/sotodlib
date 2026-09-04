@@ -945,87 +945,6 @@ def get_single_instrument_P(tod, azpl, elpl, sight = None, size=None, res=None, 
     P = coords.P.for_tod(tod, sight=sight, rot=rot,  geom=geom, hwp=True, comps='TQU', cuts=flags)
     return P
 
-def calc_planet_azel_approx(tss, source=None, site='_default', weather='typical', ds_factor=500):
-    """Calculate az, el of a planet at given timestamps.
-    If source is a planet, use skyfield azel calculation with interpolation.
-    If source is not a planet, get ra/dec first, then convert them to az,el with so3g sightline iteratively.
-    Args:
-        tss: timestamps (e.g., aman.timestamps)
-        source: name of the planet. 'moon', 'mars', 'jupiter', 'taua', see more detail SOURCE_LIST in sotodlib.proj.coords.planets.py
-        site: observation site. default = '_default' (i.e., 'so_lat'), see more detail in so3g.proj.coords.py
-        weather: weather condition. default = 'typical' (i.e., 'toco'), see more detail in so3g.proj.coords.py
-    Returns:
-        az: planet azimuth in radians
-        el: planet elevation in radians
-    """
-    pinfo = coords.planets.get_source_list_fromstr(source)
-    if isinstance(pinfo, str):
-        # source is a planet. So use skyfield azel calculation with interpolation.
-        paz, pel, _ = np.array([coords.planets.get_source_azel(source, t) for t in tss[::ds_factor]]).T
-        azpl = np.mod(np.interp(tss, tss[::ds_factor], np.unwrap(paz)), 2 * np.pi)
-        elpl = np.interp(tss, tss[::ds_factor], pel)
-    else:
-        # source is not a planet. So get ra/dec first and convert to azel.
-        azpl = []
-        elpl = []
-        planet = get_planet(tss[0], source)
-        iras, idecs = planet.pos(tss)
-        az, el, _ = horizon_iter(tss, iras, idecs, nite=3, site = site, weather = weather)
-        azpl.append(az)
-        elpl.append(el)
-        azpl = np.concatenate(azpl)%(2*np.pi)
-        elpl = np.concatenate(elpl)
-
-    return azpl, elpl
-
-def calc_planet_radec_approx(tss, source=None, interval=10):
-    """Calculate ra, dec of a planet at given timestamps
-    Args:
-        tss: timestamps (e.g., aman.timestamps)
-        source: name of the planet. 'moon', 'mars', 'jupiter', '
-        interval: interval [s] to divide timestamps for SlowSource
-    Returns:
-        ra: planet RA in radians
-        dec: planet DEC in radians
-    """
-    if source == 'moon':
-        print('Source is the Moon. Will use SlowSource by deviding timestamps into subchunk')
-        # Need interval = 10 sec for sub-arcsec accuracy.
-        divnum = int((tss[-1] - tss[0])/interval)
-        print(f'Total data duration = {tss[-1] - tss[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
-        ts = np.array_split(tss, divnum)
-    else:
-        ts = [tss]
-
-    rapl = []
-    decpl = []
-    for its in ts:
-        planet = get_planet(its[0], source)
-        iras, idecs = planet.pos(its)
-        rapl.append(iras)
-        decpl.append(idecs)
-    rapl = np.concatenate(rapl)%(2*np.pi)
-    decpl = np.concatenate(decpl)
-
-    return rapl, decpl
-
-def get_planet(ts, source):
-    """Get planet name/tuple from source name(string)
-    Args:
-        ts: single timestamp 
-        source: source name(string)
-    Returns:
-        planet: SlowSource object
-    """
-    pinfo = coords.planets.get_source_list_fromstr(source)
-    if isinstance(pinfo, tuple):
-        planet = coords.planets.SlowSource(ts, pinfo[1]*DEG, pinfo[2]*DEG)
-    elif isinstance(pinfo, str):
-        planet = coords.planets.SlowSource.for_named_source(pinfo, ts)
-    else:
-        raise ValueError('source is not matched tuple or string')
-    return planet
-
 def horizon_direct(t, ra, dec, az_ref=0, el_ref=np.pi/2, site='_default', weather='typical'):
     """Convert ra,dec to az,el,phi at a given time t with reference az,el.
     Proper Aberration correction needs actual az,el.
@@ -1042,7 +961,8 @@ def horizon_direct(t, ra, dec, az_ref=0, el_ref=np.pi/2, site='_default', weathe
         el: elevation in radians
         phi: phi in radians
     """
-    z = np.zeros(len(t))
+    t = np.atleast_1d(np.asarray(t, dtype=float))
+    z = np.zeros_like(t)
     Q0 = so3g.proj.quat.rotation_lonlat(-az_ref, el_ref)
     csl = so3g.proj.CelestialSightLine.az_el(t, z + az_ref, z + el_ref, site=site, weather=weather)                                                                             
     neg_az, el, phi = so3g.proj.quat.decompose_lonlat(
@@ -1069,3 +989,95 @@ def horizon_iter(t, ra, dec, nite = 3, site='_default', weather='typical'):
     for i in range(nite):
         az, el, phi = horizon_direct(t, ra, dec, az_ref=az, el_ref=el, site=site, weather=weather)
     return az, el, phi
+
+def get_planet(ts, source):
+    """Get planet name/tuple from source name(string)
+    Args:
+        ts: single timestamp 
+        source: source name(string)
+    Returns:
+        planet: SlowSource object
+    """
+    pinfo = coords.planets.get_source_list_fromstr(source)
+    if isinstance(pinfo, tuple):
+        planet = coords.planets.SlowSource(ts, pinfo[1]*coords.DEG, pinfo[2]*coords.DEG)
+    elif isinstance(pinfo, str):
+        planet = coords.planets.SlowSource.for_named_source(pinfo, ts)
+    else:
+        raise ValueError('source is not matched tuple or string')
+    return planet
+
+class GetSourcePosition:
+    """Class to track the time-dependent position of a source,
+    such as a Solar System planet in horizontal coordinates.
+    Interpolarion will perform to get the position at each timestamp.
+    This is important for objects like the Moon, which moves fast in the sky.
+
+    Args:
+        tss: timestamps (e.g., aman.timestamps)
+        source: name of the planet. 'moon', 'mars', 'jupiter', 'taua', see more detail SOURCE_LIST in sotodlib.proj.coords.planets.py
+        site: observation site. default = '_default' (i.e., 'so_lat'), see more detail in so3g.proj.coords.py
+        weather: weather condition. default = 'typical' (i.e., 'toco'), see more detail in so3g.proj.coords.py
+    """ 
+
+    def __init__(self, timestamp, source, site='_default', weather='typical'):
+        self.timestamp = timestamp
+        self.source = coords.planets.get_source_list_fromstr(source)
+        self.site = site
+        self.weather = weather
+
+
+    def get_radec(self, interval=10):
+        """Get the RA and DEC of the planet.
+        If the source is the Moon, it will divide the timestamps into subchunks to use SlowSource for better accuracy.
+        Otherwise, it will calculate the RA and DEC directly from SlowSource without deviding.
+        Args:
+            interval: interval [s] to divide timestamps for SlowSource. 10 seconds is enough for sub-arcsec accuracy for the Moon.
+        Returns:
+            rapl: planet RA in radians
+            decpl: planet DEC in radians
+        """
+        if self.source == 'moon':
+            print('Source is the Moon. Will use SlowSource by deviding timestamps into subchunk')
+            # Need interval = 10 sec for sub-arcsec accuracy.
+            divnum = int((self.timestamp[-1] - self.timestamp[0])/interval)
+            print(f'Total data duration = {self.timestamp[-1] - self.timestamp[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
+            ts = np.array_split(self.timestamp, divnum)
+        else:
+            ts = [self.timestamp]
+    
+        rapl = []
+        decpl = []
+        for its in ts:
+            planet = get_planet(its[0], self.source)
+            iras, idecs = planet.pos(its)
+            rapl.append(iras)
+            decpl.append(idecs)
+        rapl = np.concatenate(rapl)%(2*np.pi)
+        decpl = np.concatenate(decpl)
+    
+        return rapl, decpl
+
+    
+    def get_azel(self, site='_default', weather='typical'):
+        """Get the Az and El of the planet.
+        If the source is available to use skyfield, it will calculate az/el directly with skyfield and interpolate to get az/el at each timestamp.
+        Otherwise, it will calculate the RA and DEC first from SlowSourse and converted them into AzEl with so3g sightline iteratively.
+        NOTE: coords.planets.get_source_azel (skyfield) does not account for atmospheric refraction, but so3g sightline does.
+        So if planet position needs to be calculated in the same way as so3g.SightLine.az_el, we should use iterative method.
+        Args:
+            interval: interval [s] to divide timestamps for SlowSource
+        Returns:
+            azpl: planet Az in radians
+            elpl: planet El in radians
+        """
+        azpl = []
+        elpl = []
+        iras, idecs = self.get_radec()
+        az, el, _ = horizon_iter(self.timestamp, iras, idecs, nite=3, site = site, weather = weather)
+        azpl.append(az)
+        elpl.append(el)
+        azpl = np.concatenate(azpl)%(2*np.pi)
+        elpl = np.concatenate(elpl)
+
+        return azpl, elpl

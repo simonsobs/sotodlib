@@ -2215,7 +2215,7 @@ def get_obsinfo(aman):
     iband = aman.det_info.wafer.bandpass[0]
     iws = aman.det_info.wafer_slot[0]
     its = np.median(aman.timestamps)
-    isite = "so_lat"  # because we usually use this.
+    isite = "_default"  # for consistency with default sotodlib and so3g.
     if itele == "satp3":
         icool = "run13"
     elif itele == "satp1":

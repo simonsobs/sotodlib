@@ -761,10 +761,10 @@ def get_deflected_quat(aman, wobble_meta=None, params=None):
         Metadata tree containing both amp and phase fields under
         wobble_meta.{amp, phase}, or its name.
         Defaults to aman.wobble_params if not specified.
-    
+        
     params : Tuple or list
         (amplitude [arcmin], phase [radian]) of wobble model.
-    
+
     Returns:
         deflection quaternions
     """
