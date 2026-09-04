@@ -584,8 +584,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         of pixels for the mask map.  This is to catch cases where an
         incorrect source has been passed in, for example, leading to a
         weird map footprint
-    unroll: If True then when constructing P rotate the coordinates such that
-            scans go left-right even when roll != 0.
+      unroll: If True then when constructing P rotate the coordinates such that
+        scans go left-right even when roll != 0.
 
     Returns:
       RangesMatrix marking the samples inside the masked region.
