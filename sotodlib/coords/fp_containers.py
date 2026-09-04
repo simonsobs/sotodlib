@@ -10,22 +10,24 @@ calculations or as static attributes for loading saved results.
 # TODO: Reprs
 
 from __future__ import annotations
-from typing import Optional, Any, cast
+
+from argparse import Namespace
+from copy import deepcopy
 from dataclasses import dataclass, field
-from jaxtyping import Float, Shaped
-import numpy as np
+from functools import cached_property
+from typing import Any, Optional, Self, cast
+
 import megham.transform as mt
 import megham.utils as mu
-from functools import cached_property
-from copy import deepcopy
+import numpy as np
+from jaxtyping import Float, Shaped
 from scipy.optimize import minimize
-from sotodlib.coords.pointing_model import apply_pointing_model
 from so3g.proj import quat
+from sotodlib.coords.pointing_model import apply_pointing_model, param_defaults
 from sotodlib.core import AxisManager, IndexAxis
-from sotodlib.utils import epochs
+from sotodlib.core.metadata import ManifestDb, MetadataSpec
 from sotodlib.io.metadata import SuperLoader
-from sotodlib.core.metadata import MetadataSpec
-from sotodlib.core.metadata import ManifestDb
+from sotodlib.utils import epochs
 
 
 def gamma_fit(src, dst):
@@ -122,6 +124,9 @@ class PointingModel:
 
     Attributes
     ----------
+    epoch : str
+        Human-readable identifier for the epoch associated with this
+        data. If this spans multiple epochs they will be seperated with a '+'.
     parameters : dict
         Dictionary of pointing-model parameters accepted by
         `apply_pointing_model`. An empty dictionary corresponds to an
@@ -131,6 +136,7 @@ class PointingModel:
         model and assume a zero-roll boresight solution.
     """
 
+    epoch: str
     parameters: dict
     force_zero_roll: bool
 
@@ -322,6 +328,14 @@ class DetectorOffsets:
         if name in ("xyz"):
             self.__dict__.pop("ancil", None)
         return super().__setattr__(name, value)
+
+    @classmethod
+    def empty(cls, coordsys):
+        xyz = np.zeros((0, 3))
+        det_id = np.zeros(0, dtype=str)
+        split = np.zeros(0, dtype=str)
+        center = None
+        return cls(xyz, det_id, split, center, coordsys)
 
     @property
     def xi(self):
@@ -821,7 +835,6 @@ class OpticsTube:
     wafer_slots: list[str]
     static: bool
     autofreeze: bool
-    allpad: bool
     cm_transform: Transform = cast(Transform, StaticOrCached("cm_transform"))
     cm_transform_norx: Transform = field(init=False)
     _cm_transform_stat: Transform = field(init=False)
@@ -845,6 +858,12 @@ class OpticsTube:
         """
         self._cm_transform_stat = self._cm_transform_dyn
         self.static = static
+
+    @property
+    def allpad(self):
+        if len(fps) == 0:
+            return True
+        return np.all([fp.pad for fp in self.focal_planes])
 
     @property
     def _cm_transform_dyn(self) -> Transform:
@@ -927,6 +946,9 @@ class Receiver:
     name : str
         Human-readable identifier for the receiver.
         Probably just the telescope name.
+    epoch : str
+        Human-readable identifier for the epoch associated with this
+        data. If this spans multiple epochs they will be seperated with a '+'.
     optics_tubes : list[OpticsTube]
         Optics tubes associated with this receiver.
     static : bool
@@ -941,6 +963,7 @@ class Receiver:
     """
 
     name: str
+    epoch: str
     optics_tubes: list[OpticsTube]
     static: bool
     autofreeze: bool
@@ -1072,6 +1095,37 @@ class PointingSystem:
                 return np.inf
         return self.chisq
 
+    def search(
+        self, field: str, timestamp: float
+    ) -> Optional[PointingModel | Receiver]:
+        """
+        Get the first object associated with a specifc timestamp.
+
+        Parameters
+        ----------
+        field: str
+            The field to search in.
+            Valid options are: "receivers" and "pointing_models".
+        timestamp : float
+            The time to search for.
+
+        Returns
+        -------
+        found : Optional[PointingModel | Receiver]
+            The first matching Epoch.
+            Will be None if no matches are found.
+        """
+        if field not in ["pointing_models", "receivers"]:
+            raise ValueError(f"Invalud field to search in: {field}.")
+        dat = getattr(self, field)
+        epoch = era.find_epoch(timestamp)
+        if epoch is None:
+            return None
+        hits = [d for d in dat if epoch.name in d.epoch]
+        if len(hits) == 0:
+            return None
+        return hits[0]
+
     def load_pm_from_mdb(self, mdb: ManifestDb):
         """
         Load pointing model parameters from a ManifestDb into the current era.
@@ -1126,3 +1180,93 @@ class PointingSystem:
             )
             pm_dict = {key: pm_aman[key] for key in pm_aman.keys()}
             self.pointing_models[i].parameters = pm_dict
+
+    @classmethod
+    def empty(cls, era: epochs.Era, cfg: Namespace) -> Self:
+        """
+        Create an empty pointing system from an observing era.
+
+        This initializes a `PointingModel` and `Receiver` for each epoch,
+        with empty focal-plane data constructed from the epoch's
+        `ws_mapping`. Pointing models and receivers are then combined
+        according to the configured epoch groups.
+
+        Parameters
+        ----------
+        era : epochs.Era
+            Era containing the epochs used to construct the pointing system.
+            Each epoch must contain consistent `ws_mapping` data.
+        cfg : Namespace
+            Configuration containing the receiver name, epoch groups,
+            pointing model settings, and focal plane options.
+
+        Returns
+        -------
+        pointing_system : PointingSystem
+            A pointing system containing the initialized pointing models
+            and receivers.
+
+        Raises
+        ------
+        ValueError
+            If `era` has missing or inconsistent `ws_mapping` data.
+            If receiver or pointing model groups contain overlapping epochs.
+            If a receiver or pointing model group contains an unknown epoch.
+        """
+        if not era.check_data("ws_mapping", True):
+            raise ValueError(
+                "Era is either missing or has inconsistent values for ws_mapping"
+            )
+        rxs = []
+        pms = []
+        for epoch in era.epochs:
+            pms += [PointingModel(epoch.name, {}, cfg.force_zero_roll)]
+            ws_map = epoch.covers[0].data["ws_mapping"]
+            ots = []
+            for ot, arrays in ws_map.items():
+                fps = []
+                for ufm in arrays.items():
+                    fps += [
+                        FocalPlaneCollection(
+                            ufm,
+                            [],
+                            DetectorOffsets.empty("xieta"),
+                            False,
+                            False,
+                            True,
+                            cfg.fake_gamma,
+                        )
+                    ]
+                ots += [OpticsTube(ot, fps, list(arrays.keys()), False, False)]
+            rxs += [Receiver(cfg.tel, epoch.name, ots, False, False)]
+
+        def _group_epochs(dat, groups, desc):
+            u, c = np.unique(np.concatenate(groups), return_counts=True)
+            ng = [d for d in dat if d.epoch not in u]
+
+            if np.any(c > 1):
+                raise ValueError(f"Some {desc} groups have overlapping epochs!")
+
+            ga = []
+            for grp in groups:
+                if len(grp) == 0:
+                    continue
+                in_group = [d for d in dat if d.epoch in grp]
+                if len(in_group) < len(grp):
+                    raise ValueError(f"Unknown epoch in {desc} group {grp}")
+                new = in_group[0]
+                new.epoch = "+".join(d.epoch for d in in_group)
+                ga.append(new)
+
+            return ng + ga
+
+        rxs = _group_epochs(rxs, cfg.rx_groups, "receiver")
+        pms = _group_epochs(pms, cfg.pm_group, "pointing model")
+
+        for pm in pms:
+            pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
+            pars = deepcopy(param_defaults[pm_ver])
+            pars["version"] = pm_ver
+            pm.pars = pars
+
+        return cls(era, tuple(pms), tuple(rxs))
