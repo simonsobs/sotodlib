@@ -191,6 +191,9 @@ def planet_mapmake_single_obs(
     full, _ = pipe.run(aman)
     logger.info("Finish the pipeline")
 
+    # get obsinfo
+    obsinfo = get_obsinfo(aman)
+
     # get inverce variance
     get_inv_var(configs, aman, full, logger=logger)
 
@@ -296,7 +299,14 @@ def planet_mapmake_single_obs(
             keys.append(ikey)
         except:
             pass
-    dbinfo = make_info(aman, configs["mapmaking"]["map"].get("source"))
+    dbinfo = make_planet_map_db(aman, configs["mapmaking"]["map"].get("source"))
+    dbinfo.hit_path = configs["mapmaking"]["map"].get("save_dire")
+    fits_name = f"{obsinfo['obsid']}_{obsinfo['ws']}.fits"
+    dbinfo.hit_path = os.path.join(configs['mapmaking']['map']['save_dire'], obsinfo['band'], 'hit', fits_name)
+    dbinfo.map_path = os.path.join(configs['mapmaking']['map']['save_dire'], obsinfo['band'], 'map', fits_name)
+    dbinfo.weight_path = os.path.join(configs['mapmaking']['map']['save_dire'], obsinfo['band'], 'weight', fits_name)
+    dbinfo.weighted_map_path = os.path.join(configs['mapmaking']['map']['save_dire'], obsinfo['band'], 'weighted_map', fits_name)
+        
     dbinfo.detnum_before_fitselection = numdet_b_fitsel
     dbinfo.total_detnum = len(dets_used)
     dbinfo.recenter = configs["mapmaking"]["map"].get("recenter", False)
@@ -1166,13 +1176,13 @@ def execute_todfit(
                     ieta[imaskfit],
                     aman.hwp_angle[imaskfit],
                 )
-                ixioff = aman.focal_plane.xi[i]
-                ietaoff = aman.focal_plane.eta[i]
+                ixifp = aman.focal_plane.xi[i]
+                ietafp = aman.focal_plane.eta[i]
                 if defl_model:
                     p0 = [
                         np.max(itod4fit) * 4,
-                        ixioff,
-                        ietaoff,
+                        ixifp,
+                        ietafp,
                         FWHM2sigma(20 / 60 * coords.DEG),
                         FWHM2sigma(20 / 60 * coords.DEG),
                         0,
@@ -1189,8 +1199,8 @@ def execute_todfit(
                 else:
                     p0 = [
                         np.max(itod4fit) * 4,
-                        ixioff,
-                        ietaoff,
+                        ixifp,
+                        ietafp,
                         FWHM2sigma(20 / 60 * coords.DEG),
                         FWHM2sigma(20 / 60 * coords.DEG),
                         0,
@@ -1207,11 +1217,13 @@ def execute_todfit(
                     errs, chisq, dof = calc_err_redchi(
                         itod4fit, ifit, ierr4fit, popt, pcov
                     )
+
                 if np.all(np.isfinite(errs)):
-                    # save fit result
+                    # save fit result                    
                     idetid = aman.det_info.det_id[i]
-                    info = make_info_planettod(
-                        aman, popt, errs, chisq, dof, center_on, idetid)
+                    igammafp = aman.focal_plane.gamma[i]
+                    info = make_planet_todfit_db(
+                        aman, popt, errs, chisq, dof, center_on, idetid, ixifp, ietafp, igammafp)
                     save_db(info, dbpath=dbpath)
             except Exception as e:
                 pass
@@ -1447,7 +1459,6 @@ def save_db(db, dbpath):
         info: instance of database class.
         dbpath: path to sqlite database.
     """
-    print('save database' ,dbpath, db)
     dir_path = os.path.dirname(dbpath)
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
@@ -1456,11 +1467,17 @@ def save_db(db, dbpath):
     Session = sessionmaker(bind=engine)
 
     with Session() as session:
-        session.add(db)
         try:
+            session.add(db)            
             session.commit()
-        except exc.IntegrityError:
+        except Exception as error:
             session.rollback()
+            print("Save failed:")
+            print(type(error).__name__)
+            print(error)
+            raise
+        #except exc.IntegrityError:
+        #    session.rollback()
 
 def save_info(info, dbpath):
     """Save Database at a given path.
@@ -1557,28 +1574,7 @@ class PlanetInfo(Base):
     def __repr__(self):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime})"
 
-
-def make_info(aman, source):
-    """Make PlanetTodFitInfo instance.
-    Args:
-        aman: axismanager for one detector.
-    """
-    #dbinfo = PlanetInfo(
-    dbinfo = PlanetMapTable(
-        obs_id=aman.obs_info.obs_id,
-        telescope=aman.obs_info.telescope,
-        freq_channel=aman.det_info.wafer.bandpass[0],
-        wafer=aman.det_info.wafer_slot[0],
-        ctime=aman.obs_info.timestamp,
-        source=source,
-        dtime=datetime.datetime.fromtimestamp(
-            aman.obs_info.timestamp,
-            datetime.UTC,
-        ),
-    )
-    dbinfo.duration = aman.obs_info.stop_time - aman.obs_info.start_time
-    dbinfo.elevation = aman.obs_info.el_center
-    dbinfo.azimuth = aman.obs_info.az_center
+def get_pwv(aman, dbinfo):
     try:
         pwvs = get_pwv_sync(aman)
         bl = (pwvs < 3) & (pwvs > 0)
@@ -1622,6 +1618,30 @@ def make_info(aman, source):
             dbinfo.pwv_apex = -999
             dbinfo.pwv_apex_std = -999
             dbinfo.pwv_apex_p2p = -999
+
+
+def make_planet_map_db(aman, source):
+    """Make PlanetMapTable instance.
+    Args:
+        aman: axismanager for one detector.
+    """
+    #dbinfo = PlanetInfo(
+    dbinfo = PlanetMapTable(
+        obs_id=aman.obs_info.obs_id,
+        telescope=aman.obs_info.telescope,
+        freq_channel=aman.det_info.wafer.bandpass[0],
+        wafer=aman.det_info.wafer_slot[0],
+        ctime=aman.obs_info.timestamp,
+        source=source,
+        dtime=datetime.datetime.fromtimestamp(
+            aman.obs_info.timestamp,
+            datetime.UTC,
+        ),
+    )
+    dbinfo.duration = aman.obs_info.stop_time - aman.obs_info.start_time
+    dbinfo.elevation = aman.obs_info.el_center
+    dbinfo.azimuth = aman.obs_info.az_center
+    get_pwv(aman, dbinfo)
 
     dbinfo.f_hwp = float(
         (np.sum(np.diff(np.unwrap(aman.hwp_angle))))
@@ -1784,7 +1804,6 @@ def load_apex_pwv_range(start_ts, end_ts, data_dir):
 
     timestamps = np.concatenate(all_t)
     pwv = np.concatenate(all_p)
-    print("5")
     m = (timestamps >= start_ts) & (timestamps <= end_ts)
 
     return timestamps[m], pwv[m]
@@ -1886,7 +1905,7 @@ class PlanetTodFitInfo(Base):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.detid})"
 
 
-def make_info_planettod(aman, popt, errs, chisq, dof, source, detid=None):
+def make_planet_todfit_db(aman, popt, errs, chisq, dof, source, detid=None, xi=None, eta=None, gamma=None):
     """Make PlanetTodFitInfo instance.
     Args:
         aman: axismanager for one detector.
@@ -1941,6 +1960,15 @@ def make_info_planettod(aman, popt, errs, chisq, dof, source, detid=None):
             f"len(popt) should be 6 or 8, but {len(popt)} is given.")
     dbinfo.chisq = chisq
     dbinfo.dof = dof
+    if xi is None:
+        xi = aman.focal_plane.xi[0]
+    if eta is None:
+        eta = aman.focal_plane.eta[0]
+    if gamma is None:
+        gamma = aman.focal_plane.gamma[0]
+    dbinfo.xi = xi
+    dbinfo.eta = eta
+    dbinfo.gamma = gamma
     return dbinfo
 
 
@@ -2392,7 +2420,6 @@ def get_planet_todfit_db(
     Session = sessionmaker(bind=engine)
 
     filters = []
-
     if obs_id is not None:
         filters.append(
             PlanetTodFitTable.obs_id == obs_id
@@ -2417,12 +2444,9 @@ def get_planet_todfit_db(
         filters.append(
             PlanetTodFitTable.detid == detid
         )
-
     statement = select(PlanetTodFitTable)
-
     if filters:
         statement = statement.where(*filters)
-
     try:
         with Session() as session:
             results = session.scalars(statement).all()

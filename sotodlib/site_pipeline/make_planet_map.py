@@ -109,14 +109,18 @@ from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.mapmaking import planet_mapmaker
 from sotodlib import core
-from ..site_pipeline.utils import logging
+from sotodlib.site_pipeline.utils import logging
 
-def future_write_to_log(e, errlog):
+def future_write_to_log(e, errlog, rl = None):
+    """Write error message to log file.
+    """
     errmsg = f'{type(e)}: {e}'
     tb = ''.join(traceback.format_tb(e.__traceback__))
-    f = open(errlog, 'a')
-    f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-    f.close()
+    with open(errlog, 'a') as f:
+        if rl is not None:
+            f.write(f'Failed Run list: \n{rl}\n Traceback is below:\n')
+        f.write(f'{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+
 
 def main(
     config_path: str,
@@ -163,15 +167,15 @@ def main(
         tags = obs['tags']
         subs = 'ws'
         if configs['query'].get('all_wafers', False):
-            obs_wafers = obs['wafer_slots_list']
+            obs_wafers = obs['wafer_slots_list'].split(',')
         else:
             specific_wafers = configs['query'].get('specific_wafers')
             if specific_wafers is not None:
                 obs_wafers = [f'ws{i}' for i in specific_wafers]
             else:
                 obs_wafers = [i for i in tags if subs in i]
-        
-        bands = configs['query'].get('bands', bands)
+
+        bands = configs['query'].get('bands', ['f090', 'f150'])
         for band in bands:
             for wafer in obs_wafers: 
                 if configs['overwrite']:
