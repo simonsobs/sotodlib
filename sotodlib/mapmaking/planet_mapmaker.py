@@ -10,21 +10,24 @@ import copy
 import pickle
 import math
 import numpy as np
-from sqlalchemy import create_engine, exc
+from sqlalchemy import create_engine, exc, select
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
+from sqlmodel import SQLModel
 from typing import Optional
 import requests
 from io import StringIO
-from scipy.optimize import curve_fit
 from functools import partial
 from scipy.special import eval_hermite
 from scipy.optimize import curve_fit
+from astropy.time import Time
+from pathlib import Path
 
 import so3g
 from pixell import enmap, reproject
 
 from .. import coords, core, preprocess, io, tod_ops
 from ..site_pipeline.utils import logging
+from mapcat.database import PlanetMapTable, PlanetTodFitTable
 
 
 def save_pkl(data, path):
@@ -293,18 +296,19 @@ def planet_mapmake_single_obs(
             keys.append(ikey)
         except:
             pass
-    dbinfo = make_info(aman)
+    dbinfo = make_info(aman, configs["mapmaking"]["map"].get("source"))
     dbinfo.detnum_before_fitselection = numdet_b_fitsel
     dbinfo.total_detnum = len(dets_used)
-    dbinfo.detid = list(dets_used)
     dbinfo.recenter = configs["mapmaking"]["map"].get("recenter", False)
-    dbinfo.yc = yc
-    dbinfo.xc = xc
+    dbinfo.yc = float(yc)
+    dbinfo.xc = float(xc)
+    dbinfo.Tmap_variance = float(map_vars[0])
+    dbinfo.Qmap_variance = float(map_vars[1])
+    dbinfo.Umap_variance = float(map_vars[2])
+    dbinfo.detid = list(dets_used)
     dbinfo.proc = keys
     dbinfo.detnum = [len(np.where(idetid)[0]) for idetid in valids]
-    dbinfo.Tmap_variance = map_vars[0]
-    dbinfo.Qmap_variance = map_vars[1]
-    dbinfo.Umap_variance = map_vars[2]
+        
     logger.info(f"Finish the map making, {obs_id}, {wafer_info}")
     logger.info(
         f"[PID {os.getpid()}] Finished {obs_id}, {wafer_info} endtime = {time.perf_counter()}"
@@ -351,9 +355,9 @@ def make_planet_center(aman, config, logger, rot_q=None, debug=False, fits_name=
 
     # calculate planet in horizon coordinates (az/el)
     if config["map"]["coordinate"] == "planet_horizon":
-        paz, pel = coords.planets.calc_planet_azel_approx(
+        paz, pel = coords.planets.GetSourcePosition(
             aman.timestamps, source=config["map"]["source"], site=isite
-        )
+            ).get_azel()
         pq = so3g.proj.quat.rotation_lonlat(-paz, pel)
         sight = so3g.proj.CelestialSightLine.for_horizon(
             aman.timestamps,
@@ -362,9 +366,9 @@ def make_planet_center(aman, config, logger, rot_q=None, debug=False, fits_name=
             roll=aman.boresight.roll,
         )
     elif config["map"]["coordinate"] == "planet_equatorial":
-        pra, pdec = coords.planets.calc_planet_radec_approx(
-            aman.timestamps, source=config["map"]["source"]
-        )
+        pra, pdec = coords.planets.GetSourcePosition(
+                    aman.timestamps, source=config["map"]["source"]
+                    ).get_radec()
         pq = so3g.proj.quat.rotation_lonlat(pra, pdec)
         sight = so3g.proj.CelestialSightLine.az_el(
             aman.timestamps,
@@ -646,9 +650,9 @@ def make_instrument_center(
 
     # calculate planet in horizon coordinates (az/el)
     logger.debug("Calculating planet position in horizon coordinates")
-    azpl, elpl = coords.planets.calc_planet_azel_approx(
+    azpl, elpl = coords.planets.GetSourcePosition(
         aman.timestamps, source=config["map"]["source"], site=isite
-    )
+    ).get_azel()
 
     results = []
     dets_used = []
@@ -1065,10 +1069,7 @@ def execute_todfit(
         elif aman.det_info.wafer.bandpass[0] == "f150":
             r_fit = 0.6
     # get planet xi/eta position. Not corrected for individual detector position.
-    isite = "so_lat"
-    azpl, elpl = coords.planets.calc_planet_azel_approx(
-        aman.timestamps, source=center_on, site=isite
-    )
+    azpl, elpl = coords.planets.GetSourcePosition(aman.timestamps, source=center_on).get_azel()
     sight = so3g.proj.CelestialSightLine.for_horizon(
         aman.timestamps, aman.boresight.az, aman.boresight.el, roll=aman.boresight.roll
     )
@@ -1210,8 +1211,8 @@ def execute_todfit(
                     # save fit result
                     idetid = aman.det_info.det_id[i]
                     info = make_info_planettod(
-                        aman, popt, errs, chisq, dof, idetid)
-                    save_info(info, dbpath=dbpath)
+                        aman, popt, errs, chisq, dof, center_on, idetid)
+                    save_db(info, dbpath=dbpath)
             except Exception as e:
                 pass
     return
@@ -1440,6 +1441,26 @@ def fit_selection_each(
 
 # database function
 
+def save_db(db, dbpath):
+    """Save Database at a given path.
+    Args:
+        info: instance of database class.
+        dbpath: path to sqlite database.
+    """
+    print('save database' ,dbpath, db)
+    dir_path = os.path.dirname(dbpath)
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path, exist_ok=True)
+    engine = create_engine(f"sqlite:///{dbpath}")
+    SQLModel.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        session.add(db)
+        try:
+            session.commit()
+        except exc.IntegrityError:
+            session.rollback()
 
 def save_info(info, dbpath):
     """Save Database at a given path.
@@ -1451,7 +1472,7 @@ def save_info(info, dbpath):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
     engine = create_engine("sqlite:///%s" % dbpath, echo=False)
-    Base.metadata.create_all(bind=engine)
+    SQLModel.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 
@@ -1537,17 +1558,23 @@ class PlanetInfo(Base):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime})"
 
 
-def make_info(aman):
+def make_info(aman, source):
     """Make PlanetTodFitInfo instance.
     Args:
         aman: axismanager for one detector.
     """
-    dbinfo = PlanetInfo(
+    #dbinfo = PlanetInfo(
+    dbinfo = PlanetMapTable(
         obs_id=aman.obs_info.obs_id,
         telescope=aman.obs_info.telescope,
         freq_channel=aman.det_info.wafer.bandpass[0],
         wafer=aman.det_info.wafer_slot[0],
         ctime=aman.obs_info.timestamp,
+        source=source,
+        dtime=datetime.datetime.fromtimestamp(
+            aman.obs_info.timestamp,
+            datetime.UTC,
+        ),
     )
     dbinfo.duration = aman.obs_info.stop_time - aman.obs_info.start_time
     dbinfo.elevation = aman.obs_info.el_center
@@ -1608,11 +1635,10 @@ def make_info(aman):
     )
     return dbinfo
 
-
 def get_db(
     dbpath, obs_id=None, telescope=None, wafer=None, freq_channel=None, echo=False
 ):
-    """Get PlanetTodFitInfo from database.
+    """Get Planet info from database.
     Args:
         dbpath: path to sqlite database.
         obs_id: observation id. (e.g., 'obs_1736469509_satp3_1111111')
@@ -1823,7 +1849,7 @@ def get_pwv_apex_sync(aman):
 class PlanetTodFitInfo(Base):
     """Planet TOD fit database class."""
 
-    __tablename__ = "planet_todfit"
+    __tablename__ = "planet_todfits"
 
     obs_id: Mapped[str] = mapped_column(primary_key=True)
     telescope: Mapped[str] = mapped_column(primary_key=True)
@@ -1860,19 +1886,25 @@ class PlanetTodFitInfo(Base):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.detid})"
 
 
-def make_info_planettod(aman, popt, errs, chisq, dof, detid=None):
+def make_info_planettod(aman, popt, errs, chisq, dof, source, detid=None):
     """Make PlanetTodFitInfo instance.
     Args:
         aman: axismanager for one detector.
     """
     if detid is None:
         detid = aman.det_info.det_id[0]
-    dbinfo = PlanetTodFitInfo(
+    dbinfo = PlanetTodFitTable(
         obs_id=aman.obs_info.obs_id,
         telescope=aman.obs_info.telescope,
         freq_channel=aman.det_info.wafer.bandpass[0],
         wafer=aman.det_info.wafer_slot[0],
+        ctime=aman.obs_info.timestamp,
+        source=source,
         detid=detid,
+        dtime=datetime.datetime.fromtimestamp(
+            aman.obs_info.timestamp,
+            datetime.UTC,
+        ),
     )
     if len(popt) == 8:
         dbinfo.amplitude = popt[0]
@@ -1883,14 +1915,14 @@ def make_info_planettod(aman, popt, errs, chisq, dof, detid=None):
         dbinfo.theta = popt[5]
         dbinfo.defla = popt[6]
         dbinfo.deflp = popt[7]
-        dbinfo.amplitude_error = errs[0]
-        dbinfo.xo_error = errs[1]
-        dbinfo.yo_error = errs[2]
-        dbinfo.sigmax_error = errs[3]
-        dbinfo.sigmay_error = errs[4]
-        dbinfo.theta_error = errs[5]
-        dbinfo.defla_error = errs[6]
-        dbinfo.deflp_error = errs[7]
+        dbinfo.amplitude_err = errs[0]
+        dbinfo.xo_err = errs[1]
+        dbinfo.yo_err = errs[2]
+        dbinfo.sigmax_err = errs[3]
+        dbinfo.sigmay_err = errs[4]
+        dbinfo.theta_err = errs[5]
+        dbinfo.defla_err = errs[6]
+        dbinfo.deflp_err = errs[7]
     elif len(popt) == 6:
         dbinfo.amplitude = popt[0]
         dbinfo.xo = popt[1]
@@ -1898,12 +1930,12 @@ def make_info_planettod(aman, popt, errs, chisq, dof, detid=None):
         dbinfo.sigmax = popt[3]
         dbinfo.sigmay = popt[4]
         dbinfo.theta = popt[5]
-        dbinfo.amplitude_error = errs[0]
-        dbinfo.xo_error = errs[1]
-        dbinfo.yo_error = errs[2]
-        dbinfo.sigmax_error = errs[3]
-        dbinfo.sigmay_error = errs[4]
-        dbinfo.theta_error = errs[5]
+        dbinfo.amplitude_err = errs[0]
+        dbinfo.xo_err = errs[1]
+        dbinfo.yo_err = errs[2]
+        dbinfo.sigmax_err = errs[3]
+        dbinfo.sigmay_err = errs[4]
+        dbinfo.theta_err = errs[5]
     else:
         raise ValueError(
             f"len(popt) should be 6 or 8, but {len(popt)} is given.")
@@ -2234,6 +2266,169 @@ def get_obsinfo(aman):
     }
     return info
 
+
+def get_planet_map_db(
+        dbpath,
+        obs_id=None,
+        telescope=None,
+        wafer=None,
+        freq_channel=None,
+        source=None,
+        echo=False,
+    ):
+        """Return PlanetMap matching the specified conditions.
+
+        Parameters
+        ----------
+        dbpath : str or pathlib.Path
+            Path to the SQLite database.
+        obs_id : str, optional
+            Observation ID, for example
+            "obs_1736469509_satp3_1111111".
+        telescope : str, optional
+            Telescope name, for example "satp3".
+        wafer : str, optional
+            Wafer name, for example "ws0".
+        freq_channel : str, optional
+            Frequency channel, for example "f090".
+        source : str, optional
+            Source name, for example "jupiter".
+        echo : bool, optional
+            If True, print executed SQL statements.
+
+        Returns
+        -------
+        list[PlanetMapTable]
+            Planet-map records matching all specified conditions.
+        """
+        dbpath = Path(dbpath).expanduser().resolve()
+
+        if not dbpath.exists():
+            raise FileNotFoundError(
+                f"Database does not exist: {dbpath}"
+            )
+
+        engine = create_engine(
+            f"sqlite:///{dbpath}",
+            echo=echo,
+        )
+        Session = sessionmaker(bind=engine)
+
+        filters = []
+        if obs_id is not None:
+            filters.append(PlanetMapTable.obs_id == obs_id)
+        if telescope is not None:
+            filters.append(
+                PlanetMapTable.telescope == telescope
+            )
+        if wafer is not None:
+            filters.append(PlanetMapTable.wafer == wafer)
+        if freq_channel is not None:
+            filters.append(
+                PlanetMapTable.freq_channel == freq_channel
+            )
+        if source is not None:
+            filters.append(PlanetMapTable.source == source)
+        statement = select(PlanetMapTable)
+
+        if filters:
+            statement = statement.where(*filters)
+
+        try:
+            with Session() as session:
+                results = session.scalars(statement).all()
+                return list(results)
+        finally:
+            engine.dispose()
+
+def get_planet_todfit_db(
+    dbpath,
+    obs_id=None,
+    telescope=None,
+    freq_channel=None,
+    wafer=None,
+    source=None,
+    detid=None,
+    echo=False,
+):
+    """Return planet TOD-fit records matching the given conditions.
+
+    Parameters
+    ----------
+    dbpath : str or pathlib.Path
+        Path to the SQLite database.
+    obs_id : str, optional
+        Observation ID, for example "obs_1736469509_satp3_1111111".
+    telescope : str, optional
+        Telescope name, for example "satp1".
+    freq_channel : str, optional
+        Frequency channel, for example "f090".
+    wafer : str, optional
+        Wafer name, for example "ws0".
+    source : str, optional
+        source name, for example "jupiter".
+    detid : str, optional
+        Detector ID, for example
+        ``"Mv17_f090_Cr07c00B"``.
+    echo : bool, optional
+        If True, print executed SQL statements.
+
+    Returns
+    -------
+    list[PlanetTodFitTable]
+        TOD-fit records matching all specified conditions.
+    """
+    dbpath = Path(dbpath).expanduser().resolve()
+
+    if not dbpath.exists():
+        raise FileNotFoundError(
+            f"Database does not exist: {dbpath}"
+        )
+
+    engine = create_engine(
+        f"sqlite:///{dbpath}",
+        echo=echo,
+    )
+    Session = sessionmaker(bind=engine)
+
+    filters = []
+
+    if obs_id is not None:
+        filters.append(
+            PlanetTodFitTable.obs_id == obs_id
+        )
+    if telescope is not None:
+        filters.append(
+            PlanetTodFitTable.telescope == telescope
+        )
+    if freq_channel is not None:
+        filters.append(
+            PlanetTodFitTable.freq_channel == freq_channel
+        )
+    if wafer is not None:
+        filters.append(
+            PlanetTodFitTable.wafer == wafer
+        )
+    if source is not None:
+        filters.append(
+            PlanetTodFitTable.source == source
+        )
+    if detid is not None:
+        filters.append(
+            PlanetTodFitTable.detid == detid
+        )
+
+    statement = select(PlanetTodFitTable)
+
+    if filters:
+        statement = statement.where(*filters)
+
+    try:
+        with Session() as session:
+            results = session.scalars(statement).all()
+            return list(results)
+    finally:
+        engine.dispose()
 
 def test1():
     print("test1")

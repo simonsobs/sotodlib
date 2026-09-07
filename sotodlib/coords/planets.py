@@ -1038,7 +1038,7 @@ class GetSourcePosition:
             decpl: planet DEC in radians
         """
         if self.source == 'moon':
-            print('Source is the Moon. Will use SlowSource by deviding timestamps into subchunk')
+            print('Source is the Moon. Will use SlowSource to get ra/dec by deviding timestamps into subchunk')
             # Need interval = 10 sec for sub-arcsec accuracy.
             divnum = int((self.timestamp[-1] - self.timestamp[0])/interval)
             print(f'Total data duration = {self.timestamp[-1] - self.timestamp[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
@@ -1059,7 +1059,7 @@ class GetSourcePosition:
         return rapl, decpl
 
     
-    def get_azel(self, site='_default', weather='typical'):
+    def get_azel(self, interval=10, site='_default', weather='typical'):
         """Get the Az and El of the planet.
         If the source is available to use skyfield, it will calculate az/el directly with skyfield and interpolate to get az/el at each timestamp.
         Otherwise, it will calculate the RA and DEC first from SlowSourse and converted them into AzEl with so3g sightline iteratively.
@@ -1073,7 +1073,7 @@ class GetSourcePosition:
         """
         azpl = []
         elpl = []
-        iras, idecs = self.get_radec()
+        iras, idecs = self.get_radec(interval=interval)
         az, el, _ = horizon_iter(self.timestamp, iras, idecs, nite=3, site = site, weather = weather)
         azpl.append(az)
         elpl.append(el)

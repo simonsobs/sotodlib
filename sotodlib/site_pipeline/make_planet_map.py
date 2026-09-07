@@ -91,7 +91,8 @@ process_pipe:
         name: "smurfgaps"
         merge: True
       save: True
-    
+
+    ....
     More process steps can be added here if needed, following the same structure as above.
     See preprocess.py for more details on available process steps and their configurations 
     or configs/example_satp3_planet_map.yaml for an example configuration file.
@@ -193,7 +194,7 @@ def main(
     logger.info(f'Found {n_runs} observations to analyze')
     
     logger.debug('Parallelizing the map making work')
-    future_to_rl = {executor.submit(planet_mapmaker.planet_mapmake_eachobs, config_path=config_path, obs_id = rl['obs_id'], 
+    future_to_rl = {executor.submit(planet_mapmaker.planet_mapmake_single_obs, config_path=config_path, obs_id = rl['obs_id'], 
                             wafer_info = rl['wafer_info'], verbosity = verbosity): rl for rl in runlist}
     futures = list(future_to_rl)
 
@@ -205,7 +206,7 @@ def main(
             n += 1
             logger.info(f'Processing results {n}/{n_runs}')
             dbinfo = future.result()
-            planet_mapmaker.save_info(dbinfo, dbpath = configs['dbpath'])
+            planet_mapmaker.save_db(dbinfo, dbpath = configs['dbpath'])
             futures.remove(future)
             logger.info(f'Processing Finished correctly {n}/{n_runs}')
         except Exception as e:
