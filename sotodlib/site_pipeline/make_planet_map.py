@@ -99,7 +99,11 @@ process_pipe:
 """
 
 
-import yaml, os, time, datetime, traceback
+import yaml
+import os
+import time
+import datetime
+import traceback
 from typing import Optional, Union, Callable
 import numpy as np
 from argparse import ArgumentParser
@@ -111,7 +115,8 @@ from sotodlib.mapmaking import planet_mapmaker
 from sotodlib import core
 from sotodlib.site_pipeline.utils import logging
 
-def future_write_to_log(e, errlog, rl = None):
+
+def future_write_to_log(e, errlog, rl=None):
     """Write error message to log file.
     """
     errmsg = f'{type(e)}: {e}'
@@ -123,9 +128,9 @@ def future_write_to_log(e, errlog, rl = None):
 
 
 def main(
-    config_path: str,
-    executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
-    as_completed_callable: Callable) -> None:
+        config_path: str,
+        executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+        as_completed_callable: Callable) -> None:
 
     verbosity = 2
 
@@ -145,7 +150,7 @@ def main(
         end = datetime.datetime.strptime(end, '%Y/%m/%d').replace(tzinfo=datetime.timezone.utc).timestamp()
     if not (isinstance(start, (float, int)) and isinstance(end, (float, int))):
         raise ValueError('start and end must be float or int or str following YYYY/MM/DD')
-        
+
     obslist_all = context.obsdb.query(f'timestamp > {start} and timestamp < {end} and type="obs" and subtype="cal"')
     obslist = []
     for iobs in obslist_all:
@@ -177,29 +182,30 @@ def main(
 
         bands = configs['query'].get('bands', ['f090', 'f150'])
         for band in bands:
-            for wafer in obs_wafers: 
+            for wafer in obs_wafers:
                 if configs['overwrite']:
-                    irunlist = {'obs_id':obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
+                    irunlist = {'obs_id': obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
                     runlist.append(irunlist)
                 else:
                     if not os.path.exists(configs['dbpath']):
-                        irunlist = {'obs_id':obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
+                        irunlist = {'obs_id': obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
                         runlist.append(irunlist)
                     else:
                         idb = planet_mapmaker.get_db(configs['dbpath'], obs_id=obs_id, wafer=wafer, freq_channel=band)
                         if not bool(idb):
-                            irunlist = {'obs_id':obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
+                            irunlist = {'obs_id': obs_id, 'wafer_info': {'wafer_slot': wafer, 'wafer.bandpass': band}}
                             runlist.append(irunlist)
                         else:
-                            logger.info(f"Observation {obs_id}, wafer {wafer}, band {band} already processed. Skipping.")
+                            logger.info(
+                                f"Observation {obs_id}, wafer {wafer}, band {band} already processed. Skipping.")
 
     n_runs = len(runlist)
     logger.debug(f'Runlist: {runlist}')
     logger.info(f'Found {n_runs} observations to analyze')
-    
+
     logger.debug('Parallelizing the map making work')
-    future_to_rl = {executor.submit(planet_mapmaker.planet_mapmake_single_obs, config_path=config_path, obs_id = rl['obs_id'], 
-                            wafer_info = rl['wafer_info'], verbosity = verbosity): rl for rl in runlist}
+    future_to_rl = {executor.submit(planet_mapmaker.planet_mapmake_single_obs, config_path=config_path, obs_id=rl['obs_id'],
+                                    wafer_info=rl['wafer_info'], verbosity=verbosity): rl for rl in runlist}
     futures = list(future_to_rl)
 
     n = 0
@@ -210,7 +216,7 @@ def main(
             n += 1
             logger.info(f'Processing results {n}/{n_runs}')
             dbinfo = future.result()
-            planet_mapmaker.save_db(dbinfo, dbpath = configs['dbpath'])
+            planet_mapmaker.save_db(dbinfo, dbpath=configs['dbpath'])
             futures.remove(future)
             logger.info(f'Processing Finished correctly {n}/{n_runs}')
         except Exception as e:
@@ -218,7 +224,7 @@ def main(
             futures.remove(future)
             logger.info(f'Processing Failed somehow {n}/{n_runs}')
             continue
-    
+
 
 def cli_main(config_file: str, nprocs: int):
     rank, executor, as_completed_callable = get_exec_env(nprocs)
@@ -236,8 +242,9 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     )
     p.add_argument(
         "--nprocs", type=int, help="Number of processors to use."
-        )
+    )
     return p
+
 
 if __name__ == '__main__':
     main_launcher(cli_main, get_parser)
