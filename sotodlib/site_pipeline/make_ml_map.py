@@ -1,5 +1,15 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import sys
+import so3g
+from pixell import enmap
+import lat_mapmaking as lm
+from sotodlib.preprocess import preprocess_util as pp_util
+from sotodlib.core.flagman import has_any_cuts
+from sotodlib.preprocess import Pipeline
+from sotodlib.tod_ops.fft_ops import calc_psd
+from sotodlib import coords
+from sotodlib import mapmaking, core
 
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
@@ -16,6 +26,12 @@ def get_parser(parser=None):
     parser.add_argument("-O", "--ots",  type=str, default=None, help="Optics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
+    parser.add_argument(      "--no-glitches", action="store_true",  help="Ignore glitchfill and glitch section of preproc (still includes planet masks)")
+    parser.add_argument(      "--save-dets", action="store_true",  help="Write dets used to file")
+    parser.add_argument(      "--clean-tod", action="store_true",  help="Clean tod atmosphere signal based on fit to higher band TOD")
+    parser.add_argument(      "--clean-type", type=str, default="const", help="Type of TOD cleaning. Options: 'const', 'kalman', 'spline'")
+    parser.add_argument(      "--clean-channel", type=str, default="f280", help="channel to use to clean TOD")
+    parser.add_argument(      "--det-list", type=str, default=None,  help="List of det_ids to map with. Any detectors not in this list are discarded.")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
     parser.add_argument("-n", "--ntod",    type=int, default=None, help="Keep at most this many tods")
     parser.add_argument("-N", "--nmat",    type=str, default="corr", help="Noise model to use. corr or uncorr")
@@ -52,6 +68,36 @@ def exit(comm, code):
         comm.Abort(code)
     else:
         sys.exit(code)
+
+def find_glitch_steps(pipe):
+    glitch_step = None
+    combine_flags_step = None
+    for i, s in enumerate(pipe):
+        if s.name == 'glitchfill':
+            if s.flags == 'glitches.glitch_flags':
+                glitch_step = s
+        if s.name == 'combine_flags':
+            combine_flags_step = s
+
+    return glitch_step, combine_flags_step
+
+def remove_glitch_steps(pipe):
+    glitch_step, combine_flags_step = find_glitch_steps(pipe)
+    if glitch_step is None or combine_flags_step is None:
+        print("No glitches found in pipe...")
+        return pipe
+    pipe.remove(glitch_step)
+    combine_flags_step.process_cfgs['flag_labels'].remove('glitches.glitch_flags')
+    return
+
+def get_obsinfo_duplicate_subids(subids, context):
+    """Given a list of subids, return a ResultSet with one entry
+    from the obsdb for each subid. Include duplicate obsids from
+    entries which include sub-wafers."""
+    obsids  = mapmaking.split_subids(subids)[0]
+    queries = [context.obsdb.query(f"obs_id=='{o}'") for o in obsids]
+    rs = sum(queries[1:], queries[0])
+    return rs
 
 def main(**args):
     import time, warnings, os, so3g
@@ -104,6 +150,7 @@ def main(**args):
     bands   = args.bands .split(",") if args.bands  else None
     sub_ids = mapmaking.get_subids(args.query, context=context)
     sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands, ots=ots)
+    print(f'sub_ids: {sub_ids}')
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
@@ -118,7 +165,8 @@ def main(**args):
     L.info("Found %d tods" % (len(sub_ids)))
 
     # Define our task distribution
-    obsinfo = mapmaking.get_obsinfo_subids(sub_ids, context)
+    # obsinfo = mapmaking.get_obsinfo_subids(sub_ids, context)
+    obsinfo = get_obsinfo_duplicate_subids(sub_ids, context)
     owner   = mapmaking.distribute_tods_ra(obsinfo, comm.size, site=SITE)
     myinds  = np.where(owner==comm.rank)[0]
 
@@ -130,7 +178,8 @@ def main(**args):
 
     # set up the preprocessing
     try:
-        preproc = _get_config(args.preprocess_config)
+        # preproc = _get_config(args.preprocess_config)
+        preproc, context = pp_util.get_preprocess_context(args.preprocess_config)
     except:
         if comm.rank==0:
             L.info(f"{args.preprocess_config} is not a valid config")
@@ -138,6 +187,7 @@ def main(**args):
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     to_skip = []
+
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -208,7 +258,15 @@ def main(**args):
                 continue
 
             try:
-                meta = context.get_meta(sub_id)
+                meta = context.get_meta(obs_id, dets={
+                    "wafer_slot": wafer, "wafer.bandpass": band})
+                # Restrict to dets within det list if specified.
+                if args.det_list:
+                    L.debug(f"Restricting to detectors within det list")
+                    det_list = np.loadtxt(args.det_list, dtype="object")
+                    meta.restrict('dets', meta.dets.vals[np.isin(meta.det_info.det_id, det_list)])
+                    L.debug(f"New det count = {meta.dets.count}")
+
                 # Optionally restrict to maximum number of detectors. This is mainly
                 # useful for doing fast debug runs. Before doing this we make sure to
                 # sort the detctor list so we chop off a deterministic subset of detectors.
@@ -218,14 +276,136 @@ def main(**args):
                     meta.restrict('dets', meta['dets'].vals[:args.max_dets])
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Actually read the data
-                with bench.mark("read_obs %s" % sub_id):
-                    #obs = context.get_obs(sub_id, meta=meta)
-                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
-                if obs.dets.count < 50:
-                    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
-                    L.debug("Datacount: %s full" % (sub_id))
-                    to_skip += [sub_id]
-                    continue
+                if args.no_glitches == False:
+                    with bench.mark("read_obs %s" % sub_id):
+                        #obs = context.get_obs(sub_id, meta=meta)
+                        obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                else:
+                    L.debug("Skipping the glitches cut.")
+                    keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
+                    meta.restrict("dets", keep)
+
+                    if meta.dets.count == 0:
+                        print(f"No detectors left after cuts in obs {obs_id}")
+
+                    obs = context.get_obs(meta)
+                    pipe = Pipeline(preproc["process_pipe"])
+                    remove_glitch_steps(pipe)
+                    pipe.run(obs, obs.preprocess, select=False)
+
+                if args.clean_tod:
+                    L.debug(f"Cleaning TOD using {args.clean_channel}:")
+                    L.debug(f"Starting number of good dets = {obs.dets.count}")
+                    import atmos_clean as ac
+                    import spline_fit as sf
+                    # load TOD clean signal and preprocess
+                    meta_clean = context.get_meta(obs_id, dets={
+                        "wafer_slot": wafer, "wafer.bandpass": args.clean_channel})
+                    keep = has_any_cuts(meta_clean.preprocess.valid_data.valid_data)
+                    meta_clean.restrict("dets", keep)
+                    obs_clean = context.get_obs(meta_clean)
+                    pipe = Pipeline(preproc["process_pipe"])
+                    remove_glitch_steps(pipe)
+                    pipe.run(obs_clean, obs_clean.preprocess, select=False)
+                    L.debug(f"Starting number of good f280 = {obs_clean.dets.count}")
+
+
+                    if args.clean_type == 'const':
+                        L.debug(f"Using const fit:")
+                        # ac.clean_tod(obs, obs_clean, average_orthog_band2=False)
+                        ac.clean_tod(obs, obs_clean, fit_type="dust_coupling",
+                                     average_orthog_band2=False)
+
+                        # L.debug(f"Using time-varying fit window:")
+                        # obs, _, freqs, Pxx_vary, _  = ac.fit_tod_check_both(
+                        #     obs, obs_clean, window_size=100,
+                        #     average_orthog_band2=True, fit_type="vary_window")
+                        # good_mask, fits = ac.psd_fit_cuts(obs, freqs, Pxx_vary)
+                        # best_fits = (fits[:, good_mask][1, :] < 5e-3)
+                        # obs.restrict('dets', obs.dets.vals[good_mask][best_fits])
+                        cut_ranges = obs.flags.turnarounds
+
+                    if args.clean_type == 'per_subscan':
+                        L.debug(f"Using per subscan fit:")
+                        ac.clean_tod(obs, obs_clean, average_orthog_band2=False,
+                                     fit_type="per_subscan")
+                        cut_ranges = obs.flags.turnarounds
+                    elif args.clean_type == 'kalman':
+                        L.debug(f"Using kalman fit:")
+
+                        cut_region = abs(np.median(obs.signal, axis=0)) < 0.5
+
+                        t, l, r = lm.add_different_left_right_turnarounds(
+                            obs, rightleft_t_buffer=2, leftright_t_buffer=2)
+
+                        obs, fit_1_no_vary, freqs, Pxx_vary, Pxx_no_vary, good_inds = ac.fit_tod_check_both_kalman(
+                            obs, obs_clean, kalman_fit="decimate", pbar=True,
+                            clip_fit=True, fit_offset=False, mask_nulls=True,
+                            drift_rate=0.00001)
+                        vary_psds = np.median(Pxx_vary[:, :, good_inds], axis=(2))
+                        no_vary_psds = np.median(Pxx_no_vary[:, :, good_inds], axis=(2))
+                        good_mask, fits = ac.psd_fit_cuts(fit_1_no_vary, freqs, no_vary_psds)
+                        obs.restrict('dets', obs.dets.vals[good_mask])
+                        L.debug(f"Number of dets with good mask = {np.sum(good_mask)}")
+
+                        ## I have to cut the original obs, not the cleaned obs
+                        med_signal_cut = so3g.proj.Ranges.from_mask(cut_region)
+                        cut_ranges = so3g.proj.RangesMatrix([med_signal_cut.copy() for _ in range(obs.signal.shape[0])])
+                        fs = 1 / (obs.timestamps[1] - obs.timestamps[0])
+                        flag_buffer = 3
+                        buffer_samples = int(flag_buffer * fs)  # padding on each side, in samples
+                        cut_ranges.buffer(buffer_samples)
+                        L.debug(f"frac of cut samples = {np.sum(cut_ranges.mask()[0]) / len(cut_ranges.mask()[0])}")
+
+                        # t, l, r = lm.add_different_left_right_turnarounds(
+                        #     obs, rightleft_t_buffer=2, leftright_t_buffer=2)
+                        # cut_ranges = obs.flags.turnarounds
+
+                    elif args.clean_type == 'spline':
+                        L.debug(f"Using Spline BIC fit")
+                        L.debug(f"Adjusting turnarounds.")
+                        t, l, r = lm.add_different_left_right_turnarounds(
+                            obs, rightleft_t_buffer=0.1, leftright_t_buffer=0.1)
+                        plot_dir = f"{args.odir}/plots/"
+                        utils.mkdir(plot_dir)
+                        utils.mkdir(f"{plot_dir}/{obs_id}_{wafer}/")
+                        plt.plot(obs.timestamps - obs.timestamps[0], np.median(obs.signal, axis=0))
+                        plt.xlabel('time (s)')
+                        plt.title(f"{obs_id}_{wafer}_f220 signal")
+                        plt.ylabel('median signal [K]')
+                        plt.savefig(f'{plot_dir}/{obs_id}_{wafer}/signal.png')
+
+                        freqs_orig, Pxx_orig = calc_psd(obs, subscan=True, nperseg=(2**12))
+                        obs_const = obs.copy()
+                        ac.clean_tod(obs_const, obs_clean, fit_type="per_subscan")
+                        ac.clean_tod(obs, obs_clean, fit_type="spline_bic", pbar=True, df_max=15)
+
+                        plt.figure()
+                        plt.loglog(freqs_orig, np.median(Pxx_orig, axis=2).T, color="black", alpha=0.01)
+                        sf.show_fit_results(obs, obs_const)
+                        plt.savefig(f'{plot_dir}/{obs_id}_{wafer}/fit_compar.png')
+                        good_mask = sf.show_good_dets(obs)
+                        plt.savefig(f'{plot_dir}/{obs_id}_{wafer}/good_dets.png')
+
+
+                        freqs_no_vary, Pxx_no_vary = calc_psd(obs_const, subscan=True, nperseg=(2**12))
+                        good_mask, fits = ac.psd_fit_cuts(obs_const, freqs_no_vary, np.median(Pxx_no_vary, axis=2))
+                        del obs_const
+                        del obs_clean
+                        obs.restrict('dets', obs.dets.vals[good_mask])
+                        L.debug(f"Number of good dets = {obs.dets.count}")
+                        # t, l, r = lm.add_different_left_right_turnarounds(
+                        #     obs, rightleft_t_buffer=2, leftright_t_buffer=2)
+                        # cut_ranges = obs.flags.turnarounds
+
+
+                # if obs.dets.count < 50:
+                #     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                #     L.debug("Datacount: %s full" % (sub_id))
+                #     to_skip += [sub_id]
+                #     continue
+
+
                 # Check nans
                 if not np.all(np.isfinite(obs.signal)):
                     L.debug("Skipped %s (there is a nan in signal)" % (sub_id))
@@ -237,6 +417,7 @@ def main(**args):
                 if np.any(zero_dets == 0.0):
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
                     obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
+
                 # Cut non-optical dets, this will be redundant if the preprocessing already cut them
                 obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
@@ -269,16 +450,17 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # measure rms, and convert to µKrts for comparison with sens_limits
-                    rms  = d1u.measure_rms(obs.signal, dt=1/srate)
-                    rms *= unit_defs[args.unit]/unit_defs["uK"]
-                    good = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
-                    if np.logical_not(good).sum() / obs.dets.count > 0.5:
-                        L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
-                        L.debug("Datacount: %s full" % (sub_id))
-                        to_skip += [sub_id]
-                        continue
-                    else:
-                        obs.restrict("dets", good)
+                    #### ditch sensitivity cut for bright regions
+                    # rms  = d1u.measure_rms(obs.signal, dt=1/srate)
+                    # rms *= unit_defs[args.unit]/unit_defs["uK"]
+                    # good = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
+                    # if np.logical_not(good).sum() / obs.dets.count > 0.5:
+                    #     L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
+                    #     L.debug("Datacount: %s full" % (sub_id))
+                    #     to_skip += [sub_id]
+                    #     continue
+                    # else:
+                    #     obs.restrict("dets", good)
                     # Disqualify overly cut detectors
                     good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
                     obs.restrict("dets", good_dets)
@@ -303,10 +485,29 @@ def main(**args):
                     for cut in cutss:
                         obs.flags.glitch_flags += cut
 
+                # add cut ranges to the cut flags
+                obs.flags.glitch_flags += cut_ranges
+
                 if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
                 mmask = obs.flags.glitch_flags.mask()
                 L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
+
+
+
+                # make a bin map
+                wcsk = coords.get_wcs_kernel('car', 0., 0., 0.5*utils.arcmin)
+                P = coords.P.for_tod(obs, wcs_kernel=wcsk, comps='TQU',
+                                     cuts=obs.flags.glitch_flags)
+
+                wmap = P.to_map(obs, comps='TQU', det_weights=obs.preprocess.noiseT.white_noise**2)
+                weights = P.to_weights(obs, comps='TQU', det_weights=obs.preprocess.noiseT.white_noise**2)
+
+                # this function invert the weights and multiplies by the weighted map
+                map_ = P.remove_weights(signal_map=wmap, weights_map=weights, comps='TQU')
+                L.debug("Writing bin map.")
+                enmap.write_map(f'{args.odir}/bin_map.fits', map_)
+
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -327,6 +528,9 @@ def main(**args):
                     else: signal_estimate = None
                     mapmaker.add_obs(sub_id, obs, noise_model=nmat, signal_estimate=signal_estimate)
                     del signal_estimate
+
+                if args.save_dets:
+                    np.savetxt(args.odir + f"/{obs_id}_{wafer}_{band}_dets.txt", obs.det_info.det_id, fmt="%s")
                 del obs
                 nkept += 1
 
