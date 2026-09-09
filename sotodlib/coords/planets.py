@@ -903,8 +903,7 @@ def xieta0(q):
 
 def get_single_instrument_P(tod, azpl, elpl, sight = None, size=None, res=None, proj = 'car', flags=None, boresight_centered = False):
     """Get a standard Projection Matrix for detector-centered/boresight-centered coordinates.
-    This is mainly used for beam characterization.
-    Currently this must be done every single detector. See "coadded_maps()" in detail 
+    This is mainly used for beam characterization. Currently this must be done every single detector.
     Args:
       tod (float): axis manager that include one detector.
       azpl (float): planet azimuth, in radians.
