@@ -87,10 +87,12 @@ def apply_pointing_model(tod, pointing_model=None,
     copied from ``tod.focal_plane``.
 
     Returns:
-      boresight : AxisManager
-        The boresight with pointing model corrections applied.
-      focal_plane : AxisManager
-        The focal_plane with any optical distortions applied.
+      tuple: (boresight, focal_plane)
+        ``boresight`` is an AxisManager containing computed boresight
+        with pointing model corrections applied.  ``focal_plane`` is
+        focal_plane including any optical distortions (unless there is
+        no source focal_plane, and pointing model does not include
+        distortions, in which case it is None).
 
     """
     if pointing_model is None and "pointing_model" not in tod:
@@ -185,20 +187,23 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
         that include focal_plane distortions.
 
     The implemented model parameters are all in radians:
-    - enc_offset_{az, el, cr}: Encoder offsets in radians.
-      Sign convention: True = Encoder + Offset
-    - cr_center_{xi,eta}0: The (xi,eta) coordinate in the LATR-centered 
-      focal plane that remains fixed under corotation. 
-    - el_axis_center_{xi,eta}0: The (xi,eta) coordinate in the CR-centered
-      focal plane that appears fixed when the elevation structure is rotated 
-      about its axis.
-    - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
-      focal plane that appears fixed when the mirrors are rotated about the ray from
-      sky that hits the center of both mirrors.
-    - base_tilt_{cos,sin}: Base tilt coefficients, in radians. 
+
+    - enc_offset_{az, el, cr}: Encoder offsets in radians.  Sign
+      convention: True = Encoder + Offset.
+    - cr_center_{xi,eta}0: The (xi,eta) coordinate in the
+      LATR-centered focal plane that remains fixed under corotation.
+    - el_axis_center_{xi,eta}0: The (xi,eta) coordinate in the
+      CR-centered focal plane that appears fixed when the elevation
+      structure is rotated about its axis.
+    - mir_center_{xi,eta}0: The (xi,eta) coordinate in the
+      El-structure-centered focal plane that appears fixed when the
+      mirrors are rotated about the ray from sky that hits the center
+      of both mirrors.
+    - base_tilt_{cos,sin}: Base tilt coefficients, in radians.
     - el_sag_{quad,lin}: Dimensionless coefficients for the quadradtic
       and linear components of the elevation sag.
-    - el_sag_pivot: The elevation in radians to treat as the sag's zero point.
+    - el_sag_pivot: The elevation in radians to treat as the sag's
+      zero point.
 
     """
     if version not in ['lat_v1', 'lat_v2']:
