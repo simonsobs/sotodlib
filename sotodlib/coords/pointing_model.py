@@ -87,10 +87,10 @@ def apply_pointing_model(tod, pointing_model=None,
     copied from ``tod.focal_plane``.
 
     Returns:
-      AxisManager: the corrected boresight.
-      AxisManager: the corrected focal_plane.
-        Note that when focal_plane corrections are not needed, None is
-        returned here.
+      boresight : AxisManager
+        The boresight with pointing model corrections applied.
+      focal_plane : AxisManager
+        The focal_plane with any optical distortions applied.
 
     """
     if pointing_model is None and "pointing_model" not in tod:
@@ -313,15 +313,25 @@ def model_lat_v2(params, az, el, roll, focal_plane_template=None):
 
 def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
                                in_place=False):
-    """Apply focal plane corrections due to non-linear projection effects
-    of the mirrors.
+    """Apply focal plane corrections due to non-linear projection
+    effects of the mirrors.  The models here may use the boresight az,
+    el, and roll vectors to compute the corrections.
+
+    Returns the updated focal_plane (which will be the same object
+    that was passed in, if in_place is True.)
 
     """
     dist_model = params.get('roll_dist_model')
     if dist_model in [None, 0]:
-        return focal_plane
+        if in_place or focal_plane is None:
+            return focal_plane
+        else:
+            return focal_plane.copy()
 
     assert focal_plane is not None, "LAT non-linear distortions require focal_plane to be passed in."
+
+    # Make sure pointing inputs can be treated as vectors.
+    az, el, roll = [np.atleast_1d(x) for x in [az, el, roll]]
 
     if dist_model == 1:
         # Empirical model.
@@ -335,14 +345,17 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
         return _update_focal_plane(focal_plane, xi1, eta1, focal_plane.gamma, in_place=in_place)
 
     elif dist_model == 2:
-        # Check that roll is ~stable and get typical value.
-        droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
-        roll_mean = roll[0] + droll.mean()
-        # Note a 5 degree tolerance here is pretty generous; this is
-        # meant to not choke on "type 3" obs, where there is a ~1 deg
-        # elevatio nod during the scan.
-        assert droll.std() < 5 * DEG, \
-            "This distortion approximation does not work when roll varies significantly."
+        if len(roll) > 1:
+            # Check that roll is ~stable and get typical value.
+            droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
+            roll_mean = roll[0] + droll.mean()
+            # Note a 5 degree tolerance here is pretty generous; this is
+            # meant to not choke on "type 3" obs, where there is a ~1 deg
+            # elevatio nod during the scan.
+            assert droll.std() < 5 * DEG, \
+                "This distortion approximation does not work when roll varies significantly."
+        else:
+            roll_mean = roll[0]
 
         # Rotate focal plane template xi-eta into the space of the
         # secondary mirror.
