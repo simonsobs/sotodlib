@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import yaml
 
 import sotodlib
@@ -108,15 +109,15 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         dets_req = [p[1] for p in pairs_req]
         unmatched = [d for d in dets if d not in dets_req]
         if len(unmatched):
-            raise RuntimeError("User requested invalid dets (e.g. %s) "
-                               "for obs_id=%s" % (unmatched[0], obs_id))
+            raise RuntimeError(f"User requested invalid dets (e.g. {unmatched[0]}) "
+                               "for obs_id={obs_id}")
         del dets_req, unmatched
     del all_pairs, dets
 
     # Make sure "pairs" is sorted, at _least_ at the level of grouping
     # detsets together; then make sure the detsets are processed in
     # that order.
-    detsets_req = sorted(set([p[0] for p in pairs_req]))
+    detsets_req = sorted({p[0] for p in pairs_req})
     dets_req = []
     for _ds in detsets_req:
         dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
@@ -126,7 +127,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     # one result for some downstream processing.
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
-    
+
     # Figure out how many samples we're loading.
     sample_range = one_group[0][1], one_group[-1][2]
     if samples is None:
@@ -336,6 +337,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     # Sniff out a smurf status frame.
     smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
 
+    start = time.time()
     for frame, frame_offset in _frames_iterator(files, prefix, samples,
                                                 smurf_proc=smurf_proc):
         # This is to escape once requested number of samples (and a
@@ -379,6 +381,9 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
         if not more_data:
             break
+    stop = time.time()
+    elapsed = stop - start
+    print(f"_load_book_detset accum in {elapsed:8.3f} seconds", flush=True)
 
     if times_acc is not None:
         times_acc = times_acc.finalize() / spt3g_core.G3Units.sec
@@ -495,12 +500,12 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 _b.wrap('roll', None)
             else:
                 _b.wrap('roll', roll * DEG, [(0, 'samps')])
-            
+
             # if we don't have flag fields, assume it's good
             bs_flag = so3g.RangesInt32(aman.samps.count)
             for k, flg in _a._fields.items():
                 if "flag" in k:
-                    bs_flag += flg 
+                    bs_flag += flg
             aman.flags.wrap("acu_drops", bs_flag, [(0, 'samps')])
 
     if len(results) == 0:
@@ -654,7 +659,7 @@ def _check_bias_names(frame):
 
     """
     for i, name in enumerate(frame['tes_biases'].names):
-        if name != 'bias%02i' % i:
+        if name != f'bias{i:02d}':
             raise RuntimeError(f'Bias at index {i} has unexpected name "{name}"!')
     stream_id = frame['stream_id']
     return [f'{stream_id}_b{_i:02d}' for _i in range(i+1)]
@@ -740,9 +745,8 @@ class Accumulator1d(Accumulator):
         _data = np.asarray(data[src_slice])
 
         # On first frame, check if we know the final data shape.
-        if self.data is None:
-            if self.samples[1] is not None:
-                self.shape = (self.samples[1] - self.samples[0], )
+        if self.data is None and self.samples[1] is not None:
+            self.shape = (self.samples[1] - self.samples[0], )
 
         if self.shape is not None:
             # Determinate.
@@ -811,7 +815,7 @@ class AccumulatorTimesampleMap(AccumulatorNamed):
         if self.data is None:
             if self.samples[1] is not None:
                 self.shape = (self.samples[1] - self.samples[0], )
-            self.keys = [k for k in data.keys()]
+            self.keys = list(data.keys())
 
         if self.shape is not None:
             # Determinate.
@@ -829,9 +833,8 @@ class AccumulatorTimesampleMap(AccumulatorNamed):
 
 
 class Accumulator2d(Accumulator):
-    """Accumulator for unpacking 2-d data (G3SuperTimestream) into
-    2-d array (preserving first axis labels).
-
+    """Accumulator for unpacking 2-d data (G3SuperTimestream / G3TimestreamMap)
+    into 2-d array (preserving first axis labels).
     """
     def __init__(self, *args, insert_at=None, keys_to_keep=None,
                  dtype=None, calibrate=None, **kwargs):
@@ -853,20 +856,24 @@ class Accumulator2d(Accumulator):
     def _extract(self, data, src_slice, dest_slice):
 
         if self.calibrate is not None and hasattr(data, 'calibrate'):
+            start = time.time()
             # This is a low cost operation if you do it before
             # decompression.  (Also do it before you use data.dtype,
             # in "first frame stuff".)
             data.calibrate(np.array([self.calibrate] * len(data.names)))
             self._cal_preapplied = True
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Calibrate super in {elapsed:8.3f} seconds", flush=True)
 
         # First frame stuff ...
         if self.data is None:
+            start = time.time()
             if self.insert_at is not None:
                 # We have a destination buffer
                 self.keys, self.extract_at_idx, self.insert_at_idx = \
-                    core.util.get_coindices(
-                        data.names, self.keys_to_keep)
-                self.data = self.insert_at  # place-holder
+                    core.util.get_coindices(data.names, self.keys_to_keep)
+                self.data = self.insert_at  # handle to the destination buffer
             else:
                 if self.keys_to_keep is not None:
                     self.keys, _, self.extract_at_idx = \
@@ -879,12 +886,17 @@ class Accumulator2d(Accumulator):
                     _dtype = self.dtype if self.dtype is not None else data.dtype
                     self.data = np.empty(self.shape, dtype=_dtype)
                 else:
+                    # Unknown number of samples, so all we can do is build up
+                    # the list of data arrays and stack them later.
                     self.data = []
+            stop = time.time()
+            elapsed = stop - start
+            print(f"First frame setup in {elapsed:8.3f} seconds", flush=True)
 
         # G3SuperTimestream.extract() is available from so3g v0.1.13
-        # (April 2024).  The previous handling (below this block) can
-        # be removed in a few months.
+        # (April 2024) through so3g v0.2.x.
         if hasattr(data, 'extract'):
+            start = time.time()
             if self.insert_at is not None:
                 data.extract(self.insert_at[:, dest_slice],
                              self.insert_at_idx,
@@ -902,39 +914,66 @@ class Accumulator2d(Accumulator):
                 data.extract(_dest, None, self.extract_at_idx,
                              src_slice.start, src_slice.stop)
                 self.data.append(_dest)
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Extract super in {elapsed:8.3f} seconds", flush=True)
             return
 
-        # Store data from this frame.
+        # If we got here, the data container must be a G3TimestreamMap
+
         _data = data.data
-        del data
-        if self.calibrate is not None and not self._cal_preapplied:
-            _data = _data * self.calibrate
 
         if self.insert_at is not None:
+            start = time.time()
             # Indexed by name
             for i0, i1 in zip(self.insert_at_idx, self.extract_at_idx):
                 self.insert_at[i0, dest_slice] = _data[i1, src_slice]
-
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Extract to input buffer in {elapsed:9.4f} seconds", flush=True)
         elif self.shape is not None:
+            start = time.time()
             # Full array to hold data.
             if self.extract_at_idx is not None:
                 for i, j in enumerate(self.extract_at_idx):
                     self.data[i, dest_slice] = _data[j, src_slice]
             else:
                 self.data[:, dest_slice] = _data[:, src_slice]
-
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Extract to prealloc buffer in {elapsed:9.4f} seconds", flush=True)
         else:
+            start = time.time()
             # List of arrays, to be hstacked later.
             if self.extract_at_idx is not None:
                 self.data.append(_data[self.extract_at_idx, src_slice])
             else:
                 self.data.append(_data[:, src_slice])
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Extract to list in {elapsed:9.4f} seconds", flush=True)
+        del data
 
     def finalize(self):
         if self.insert_at is not None:
             pass
         elif self.shape is None:
+            start = time.time()
             self.data = np.hstack(self.data)
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Hstack list in {elapsed:8.3f} seconds", flush=True)
+        if self.calibrate is not None and not self._cal_preapplied:
+            start = time.time()
+            if self.data.dtype == np.dtype(np.int32):
+                calibrated = self.data.astype(np.float32)
+            else:
+                calibrated = self.data.astype(np.float64)
+            calibrated *= self.calibrate
+            self.data = calibrated
+            stop = time.time()
+            elapsed = stop - start
+            print(f"Calibrate data in {elapsed:8.3f} seconds", flush=True)
         return self.data
 
 
@@ -976,7 +1015,7 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
 
             if tmpdir:
                 filename, orig_filename = os.path.join(tmpdir, 'framefile'), filename
-                logger.debug('Copying data file %s to %s.' % (orig_filename, filename))
+                logger.debug(f'Copying data file {orig_filename} to {filename}.')
                 shutil.copyfile(orig_filename, filename)
 
             for frame in spt3g_core.G3File(filename):
@@ -1030,10 +1069,9 @@ def get_cal_obsids(ctx, obs_id, cal_type):
     for o in cal_all:
         dsets = ctx.obsfiledb.get_files(o['obs_id']).keys()
         for ds in dsets:
-            if ds in obs_ids:
-                if obs_ids[ds] is None:
-                    obs_ids[ds] = o['obs_id']
-                    ids_found += 1
+            if ds in obs_ids and obs_ids[ds] is None:
+                obs_ids[ds] = o['obs_id']
+                ids_found += 1
         if ids_to_find == ids_found:
             break
 
@@ -1059,13 +1097,13 @@ def _sim_g3_generator(dets, samps, stream_id=None, frame_size=200):
     Simulate book data and yield G3Frames.
     """
     prims = ['Counter0', 'Counter2', 'UnixTimestamp']
-    bias_lines = ['bias%02i' % i for i in range(_TES_BIAS_COUNT)]
+    bias_lines = [f'bias{i:02d}' for i in range(_TES_BIAS_COUNT)]
     if stream_id is None:
         stream_id = 'ufm_fako99'
     untracked_dets = []#'sch_NONE_3_4']
 
     if isinstance(dets, int):
-        dets = np.array(['det_%04i' % i for i in range(dets)])
+        dets = np.array([f'det_{i:04d}' for i in range(dets)])
     nd = len(dets)
     ns = samps
 
@@ -1080,7 +1118,7 @@ def _sim_g3_generator(dets, samps, stream_id=None, frame_size=200):
     wiring = {
         'AMCc.SmurfProcessor.ChannelMapper.NumChannels': nd,
         'AMCc.SmurfProcessor.ChannelMapper.Mask':
-        ','.join(['%i' % i for i in range(nd)]),
+        ','.join([f'{i}' for i in range(nd)]),
         'AMCc.FpgaTopLevel.AppTop.AppCore.SysgenCryo.Base[0].digitizerFrequency_MHz': 614.4,
         'AMCc.FpgaTopLevel.AppTop.AppCore.RtmCryoDet.RampMaxCnt': 76799,
     }
