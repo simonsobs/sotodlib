@@ -800,7 +800,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
             else:
                 det_mask[ptps_full <= np.min(ptps)] = False
     mskptps = flag_array_to_ranges_matrix(
-        det_mask, aman.samps.count
+        det_mask, aman.samps.count, reverse=True
     )
     if merge:
         if ptp_flag_name in aman.flags and not overwrite:

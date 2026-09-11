@@ -102,13 +102,22 @@ def set_book_rebind(imprint, book, update_level2=False):
         for _, obs in obs_dict.items():
             SMURF.update_observation_files(obs, g3session, force=True)
 
-def delete_level2_obs_and_book(imprint, book, session=None):
+def delete_level2_obs_and_book(imprint, book, session=None, obs_ok=False):
     """When there are certain readout communication errors, smurf will blindly 
     stream full rate data that is nonsense. For these, we don't want to keep 
     the data in stray books because it's nonsense and it's massive. Delete the 
     level 2 files, observation, and the book.
+
+    Pass obs_ok = True for this to work on observations books.
+
+    This function is NOT for standard level 2 deletion such as what is
+    implemented in cleanup level 2. This function removes all record of the
+    book.
     """
-    assert book.type == "oper", f"This function is for oper books"
+    if not obs_ok:
+        assert book.type == "oper", f"This function is for oper books"
+    else:
+        assert book.type in ["obs", "oper"], "function is for obs/oper books"
     set_book_rebind(imprint, book)
     
     if session is None:

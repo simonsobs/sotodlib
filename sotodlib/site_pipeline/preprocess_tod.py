@@ -233,16 +233,19 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         for future in tqdm(as_completed_callable(futures), total=len(futures),
                            desc="building run list from obs list"):
             obs_id = futures_dict[future]
-            _, groups, _ = future.result()
+            _, groups, get_groups_err = future.result()
 
             if db is not None and not overwrite:
                 x = db.inspect({'obs:obs_id': obs_id})
                 if x is not None and len(x) != 0 and len(x) != len(groups):
                     try:
                         [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-                    except Exception as e:
-                        logger.error(f"filtering of {groups} for {obs_id} with entry {x} failed with {e}")
-                        raise
+                    except Exception:
+                        logger.exception(
+                            f"filtering groups for {obs_id} failed; "
+                            f"groups={groups}, entry={x}, "
+                            f"get_groups_err={get_groups_err}"
+                        )
 
 
             for group in groups:
