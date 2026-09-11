@@ -25,7 +25,6 @@ dependencies = [
   "pytest",
   "scikit-image",
   "ruptures",
-  "joblib",
   "pyfftw",
   "numdifftools",
   "psycopg2-binary",
