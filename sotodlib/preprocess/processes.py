@@ -2374,11 +2374,24 @@ class JointQUNmatModel(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        calc_cfgs = dict(self.calc_cfgs or {})
+        # Check whitening band sits below the demodulation low-pass.
+        noise_band = calc_cfgs.get("noise_band")
+        if noise_band is not None and "frequency_cutoffs" in proc_aman:
+            fcs = proc_aman["frequency_cutoffs"]
+            cutoff = fcs[self.signal_Q] if self.signal_Q in fcs else None
+            if cutoff is not None and noise_band[1] > cutoff:
+                logger.warning(
+                    "joint_qu_nmat_model: noise_band upper edge %.3g Hz is above "
+                    "the demodulation low-pass cutoff %.3g Hz; the whitening "
+                    "scale will be biased low by the filtered-out band.",
+                    noise_band[1], cutoff,
+                )
         operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
             aman,
             signal_Q=self.signal_Q,
             signal_U=self.signal_U,
-            **self.calc_cfgs,
+            **calc_cfgs,
         )
         logger.info(
             "Joint Q/U Nmat model: selected %s modes per bin "
@@ -2429,9 +2442,17 @@ class JointQUNmatFilter(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
-        cfgs = dict(self.process_cfgs)
+        cfgs = dict(self.process_cfgs or {})
         model_name = cfgs.pop("nmat_model", "nmat_qu")
         fit_cfgs = cfgs.pop("fit", None)
+
+        if cfgs.get("in_place") is not None:
+            if cfgs["in_place"] is not True:
+                logger.warning(
+                    "joint_qu_nmat_filter: ignoring process.in_place config; "
+                    "the operator is always applied in place"
+                )
+        cfgs.pop("in_place", None)
 
         if self.use_data_aman:
             model_aman = data_aman if data_aman is not None else aman

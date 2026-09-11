@@ -139,7 +139,7 @@ def _stack_rfft(q, u):
     ndet, nsamp = q.shape
     nfreq = nsamp // 2 + 1
     real_dtype = np.result_type(q.dtype, u.dtype)
-    complex_dtype = np.complex64 if real_dtype.itemsize <= 4 else np.complex128
+    complex_dtype = np.result_type(real_dtype, np.complex64) # type casting for pixell
     ft = np.empty((2 * ndet, nfreq), dtype=complex_dtype)
     fft.rfft(q, ft[:ndet])
     fft.rfft(u, ft[ndet:])
@@ -238,8 +238,11 @@ def fit_joint_qu_nmat_operator(
     )
 
     n0, n1 = noise_band
-    if n0 < 0 or n1 <= n0:
-        raise ValueError("noise_band must satisfy 0 <= low < high")
+    if n0 < 0 or n1 <= n0 or n1 > freqs[-1]:
+        raise ValueError(
+            "noise_band must satisfy 0 <= low < high <= Nyquist "
+            f"({freqs[-1]:g} Hz); got {tuple(noise_band)}"
+        )
     j0 = int(np.searchsorted(freqs, n0, side="left"))
     j1 = int(np.searchsorted(freqs, n1, side="right"))
     if j1 <= j0:
@@ -365,12 +368,6 @@ def fit_joint_qu_nmat_operator(
         core.IndexAxis("nmat_bins", len(bins)),
     )
 
-    def _split(arr_over_channels, fill=0.0):
-        """Scatter a valid-channel array back to (dets,) Q and U halves."""
-        full = np.full(2 * ndet, fill, dtype=float)
-        full[valid_idx] = arr_over_channels
-        return full[:ndet], full[ndet:]
-
     sig_q, sig_u = noise_sigma[:ndet], noise_sigma[ndet:]
     op.wrap("sigma_Q", sig_q, [(0, "dets")])
     op.wrap("sigma_U", sig_u, [(0, "dets")])
@@ -396,6 +393,9 @@ def fit_joint_qu_nmat_operator(
     for key, val in stats.items():
         op.wrap(key, np.asarray(val), [(0, "nmat_bins")])
 
+    # Store the Fourier grid this operator was fit on. So ``nsamp`` can be
+    # checked against the target TOD at apply time (the stored D(f)/E(f)
+    # profiles live on this grid); ``fmin``/``fmax`` record the fitted band.
     op.wrap("fmin", float(freqs[band_lo]))
     op.wrap("fmax", float(freqs[band_hi - 1]))
     op.wrap("profile_diagonal_floor", float(profile_diagonal_floor))
@@ -442,6 +442,12 @@ def _filtered_ft(tod, operator, signal_Q, signal_U, psd_scale):
     q = _resolve_signal(tod, signal_Q)
     u = _resolve_signal(tod, signal_U)
     ndet, nsamp = q.shape
+    if "nsamp" in operator and int(operator.nsamp) != nsamp:
+        raise ValueError(
+            f"operator was fit on {int(operator.nsamp)} samples but the target "
+            f"TOD has {nsamp}; the stored D(f)/E(f) profiles are defined on the "
+            "fit-time Fourier grid and cannot be reindexed to another length"
+        )
     freqs = np.fft.rfftfreq(nsamp, _sample_dt(tod))
 
     sigma, valid_idx, vecs, resid = _operator_arrays(tod, operator)
