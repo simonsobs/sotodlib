@@ -1,9 +1,10 @@
-# Copyright (c) 2024 Simons Observatory.
+# Copyright (c) 2024-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
 from .. import core
 from .helpers import _valid_arg
+from .optics import _interp_func
 from so3g.proj import quat
 
 import logging
@@ -47,41 +48,71 @@ def apply_basic_pointing_model(tod):
 
     tod.wrap('boresight', _boresight)
 
-    return _boresight
+    _fp = _reset_focal_plane(tod)
+
+    return _boresight, _fp
 
 
-def apply_pointing_model(tod, pointing_model=None, ancil=None,
-                         wrap=None):
+def apply_pointing_model(tod, pointing_model=None,
+                         ancil=None, focal_plane_template=None,
+                         wrap_boresight=None, wrap_focal_plane=None):
     """Applies a static pointing model to compute corrected boresight
-    position and orientation in horizon coordinates.  The encoder
-    values in tod.ancil are consumed as raw data, and the computed
-    values are stored in tod.boresight.
+    position and orientation in horizon coordinates. For some models
+    this will also compute updated focal_plane values (i.e. detector
+    offsets and orientations).
 
     Args:
       tod (AxisManager): the observation data.
       pointing_model (AxisManager): if None, the pointing_model
         parameters are read from tod.pointing_model.
-      ancil (AxisManager): if None, the encoders are read from
-        tod.ancil.
-      wrap (str): If specified, the name in tod where corrected
-        boresight should be stored.  If None, the default of
-        'boresight' is used.  Pass wrap=False to not store the
-        result in tod.
+      ancil (AxisManager): alternative encoder data (if None, then
+        encoders are taken from tod.ancil).
+      focal_plane_template (AxisManager): alternative focal_plane
+        template (if None, template is determined as described in
+        notes).
+      wrap_boresight (str): If specified, the name in tod where
+        corrected boresight should be stored.  If None, the default of
+        'boresight' is used.  Pass value False to not store the result
+        in tod.
+      wrap_focal_plane (str): If specified, the name in tod where
+        corrected focal_plane should be stored.  If None, the default of
+        'focal_plane' is used.  Pass value False to not store the result
+        in tod.
+
+    By default the encoder values in ``tod.ancil`` are used as basic
+    inputs for computing the boresight position.  The focal_plane
+    template values in ``tod.focal_plane_template`` are used as the
+    basic inputs for computing the corrected focal_plane.  Note that
+    if focal_plane_template does not exist, and is needed, it will be
+    copied from ``tod.focal_plane``.
 
     Returns:
-      AxisManager: the corrected boresight.
+      tuple: (boresight, focal_plane)
+        ``boresight`` is an AxisManager containing computed boresight
+        with pointing model corrections applied.  ``focal_plane`` is
+        focal_plane including any optical distortions (unless there is
+        no source focal_plane, and pointing model does not include
+        distortions, in which case it is None).
 
     """
     if pointing_model is None and "pointing_model" not in tod:
         logger.warning("No pointing_model found -- applying basic model.")
-        assert wrap in (
+        assert wrap_boresight in (
             None,
             "boresight",
-        ), "When using naive pointing model, wrap=... not supported"
-        return apply_basic_pointing_model(tod)
+        ), "When using naive pointing model, wrap_boresight=... not supported"
+        assert wrap_focal_plane in (
+            None,
+            "focal_plane",
+        ), "When using naive pointing model, wrap_focal_plane=... not supported"
+        return apply_basic_pointing_model(tod), None
 
     pointing_model = _valid_arg(pointing_model, "pointing_model", src=tod)
     ancil = _valid_arg(ancil, "ancil", src=tod)
+    if focal_plane_template is None:
+        _ensure_focal_plane_template(tod)
+    focal_plane_template = _valid_arg(focal_plane_template,
+                                      "focal_plane_template", src=tod)
 
     # Encoder values, to radians.
     if pointing_model is None:
@@ -91,46 +122,51 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
     vers = pointing_model["version"]
     tel_type = vers.split("_")[0]
     if tel_type == "sat":
-        boresight = apply_pointing_model_sat(vers, pointing_model, tod, ancil)
+        boresight, focal_plane = apply_pointing_model_sat(
+            vers, pointing_model, ancil, focal_plane_template)
     elif tel_type == "lat":
-        boresight = apply_pointing_model_lat(vers, pointing_model, ancil)
+        boresight, focal_plane = apply_pointing_model_lat(
+            vers, pointing_model, ancil, focal_plane_template)
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
-    if wrap is None:
-        wrap = "boresight"
-    if wrap is not False:
-        if wrap in tod._fields:
-            del tod[wrap]
-        tod.wrap(wrap, boresight)
-    return boresight
+    for control, default, item in [
+            (wrap_boresight, 'boresight', boresight),
+            (wrap_focal_plane, 'focal_plane', focal_plane),
+    ]:
+        if control is None:
+            control = default
+        if control is not False:
+            tod.wrap(control, item, overwrite=True)
+
+    return boresight, focal_plane
 
 
-def apply_pointing_model_sat(vers, params, tod, ancil):
+def apply_pointing_model_sat(vers, params, ancil, focal_plane_template=None):
     az, el, roll = _get_sat_enc_radians(ancil)
 
     if vers == 'sat_naive':
-        return _new_boresight(ancil.samps, az=az, el=el, roll=roll)
+        return _new_boresight(ancil.samps, az=az, el=el, roll=roll), focal_plane_template
 
     elif vers == 'sat_v1':
-        az1, el1, roll1 = model_sat_v1(params, az, el, roll)
-        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
+        (az1, el1, roll1), fp = model_sat_v1(params, az, el, roll, focal_plane_template=focal_plane_template)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1), fp
 
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
 
-def apply_pointing_model_lat(vers, params, ancil):
+def apply_pointing_model_lat(vers, params, ancil, focal_plane_template=None):
     az, el, roll = _get_lat_enc_radians(ancil)
     
     if vers == 'lat_naive':
-        return _new_boresight(ancil.samps, az=az, el=el, roll=roll)
+        return _new_boresight(ancil.samps, az=az, el=el, roll=roll), focal_plane_template
     elif vers == "lat_v1":
-        az1, el1, roll1 = model_lat_v1(params, az, el, roll)
-        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
+        (az1, el1, roll1), fp = model_lat_v1(params, az, el, roll, focal_plane_template=focal_plane_template)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1), fp
     elif vers == "lat_v2":
-        az1, el1, roll1 = model_lat_v2(params, az, el, roll)
-        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
+        (az1, el1, roll1), fp = model_lat_v2(params, az, el, roll, focal_plane_template=focal_plane_template)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1), fp
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
@@ -138,7 +174,7 @@ def apply_pointing_model_lat(vers, params, ancil):
 #
 # LAT model(s)
 #
-def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
+def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='lat_v1'):
     """Applies pointing model to (az, el, roll).
     The difference between v1 and v2 is the location of the el sag application.
     See the code for clarity.
@@ -147,22 +183,32 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
+      focal_plane_template: focal_plane to be modified, for models
+        that include focal_plane distortions.
 
     The implemented model parameters are all in radians:
-    - enc_offset_{az, el, cr}: Encoder offsets in radians.
-      Sign convention: True = Encoder + Offset
-    - cr_center_{xi,eta}0: The (xi,eta) coordinate in the LATR-centered 
-      focal plane that remains fixed under corotation. 
-    - el_axis_center_{xi,eta}0: The (xi,eta) coordinate in the CR-centered
-      focal plane that appears fixed when the elevation structure is rotated 
-      about its axis.
-    - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
-      focal plane that appears fixed when the mirrors are rotated about the ray from
-      sky that hits the center of both mirrors.
-    - base_tilt_{cos,sin}: Base tilt coefficients, in radians. 
+
+    - enc_offset_{az, el, cr}: Encoder offsets in radians.  Sign
+      convention: True = Encoder + Offset.
+    - cr_center_{xi,eta}0: The (xi,eta) coordinate in the
+      LATR-centered focal plane that remains fixed under corotation.
+    - el_axis_center_{xi,eta}0: The (xi,eta) coordinate in the
+      CR-centered focal plane that appears fixed when the elevation
+      structure is rotated about its axis.
+    - mir_center_{xi,eta}0: The (xi,eta) coordinate in the
+      El-structure-centered focal plane that appears fixed when the
+      mirrors are rotated about the ray from sky that hits the center
+      of both mirrors.
+    - base_tilt_{cos,sin}: Base tilt coefficients, in radians.
     - el_sag_{quad,lin}: Dimensionless coefficients for the quadradtic
       and linear components of the elevation sag.
-    - el_sag_pivot: The elevation in radians to treat as the sag's zero point.
+    - el_sag_pivot: The elevation in radians to treat as the sag's
+      zero point.
+
+    In addition to the above parameters (which affect only the
+    boresight), the parameter ``roll_dist_model`` (an integer)
+    activates distortions of the focal plane, which can consume other
+    parameters. See details in :func:`apply_lat_distortion_model`.
 
     """
     if version not in ['lat_v1', 'lat_v2']:
@@ -263,13 +309,162 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     change = ((new_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
     az = az_orig + change
 
-    return az, el, roll
+    # Apply any (non-linear) focal plane distortions.
+    focal_plane = apply_lat_distortion_model(
+        params, az, el, roll, focal_plane=focal_plane_template)
 
-def model_lat_v1(params, az, el, roll):
-    return model_lat_v1_v2(params, az, el, roll, version='lat_v1')
+    return (az, el, roll), focal_plane
 
-def model_lat_v2(params, az, el, roll):
-    return model_lat_v1_v2(params, az, el, roll, version='lat_v2')
+def model_lat_v1(params, az, el, roll, focal_plane_template=None):
+    return model_lat_v1_v2(params, az, el, roll, focal_plane_template=focal_plane_template, version='lat_v1')
+
+def model_lat_v2(params, az, el, roll, focal_plane_template=None):
+    return model_lat_v1_v2(params, az, el, roll, focal_plane_template=focal_plane_template, version='lat_v2')
+
+def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
+                               in_place=False):
+    """Apply focal plane corrections due to non-linear projection
+    effects of the mirrors.  The models here may use the boresight az,
+    el, and roll vectors to compute the corrections.
+
+    Returns the updated focal_plane (which will be the same object
+    that was passed in, if in_place is True.)
+
+    Two models are supported in addition to the do-nothing model.
+    These are selected via parameter ``roll_dist_model`` (integer):
+
+      - 0: No distortion correction.
+      - 1: Empirical "arc" correction.  This is further parametrized by:
+
+        - ``arc_amp``: the amplitude of the radial term (radians).
+        - ``arc_r0``: the cross-over radius (radians).
+        - ``arc_roll0``: the reference roll value (radians) at which
+          the effect is fully null.
+
+      - 2: Optical modeling result.  This is based on Zemax models and
+        has no parameters.
+
+    """
+    dist_model = params.get('roll_dist_model')
+    if dist_model in [None, 0]:
+        if in_place or focal_plane is None:
+            return focal_plane
+        else:
+            return focal_plane.copy()
+
+    assert focal_plane is not None, "LAT non-linear distortions require focal_plane to be passed in."
+
+    # Make sure pointing inputs can be treated as vectors.
+    az, el, roll = [np.atleast_1d(x) for x in [az, el, roll]]
+
+    if dist_model == 1:
+        # Empirical model.
+        amp, r0, roll0 = [params[k] for k in ['arc_amp', 'arc_r0', 'arc_roll0']]
+        _c, _s = np.cos(roll-roll0).mean(), np.sin(roll-roll0).mean()
+        xi, eta = focal_plane.xi, focal_plane.eta
+        r2 = xi**2 + eta**2
+        scale = amp * (1 - r2 / r0**2)
+        xi1 = xi + scale * (_c - 1)
+        eta1 = eta + scale * _s
+        return _update_focal_plane(focal_plane, xi1, eta1, focal_plane.gamma, in_place=in_place)
+
+    elif dist_model == 2:
+        if len(roll) > 1:
+            # Check that roll is ~stable and get typical value.
+            droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
+            roll_mean = roll[0] + droll.mean()
+            # Note a 5 degree tolerance here is pretty generous; this is
+            # meant to not choke on "type 3" obs, where there is a ~1 deg
+            # elevatio nod during the scan.
+            assert droll.std() < 5 * DEG, \
+                "This distortion approximation does not work when roll varies significantly."
+        else:
+            roll_mean = roll[0]
+
+        # Rotate focal plane template xi-eta into the space of the
+        # secondary mirror.
+        xi1, eta1, _ = quat.decompose_xieta(
+            quat.euler(2, roll_mean)
+            * quat.rotation_xieta(focal_plane.xi, focal_plane.eta))
+
+        # Get distortion
+        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_xi_bsp'])
+        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_eta_bsp'])
+
+        # Apply distortion and return to un-rolled focal_plane.
+        xi2, eta2, _ = quat.decompose_xieta(
+            quat.euler(2, -roll_mean)
+            * quat.rotation_xieta(xi1 + dxi, eta1 + deta))
+
+        return _update_focal_plane(
+            focal_plane, xi2, eta2,
+            focal_plane.gamma, in_place=in_place)
+
+    raise ValueError(f"Unimplemented distortion model {dist_model}")
+
+
+def _ensure_focal_plane_template(tod):
+    """Checks whether ``focal_plane_template`` is a member of the
+    AxisManager, and if not creates it (by making a copy of
+    tod.focal_plane).
+
+    If neither exists, or if tod.focal_plane is None, then
+    focal_plane_template will also be instantiated as None.
+
+    Returns tod.focal_plane_template.
+
+    """
+    if 'focal_plane_template' not in tod:
+        if tod.get('focal_plane') is None:
+            tod.wrap('focal_plane_template', None)
+        else:
+            tod.wrap('focal_plane_template', tod.focal_plane.copy())
+    return tod.focal_plane_template
+
+
+def _reset_focal_plane(tod, focal_plane_template=None, wrap=None):
+    """Updates tod.focal_plane to match tod.focal_plane_template, and
+    returns tod.focal_plane.
+
+    Starts by calling _ensure_focal_plane_template, in case
+    tod.focal_plane_template does not exist yet.
+
+    If arg focal_plane_template is not None, that is used to populate
+    tod.focal_plane and tod.focal_plane_template is not checked or
+    altered in any way.
+
+    If wrap is False, tod.focal_plane is not altered and the new
+    focal_plane is simply returned.  If wrap is a string, then the
+    focal_plane will be stored there in tod (instead of .focal_plane).
+
+    """
+    if focal_plane_template is None:
+        # Make sure you _ensure before del'ing .focal_plane ...
+        focal_plane_template = _ensure_focal_plane_template(tod)
+    if wrap is None:
+        wrap = 'focal_plane'
+    if focal_plane_template is None:
+        fp = None
+    else:
+        fp = focal_plane_template.copy()
+    if wrap is not False:
+        tod.wrap(wrap, fp, overwrite=True)
+    return fp
+
+
+def _update_focal_plane(focal_plane, xi, eta, gamma, in_place=False):
+    if in_place:
+        dest = focal_plane
+    else:
+        dest = core.AxisManager(focal_plane.dets)
+    for k, v in [
+            ('xi', xi),
+            ('eta', eta),
+            ('gamma', gamma)]:
+        dest.wrap(k, v, axis_map=[(0, 'dets')], overwrite=True)
+    return dest
+
+
 
 #
 # SAT model(s)
@@ -278,13 +473,14 @@ def model_lat_v2(params, az, el, roll):
 # sat_v1: you can expand v1, as long as new params don't do anything
 # if their value is zero (and that should be the registered default).
 
-def model_sat_v1(params, az, el, roll):
+def model_sat_v1(params, az, el, roll, focal_plane_template=None):
     """Applies pointing model to (az, el, roll).
 
     Args:
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
+      focal_plane_template: ignored in this function.
 
     The implemented model parameters are:
 
@@ -348,7 +544,9 @@ def model_sat_v1(params, az, el, roll):
     change = ((-neg_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
     new_az = az_orig + change
 
-    return new_az, el, roll
+    focal_plane = (None if focal_plane_template is None \
+                   else focal_plane_template.copy())
+    return (new_az, el, roll), focal_plane_template
 
 
 # Support functions
@@ -368,6 +566,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
+        'roll_dist_model': 0,
     },
     'lat_v2' : {
         'enc_offset_az': 0,
@@ -384,6 +583,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
+        'roll_dist_model': 0,
     },
     'sat_v1' : {
         'enc_offset_az': 0.,
@@ -458,3 +658,35 @@ def get_base_tilt_q_2nd(az, el, dE_C2A, dE_S2A, dA_C2A, dA_S2A):
 
     return q_HE * q_HA
 
+
+# Parameter store.
+#
+# LAT_ROLL_DIST_V2 are the 2d spline parameters for roll_dist_model=2.
+# These are obtained from an analysis of ray tracing result
+# ID9_checked_trace_data.npz (md5:862da7).
+#
+
+LAT_ROLL_DIST_V2 = {
+    'd_xi_bsp': [
+        np.array([-0.06582537, -0.06582537, -0.06582537, -0.06582537,  0.06675579,
+                  0.06675579,  0.06675579,  0.06675579]),
+        np.array([-0.06629553, -0.06629553, -0.06629553, -0.06629553,  0.06629563,
+                  0.06629563,  0.06629563,  0.06629563]),
+        np.array([-0.00093586, -0.00022504, -0.00022504, -0.00093586, -0.0003626 ,
+                  0.00025474,  0.00025474, -0.0003626 , -0.00020491,  0.00034118,
+                  0.00034118, -0.00020491, -0.00085233, -0.0003975 , -0.0003975 ,
+                  -0.00085233]),
+        3, 3,
+    ],
+    'd_eta_bsp': [
+        np.array([-0.06582537, -0.06582537, -0.06582537, -0.06582537,  0.06675579,
+                  0.06675579,  0.06675579,  0.06675579]),
+        np.array([-0.06629553, -0.06629553, -0.06629553, -0.06629553,  0.06629563,
+                  0.06629563,  0.06629563,  0.06629563]),
+        np.array([ 1.14254705e-04, -5.05210945e-05,  5.04236431e-05, -1.14352157e-04,
+                   3.86235319e-05, -8.28344938e-05,  8.27370425e-05, -3.87209832e-05,
+                   4.95712074e-05, -7.96615609e-05,  7.95641095e-05, -4.96686587e-05,
+                   1.50720118e-04, -3.96436543e-05,  3.95462029e-05, -1.50817570e-04]),
+        3, 3
+    ],
+}
