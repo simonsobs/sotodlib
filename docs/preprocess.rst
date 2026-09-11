@@ -446,6 +446,7 @@ Noise & PSD
 .. autoclass:: sotodlib.preprocess.processes.NoiseRatio
 .. autoclass:: sotodlib.preprocess.processes.Noise
 
+
 Calibration
 -----------
 
@@ -498,16 +499,18 @@ Ground Pickup (AzSS)
 Filtering
 ---------
 
-=================== ================= =======================================================================
-``name:``           Class             What it does
-=================== ================= =======================================================================
-``fourier_filter``  ``FourierFilter`` Applies a chain of Fourier filters (defined in fft_ops) to the data.
-``sub_polyf``       ``SubPolyf``      Fit TOD in each subscan with polynomial of given order and subtract it.
-``apodize``         ``Apodize``       Apodize the edges of a signal.
-``scan_freq_cut``   ``ScanFreqCut``   Apply high-pass cut at the scan frequency.
-``pca_filter``      ``PCAFilter``     Applies a pca filter to the data.
-``get_common_mode`` ``GetCommonMode`` Calculate common mode (average over detectors not PCA filtered).
-=================== ================= =======================================================================
+======================== ===================== =========================================================================
+``name:``                Class                 What it does
+======================== ===================== =========================================================================
+``fourier_filter``       ``FourierFilter``     Applies a chain of Fourier filters (defined in fft_ops) to the data.
+``sub_polyf``            ``SubPolyf``          Fit TOD in each subscan with polynomial of given order and subtract it.
+``apodize``              ``Apodize``           Apodize the edges of a signal.
+``scan_freq_cut``        ``ScanFreqCut``       Apply high-pass cut at the scan frequency.
+``pca_filter``           ``PCAFilter``         Applies a pca filter to the data.
+``get_common_mode``      ``GetCommonMode``     Calculate common mode (average over detectors not PCA filtered).
+``joint_qu_nmat_model``  ``JointQUNmatModel``  Fit a joint demodulated Q/U Fourier Nmat operator; store it in proc_aman.
+``joint_qu_nmat_filter`` ``JointQUNmatFilter`` Apply a stored joint demodulated Q/U Fourier Nmat operator.
+======================== ===================== =========================================================================
 
 .. autoclass:: sotodlib.preprocess.processes.FourierFilter
 .. autoclass:: sotodlib.preprocess.processes.SubPolyf
@@ -515,6 +518,8 @@ Filtering
 .. autoclass:: sotodlib.preprocess.processes.ScanFreqCut
 .. autoclass:: sotodlib.preprocess.processes.PCAFilter
 .. autoclass:: sotodlib.preprocess.processes.GetCommonMode
+.. autoclass:: sotodlib.preprocess.processes.JointQUNmatModel
+.. autoclass:: sotodlib.preprocess.processes.JointQUNmatFilter
 
 Pointing & Focal-Plane Geometry
 -------------------------------
