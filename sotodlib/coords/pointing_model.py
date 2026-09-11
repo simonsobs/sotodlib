@@ -205,6 +205,11 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
     - el_sag_pivot: The elevation in radians to treat as the sag's
       zero point.
 
+    In addition to the above parameters (which affect only the
+    boresight), the parameter ``roll_dist_model`` (an integer)
+    activates distortions of the focal plane, which can consume other
+    parameters. See details in :func:`apply_lat_distortion_model`.
+
     """
     if version not in ['lat_v1', 'lat_v2']:
         raise ValueError("model_lat_v1_v2 can only be called with versions lat_v1 and lat_v2")
@@ -324,6 +329,20 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
 
     Returns the updated focal_plane (which will be the same object
     that was passed in, if in_place is True.)
+
+    Two models are supported in addition to the do-nothing model.
+    These are selected via parameter ``roll_dist_model`` (integer):
+
+      - 0: No distortion correction.
+      - 1: Empirical "arc" correction.  This is further parametrized by:
+
+        - ``arc_amp``: the amplitude of the radial term (radians).
+        - ``arc_r0``: the cross-over radius (radians).
+        - ``arc_roll0``: the reference roll value (radians) at which
+          the effect is fully null.
+
+      - 2: Optical modeling result.  This is based on Zemax models and
+        has no parameters.
 
     """
     dist_model = params.get('roll_dist_model')
