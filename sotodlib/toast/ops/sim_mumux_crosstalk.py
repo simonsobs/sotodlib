@@ -22,10 +22,11 @@ try:
     from jbolo.utils import load_sim
 
     jbolo_available = True
-except:
+except (ImportError, AttributeError):
     jbolo_available = False
 
-from .mumux_crosstalk_util import detmap_available, pos_to_chi
+from .mumux_crosstalk_util import pos_to_chi
+
 
 # JBolo sims to use
 JBOLO_MODELS = {
@@ -134,11 +135,14 @@ class SimMuMUXCrosstalk(Operator):
         help="Draw new phase offsets for every observation and realization",
     )
 
-    # The name of the temporary, scaled, detector data field.
-    _temp_detdata_name = "temp_umux_crosstalk_input"
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        # Set of real data band types for non-optical detectors
+        self._alt_band_keys = {"DARK", "NC", "SQID"}
+
+        # The name of the temporary, scaled, detector data field.
+        self._temp_detdata_name = "temp_umux_crosstalk_input"
 
     def _temperature_to_squid_phase(self, input_signal, Phi0, dPhi0dT):
         """Translate temperature-valued signal into SQUID phase"""
@@ -206,7 +210,7 @@ class SimMuMUXCrosstalk(Operator):
         dPhi0dT = {}
         for det in detectors:
             raw_band = focalplane[det]["band"]
-            if raw_band == "DARK" or raw_band[0] == "f":
+            if raw_band in self._alt_band_keys or raw_band[0] == "f":
                 # We are using real data with bands like "f090", "f150", etc
                 # Determine the telescope type from the name.
                 wafer_band = focalplane[det]["det_info:wafer:bandpass"]
@@ -241,7 +245,7 @@ class SimMuMUXCrosstalk(Operator):
             else:
                 # We are using the boresight elevation
                 elevation = boresight_el
-                if band not in P_opts.keys():
+                if band not in P_opts:
                     # Compute detector properties using JBolo
                     jsim = load_sim(jbolo_model)
                     jsim["sources"]["atmosphere"]["elevation"] = elevation  # Degrees
@@ -291,8 +295,8 @@ class SimMuMUXCrosstalk(Operator):
             )
         # Check for JBOLO data path
         if (
-            "JBOLO_PATH" not in os.environ.keys()
-            or "JBOLO_MODELS_PATH" not in os.environ.keys()
+            "JBOLO_PATH" not in os.environ
+            or "JBOLO_MODELS_PATH" not in os.environ
         ):
             raise RuntimeError(
                 "Cannot calculate detector parameters -- no JBolo models available"
@@ -410,8 +414,8 @@ class SimMuMUXCrosstalk(Operator):
                         crosstalk += chi * np.sin(
                             source_squid_phase - target_squid_phase
                         )
-                        det_msg += f"\n  {det_source} (phi0={Phi0[det_target]:0.2e}, "
-                        det_msg += f"dphi0dT={dPhi0dT[det_target]:0.2e}) "
+                        det_msg += f"\n  {det_source} (phi0={Phi0[det_source]:0.2e}, "
+                        det_msg += f"dphi0dT={dPhi0dT[det_source]:0.2e}) "
                         det_msg += f"chi = {chi:0.2e}"
                     else:
                         # If collided, flag both detectors
@@ -467,8 +471,6 @@ class SimMuMUXCrosstalk(Operator):
             del temp_obs
             del temp_data
 
-        return
-
     def _finalize(self, data, **kwargs):
         return
 
@@ -487,8 +489,8 @@ class SimMuMUXCrosstalk(Operator):
 
     def _provides(self):
         prov = {
-            "meta": list(),
-            "shared": list(),
+            "meta": [],
+            "shared": [],
             "detdata": [
                 self.det_data,
             ],
@@ -496,4 +498,4 @@ class SimMuMUXCrosstalk(Operator):
         return prov
 
     def _accelerators(self):
-        return list()
+        return []
