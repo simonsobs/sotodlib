@@ -37,9 +37,12 @@ class DataCfg:
         Path to the context file to use. (required)
     metadata_list: "all" or list of str
         List of metadata labels to load. (default: ['smurf'])
+    max_days_before: int = 20
+        Maximum days to find bgmap before the obs.
     '''
     context_path: str
     metadata_list: Union[str, list[str]] = field(default_factory=lambda: ['smurf'])
+    max_days_before: int = 20
 
 
 @dataclass
@@ -146,6 +149,7 @@ class OutputCfg:
         transient_errors = [
             'sotodlib.core.metadata.loader.LoaderError',
             'BlockingIOError',
+            'FileNotFoundError',
         ]
         for err in transient_errors:
             if err in msg:
@@ -269,6 +273,9 @@ class BgmapDelayCfg:
             num_process = self.process.num_obs
         else:
             raise ValueError(f'which is not bgmap or obs but {which}')
+
+        if num_process == 0:
+            return []
 
         # Find all obs_ids that have not been processed
         with open(failed_file, "r") as f:
@@ -1035,7 +1042,7 @@ def run_obs_process(cfg: BgmapDelayCfg, obs_id: str) -> RunObsResult:
             cfg.data.context_path,
             metadata_list=cfg.data.metadata_list)
 
-        bgmap_dict = load_book.get_cal_obsids(ctx, obs_id, "bgmap")
+        bgmap_dict = load_book.get_cal_obsids(ctx, obs_id, "bgmap", max_days_before=cfg.data.max_days_before)
         bgmap_ids = []
         for dset, oid in bgmap_dict.items():
             if oid is None:

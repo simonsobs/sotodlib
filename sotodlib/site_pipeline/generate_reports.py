@@ -56,7 +56,8 @@ def create_manifest(base_dir: str, output_file: str):
 
     for cadence in ["weekly", "monthly"]:
         parent = os.path.join(base_dir, cadence)
-        if not os.path.exists(parent):
+
+        if not os.path.isdir(parent):
             continue
 
         entries = []
@@ -64,35 +65,44 @@ def create_manifest(base_dir: str, output_file: str):
 
         for folder_name in sorted(os.listdir(parent)):
             folder_path = os.path.join(parent, folder_name)
+
             if not os.path.isdir(folder_path):
                 continue
 
-            index_path = os.path.join(folder_path, "report.html")
-            if not os.path.exists(index_path):
+            report_path = os.path.join(folder_path, "report.html")
+
+            if not os.path.isfile(report_path):
                 continue
 
-            rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
-            rel_path = f"../../{rel_path}"
+            rel_path = os.path.relpath(
+                report_path,
+                start=base_dir,
+            ).replace(os.sep, "/")
+
 
             entries.append({
                 "label": f"{cadence} / {folder_name}",
-                "rel_path": rel_path
+                "rel_path": rel_path,
             })
 
             start, end = parse_range(folder_name)
+
             if end is not None:
-                candidates.append((end, start, rel_path))
+                candidates.append(
+                    (end, start, rel_path)
+                )
 
         if candidates:
             _, _, latest_path = max(candidates)
+
             entries.insert(0, {
                 "label": f"{cadence} / latest",
-                "rel_path": latest_path
+                "rel_path": latest_path,
             })
 
         manifest.extend(entries)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
 
@@ -102,10 +112,10 @@ class GenerateReportConfig:
         platform: Literal["satp1", "satp2", "satp3", "lat"],
         site_url: str,
         report_interval: Literal["range", "daily", "weekly", "monthly"],
-        start_time: Union[dt.datetime, float, str],
+        start_time: Union[dt.datetime, int, float, str],
         output_root: str,
         data_config: Dict[str, Any],
-        stop_time: Union[dt.datetime, float, str, None] = None,
+        stop_time: Union[dt.datetime, int, float, str, None] = None,
         overwrite_html: bool = False,
         overwrite_data: bool = False,
         skip_html: bool = False,
@@ -116,7 +126,7 @@ class GenerateReportConfig:
         self.report_interval = report_interval
 
         def convert_to_datetime(
-            time: Union[dt.datetime, float, str, None],
+            time: Union[dt.datetime, int, float, str, None],
         ) -> dt.datetime:
             if isinstance(time, type(None)):
                 return dt.datetime.now(tz=dt.timezone.utc)
@@ -311,6 +321,25 @@ def _main(
 
     create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
 
+    env = Environment(loader=FileSystemLoader(cfg.template_dir))
+
+    platforms = ["satp1", "satp2", "satp3", "lat"]
+
+    template = env.get_template("platform_index.html")
+    with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
+        output_file.write(
+            template.render(
+                platform=cfg.platform,
+                platforms=platforms,
+                reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
+            )
+        )
+
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html")):
+        template = env.get_template("index.html")
+        with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
+            output_file.write(template.render(platforms=platforms))
+
     if n_failed > 0:
         raise RuntimeError(f"{n_failed} reports failed to generate")
 
@@ -475,7 +504,7 @@ def render_report(
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
             "Median Obs PWV (mm)": np.round(np.nanmedian([o.pwv for o in unique_obs]), 3),
-            "Stddev Obs PWV (mm)": np.round(np.std([o.pwv for o in unique_obs]), 3),
+            "Stddev Obs PWV (mm)": np.round(np.nanstd([o.pwv for o in unique_obs]), 3),
         }
     }
 
@@ -483,7 +512,6 @@ def render_report(
         jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "wiregrid" in o.obs_tags])) / 3600, 1)
     elif cfg.platform == "lat":
         jinja_data["general_stats"]["Time Spent on Stimulator Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "stimulator" in o.obs_tags])) / 3600, 1)
-
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
@@ -504,8 +532,8 @@ def get_parser(
 
 def main(
     cfg: str,
-    start_time: Optional[Union[dt.datetime, float, str]] = None,
-    stop_time: Optional[Union[dt.datetime, float, str]] = None,
+    start_time: Optional[Union[dt.datetime, int, float, str]] = None,
+    stop_time: Optional[Union[dt.datetime, int, float, str]] = None,
     report_interval: Optional[str] = None,
     overwrite_html: Optional[bool] = None,
     overwrite_data: Optional[bool] = None,
