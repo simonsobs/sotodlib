@@ -1,7 +1,54 @@
 """
-Script for running updates on (or creating) a g3tsmurf database. This setup
-is specifically designed to work when the data is dynamically coming in. Meaning is
-is designed to work from something like a cronjob.
+Script for running updates on (or creating) a g3tsmurf database, the index of
+level 2 SMuRF data. This setup is specifically designed to work when the data
+is dynamically coming in, meaning it is designed to work from something like a
+cronjob.
+
+Each run does the following, over the ctime range being updated:
+
+1. ``index_metadata``: walk the ``smurf/`` action folders and index tunes,
+   channel assignments and other sodetlib metadata.
+2. ``index_archive``: index the ``timestreams/`` .g3 files and their frames,
+   grouping them into level 2 observations.
+3. ``index_action_observations`` (only with ``--index-via-actions``):
+   reconstruct observations from action folders. Needed for data older than
+   Oct 2022, but it races with automatic level 2 deletion so it is off at the
+   site.
+4. ``index_timecodes``: index the suprsync rows that say a timecode's files or
+   metadata have finished transferring.
+5. ``update_finalization``: advance the per-agent finalization times, i.e. how
+   far we trust the level 2 data to be complete. This reads the G3tHk
+   database, so ``update_g3thk_database`` must have run first.
+6. Revisit recent observations with no stop time or no tuneset and try to
+   complete them.
+
+The script then raises if it finds *completed* observations that have bad
+timing or no tuneset (no readout IDs), since neither can be bound into a Book.
+Observations that a human has already inspected and accepted can be listed
+one per line in a file passed as ``--checked-file`` to suppress the error.
+
+The time range defaults to the last ``--update-delay`` days. ``--min_ctime``
+may not be later than the current finalization time, otherwise a gap would be
+silently left in the index.
+
+Configuration file, an expanded version of the one used to connect to a
+G3tSmurf database::
+
+    data_prefix : "/path/to/daq-node/"
+    g3tsmurf_db: "/path/to/g3tsmurf.db"
+    g3thk_db: "/path/to/g3hk.db"
+
+    finalization:
+        servers:
+            - smurf-suprsync: "smurf-sync-so1"        ## instance-id
+              timestream-suprsync: "timestream-sync-so1"
+              pysmurf-monitor: "monitor-so1"
+
+The user running this script must have read, write, and execute permissions
+on the database file.
+
+See the Data Packaging page of the sotodlib documentation for the full
+pipeline description.
 """
 import os
 import datetime as dt
@@ -195,12 +242,21 @@ def main(
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
-    
-    parser.add_argument('config', help="g3tsmurf db configuration file")
+        parser = argparse.ArgumentParser(
+            description="Index level 2 SMuRF data into a G3tSmurf database "
+            "and advance the data transfer finalization time. Run "
+            "update_g3thk_database first."
+        )
+
+    parser.add_argument('config',
+                        help="g3tsmurf db configuration file. Requires the "
+                        "'data_prefix', 'g3tsmurf_db', 'g3thk_db' and "
+                        "'finalization' keys.")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
-    parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
+    parser.add_argument('--from-scratch',
+                        help="Index from ctime 1.6e9 (all SO time), creating "
+                        "the database if needed. Overrides --update-delay.",
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                         default=2, type=int)
@@ -212,10 +268,16 @@ def get_parser(parser=None):
         help="maximum ctime to search, otherwise searches through 'now'",
         default=None, type=int
     )
-    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+    parser.add_argument('--index-via-actions',
+                        help="Look through action folders to create "
+                        "observations. Needed for data older than Oct 2022, "
+                        "but causes concurrency issues on systems (like the "
+                        "site) that automatically delete level 2 data.",
                         action="store_true")
     parser.add_argument("--checked-file",
-        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
+        help="Path to a file listing, one obs_id per line, observations with "
+        "bad timing or missing readout ids that have been manually checked. "
+        "Listed observations do not cause this script to raise.")
     
     add_profile_args(parser)
 

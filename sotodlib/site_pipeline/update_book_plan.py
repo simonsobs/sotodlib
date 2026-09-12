@@ -1,3 +1,42 @@
+"""
+Plan Books: read the level 2 G3tSmurf database and register the Books that
+should be made from it in the Imprinter ("book") database. This script writes
+no data; it only decides which level 2 observations belong together and
+records the resulting Books with status UNBOUND, ready for ``make_book``.
+
+Three registration passes run per invocation:
+
+1. ``obs``/``oper`` Books, once per tel tube. For each level 2 observation in
+   the window, look for observations on the *other* configured stream_ids that
+   overlap it by at least ``min_overlap`` (30 s); mutually overlapping
+   observations become one multi-wafer Book. Observations tagged as operations
+   always get their own single-wafer ``oper`` Book, as do observations with
+   low-precision timing (they cannot share a sample grid).
+2. ``hk`` Books, one per timecode directory under ``<data_prefix>/hk``,
+   excluding the most recent (still growing) one.
+3. ``smurf`` and ``stray`` Books, one per timecode, driven by the suprsync
+   TimeCodes rows in G3tSmurf. ``smurf`` Books need all metadata transfers
+   complete; ``stray`` Books additionally need all file transfers complete and
+   every obs/oper Book in the timecode successfully bound.
+
+Nothing is ever planned past the finalization time (see
+``G3tSmurf.get_final_time``), so ``update_g3thk_database`` and
+``update_g3tsmurf_db`` must both have run recently. If the databases are stale
+by more than ``--delay_warning`` hours the script warns; past
+``--delay_error`` hours it raises, rather than plan Books over data that may
+still be in transit.
+
+The two search windows are set separately: ``--update-delay`` (default 1 day)
+for obs/oper Books, and ``--update-delay-timecodes`` (default 7 days) for the
+timecode Books, since a timecode can only be closed out well after the fact.
+
+Errors are collected per tel tube so one broken tube does not stop the others,
+then re-raised together at the end.
+
+See the Data Packaging page of the sotodlib documentation for the Book model,
+the imprinter configuration file format, and how to recover failed Books.
+"""
+
 import argparse
 import datetime as dt
 import time
@@ -226,13 +265,28 @@ def record_book_counts(monitor, imprinter):
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, help="g3tsmurf db configuration file")
-    parser.add_argument('--min-ctime', type=float, help="Minimum creation time")
-    parser.add_argument('--max-ctime', type=float, help="Maximum creation time")
-    parser.add_argument('--stream-ids', type=str, help="Stream IDs")
+        parser = argparse.ArgumentParser(
+            description="Register the Books that should be made from the "
+            "level 2 G3tSmurf database into the imprinter database. Writes no "
+            "data; run make_book afterwards to bind the registered Books."
+        )
+    parser.add_argument('--config', type=str,
+                        help="Imprinter configuration file")
+    parser.add_argument('--min-ctime', type=float,
+                        help="Minimum observation ctime to consider. "
+                        "Overrides --update-delay.")
+    parser.add_argument('--max-ctime', type=float,
+                        help="Maximum observation ctime to consider. Capped "
+                        "at the finalization time regardless.")
+    parser.add_argument('--stream-ids', type=str,
+                        help="Comma separated list of stream_ids to consider, "
+                        "e.g. 'ufm_mv6,ufm_mv9'. Defaults to the stream_ids "
+                        "in the imprinter config.")
     parser.add_argument(
-        '--force-single-stream', help="Force single stream", action="store_true"
+        '--force-single-stream',
+        help="Treat multi-wafer data as single wafer data, i.e. register one "
+        "Book per level 2 observation with no overlap grouping",
+        action="store_true"
     )
     parser.add_argument(
         '--update-delay', type=float, 
@@ -250,7 +304,9 @@ def get_parser(parser=None):
         default=6,
     )
     parser.add_argument(
-        '--from-scratch', help="Builds or updates database from scratch",
+        '--from-scratch',
+        help="Create the imprinter database if needed and search from the "
+        "beginning of time. Overrides --update-delay.",
         action="store_true"
     )
     parser.add_argument(
