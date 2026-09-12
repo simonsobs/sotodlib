@@ -133,7 +133,7 @@ def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite)
 
         dbs[product].add_entry(
             {'obs:obs_id': obs_id,
-             'detset:detset': detset,
+             'dets:detset': detset,
              'dataset': obs_id},
             filename=h5_path,
             replace=overwrite,
@@ -223,7 +223,14 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before,
                 obs_start_time,
                 max_days_before,
             )
+
             if stm_obs_id is not None:
+                query = {'obs:obs_id': obs_id, 'dets:detset': detset}
+                existing = db.inspect(query, strict=False)
+                # Remove any existing entries
+                for entry in existing:
+                    db.remove_entry(entry['_id'], commit=False)
+
                 db.add_entry(
                     {
                         'obs:obs_id': obs_id,
@@ -421,9 +428,16 @@ def _main(
             ctx.obsfiledb,
             [row['obs_id'] for row in obs_rows],
         )
+        query_stm_all = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
+        stm_all = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
+                               sort=['start_time'])
 
         for product in _DB_TYPES:
-            stm_rows_available = load_stimulator_cal(dbs[product])
+            stm_cal_mandb = load_stimulator_cal(dbs[product])
+            stm_rows_available = [
+                row for row in stm_all
+                if row['obs_id'] in stm_cal_mandb
+            ]
             cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
             _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
                                   cal_index, max_days_before, output_dir)
