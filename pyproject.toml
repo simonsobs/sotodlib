@@ -24,7 +24,6 @@ dependencies = [
   "pixell>=0.23.0",
   "pytest",
   "scikit-image",
-  "ruptures",
   "pyfftw",
   "numdifftools",
   "psycopg2-binary",
