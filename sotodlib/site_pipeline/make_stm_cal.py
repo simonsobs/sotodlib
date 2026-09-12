@@ -5,6 +5,7 @@ import traceback
 import yaml
 import argparse
 from typing import Optional, List, Callable
+from collections import defaultdict
 
 from sotodlib import core
 from sotodlib.io.hkdb import HkConfig
@@ -21,9 +22,13 @@ from sotodlib.stimulator.stimulator import (
 )
 
 _OBS_TYPES = ('gain', 'time_constant', 'gain_and_timeconstant')
-_DEFAULT_R_FRAC_MIN = 0.2
-_DEFAULT_R_FRAC_MAX = 0.8
-
+_DB_TYPES = ('gain', 'time_constant', 'readout_delay', 'gain_with_tau_correction')
+_PRODUCTS = {
+    'gain': ['gain'],
+    'time_constant': ['time_constant', 'readout_delay'],
+    'gain_and_timeconstant': ['gain', 'time_constant',
+                              'readout_delay', 'gain_with_tau_correction'],
+}
 
 def run(
     logger,
@@ -74,7 +79,7 @@ def run(
                 stm_cal = tod.stm_cal
             else:
                 stm_cal = core.AxisManager.concatenate(
-                    [stm_cal, tod.stm_cal], axis='dets', other_fields='exact')
+                    [stm_cal, tod.stm_cal], axis='dets', other_fields='first')
 
         assert stm_cal.dets.count == meta.dets.count
         return obs_id, stm_cal, None
@@ -85,6 +90,148 @@ def run(
     except Exception as e:
         logger.error(f'Failed to process {obs_id}: {e}')
         return obs_id,  None, (type(e).__name__, str(e), traceback.format_exc())
+
+
+def _get_stm_h5_path(output_dir, obs_id):
+    oid_spl = obs_id.split('_')
+    unix = oid_spl[1][:5]
+    tube_slot = oid_spl[2]
+
+    return os.path.join(output_dir, f'stm_cal_{tube_slot}_{unix}.h5')
+
+
+def _open_stm_manifest_dbs(output_dir, logger):
+    dbs = {}
+    for key in _DB_TYPES:
+        db_path = os.path.join(output_dir, f'stm_{key}.sqlite')
+        if os.path.exists(db_path):
+            logger.info(f'Mapping {db_path}')
+            dbs[key] = core.metadata.ManifestDb(db_path)
+        else:
+            logger.info(f'Creating {db_path}')
+            scheme = core.metadata.ManifestScheme()
+            scheme.add_exact_match('obs:obs_id')
+            scheme.add_data_field('dataset')
+            dbs[key] = core.metadata.ManifestDb(db_path, scheme=scheme)
+    return dbs
+
+
+def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, overwrite):
+    h5_path = _get_stm_h5_path(output_dir, obs_id)
+
+    for product in _PRODUCTS[obs_type]:
+        if product == 'gain' and 'stm_gain' not in stm_cal._fields:
+            continue
+        if product == 'time_constant' and 'stm_tau' not in stm_cal._fields:
+            continue
+        if product == 'readout_delay' and 'readout_delay' not in stm_cal._fields:
+            continue
+        if product == 'stm_gain_with_tau_correction' and \
+            'stm_gain_with_tau_correction' not in stm_cal._fields:
+            continue
+
+        dbs[product].add_entry(
+            {'obs:obs_id': obs_id, 'dataset': obs_id},
+            filename=h5_path,
+            replace=overwrite,
+        )
+
+
+def _detsets_by_obsid(obsfiledb, obsids):
+    return {
+        obs_id: set(obsfiledb.get_detsets(obs_id))
+        for obs_id in obsids
+    }
+
+
+def _build_stm_cal_index(ctx, stm_rows, product):
+    stm_detsets = _detsets_by_obsid(
+        ctx.obsfiledb,
+        [row['obs_id'] for row in stm_rows],
+    )
+
+    cal_index = defaultdict(lambda: {
+        'times': [],
+        'obs_ids': [],
+    })
+
+    for row in stm_rows:
+        if product not in _PRODUCTS[_tag_resolver(row)]:
+            continue
+
+        stm_obs_id = row['obs_id']
+        start_time = row['start_time']
+
+        for detset in stm_detsets[stm_obs_id]:
+            cal_index[detset]['times'].append(start_time)
+            cal_index[detset]['obs_ids'].append(stm_obs_id)
+
+    # List -> np.array for faster search later
+    out = {}
+    for detset, items in cal_index.items():
+        out[detset] = {
+            'times': np.asarray(items['times'], dtype=float),
+            'obs_ids': items['obs_ids']
+        }
+
+    return out
+
+
+def _find_latest_stm_cal(cal_index, detset, obs_start_time, max_days_before):
+    if detset not in cal_index:
+        return None
+
+    times = cal_index[detset]['times']
+    obs_ids = cal_index[detset]['obs_ids']
+
+    idx = np.searchsorted(times, obs_start_time, side='right') - 1
+    if idx < 0:
+        return None
+
+    max_age = 3600 * 24 * max_days_before
+    if obs_start_time - times[idx] > max_age:
+        return None
+
+    return obs_ids[idx]
+
+
+def _tag_resolver(row):
+    if row['gain_and_timeconstant']:
+        return 'gain_and_timeconstant'
+    if row['gain'] and row['time_constant']:
+        return 'gain_and_timeconstant'
+    if row['gain']:
+        return 'gain'
+    if row['time_constant']:
+        return 'time_constant'
+    else:
+        raise ValueError(f'Row {row} has no valid obs_type tag.')
+
+
+def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before, output_dir):
+    for row in obs_rows:
+        obs_id = row['obs_id']
+        obs_start_time = row['start_time']
+
+        for detset in obs_detsets.get(obs_id, []):
+            stm_obs_id = _find_latest_stm_cal(
+                cal_index,
+                detset,
+                obs_start_time,
+                max_days_before,
+            )
+            if stm_obs_id is not None:
+                db.add_entry(
+                    {
+                        'obs:obs_id': obs_id,
+                        'dataset': stm_obs_id,
+                    },
+                    filename=_get_stm_h5_path(output_dir, obs_id),
+                    replace=True,
+                    commit=False,
+                )
+
+        db.conn.commit()
 
 
 def _main(
@@ -102,6 +249,7 @@ def _main(
     nprocs: Optional[int] = 1,
     max_retry: Optional[int] = 3,
     stale: Optional[float] = 60.,
+    max_days_before: Optional[float] = 1.0
 ):
     """Main function for making stimulator calibration metadata.
 
@@ -131,6 +279,8 @@ def _main(
         Maximum attempts before marking a job as failed.
     stale : float (default 60.)
         Jobs locked longer than this many seconds are unlocked before starting.
+    max_days_before : float (default 1.0)
+        Maximum age of stimulator calibration to use for a given observation.
     """
     logger = init_logger(__name__, 'make_stm_cal: ', verbosity=verbosity)
     errlog = os.path.join(output_dir, 'errlog.txt')
@@ -141,43 +291,36 @@ def _main(
     ctx = core.Context(context_path, metadata_list=metadata_list)
 
     # Collect (obs_id, obs_type) pairs to process
-    obs_pairs = []
+    stm_pairs = []
     obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
-    obs_rows = ctx.obsdb.query(obs_type_query, tags=obs_type_tags)
+    stm_rows = ctx.obsdb.query(obs_type_query, tags=obs_type_tags,
+                               sort=['start_time'])
+
     if obs_id is not None:
-        rows_by_obs_id = {}
-        for row in obs_rows:
-            rows_by_obs_id.setdefault(row['obs_id'], []).append(row)
+        rows_by_obs_id = {
+            row['obs_id']: row
+            for row in stm_rows
+        }
+
         for oid in obs_id:
-            for row in rows_by_obs_id.get(oid, []):
-                for otype in obs_type_tags:
-                    if row[otype]:
-                        obs_pairs.append((oid, otype))
+            row = rows_by_obs_id.get(oid, None)
+            if row is None:
+                logger.warning(f'obs_id {oid} not found in obsdb, skipping.')
+                continue
+
+            stm_pairs.append((oid, _tag_resolver(row)))
     else:
-        for otype in obs_type_tags:
-            for row in obs_rows:
-                if row[otype]:
-                    obs_pairs.append((row['obs_id'], otype))
+        for row in stm_rows:
+            stm_pairs.append((row['obs_id'], _tag_resolver(row)))
 
     # ManifestDb: one per calibration product
-    dbs = {}
-    for key in ('gain', 'timeconstant'):
-        db_path = os.path.join(output_dir, f'stm_{key}.sqlite')
-        if os.path.exists(db_path):
-            logger.info(f'Mapping {db_path}')
-            dbs[key] = core.metadata.ManifestDb(db_path)
-        else:
-            logger.info(f'Creating {db_path}')
-            scheme = core.metadata.ManifestScheme()
-            scheme.add_exact_match('obs:obs_id')
-            scheme.add_data_field('dataset')
-            dbs[key] = core.metadata.ManifestDb(db_path, scheme=scheme)
+    dbs = _open_stm_manifest_dbs(output_dir, logger)
 
     jclass = 'stm_cal'
     jdb_path = os.path.join(output_dir, 'jobdb.sqlite')
     jdb = jobdb.JobManager(sqlite_file=jdb_path)
 
-    for oid, otype in obs_pairs:
+    for oid, otype in stm_pairs:
         if len(jdb.get_jobs(jclass=jclass, tags={'obs_id': oid, 'obs_type': otype})) == 0:
             jdb.create_job(jclass, tags={'obs_id': oid, 'obs_type': otype})
 
@@ -191,6 +334,7 @@ def _main(
 
     futures = []
     with jdb.locked(to_do, count=len(to_do)) as jobs:
+        oids_processed = []
         for job in jobs:
             job.mark_visited()
             futures.append(executor.submit(
@@ -225,15 +369,12 @@ def _main(
             if stm_cal is not None:
                 try:
                     logger.info(f'Saving {oid}...')
-                    oid_spl = oid.split('_')
-                    unix = oid_spl[1][:5]
-                    tube_slot = oid_spl[2]
-                    h5_fn = f'stm_cal_{tube_slot}_{unix}.h5'
-                    h5_path = os.path.join(output_dir, h5_fn)
+                    h5_path = _get_stm_h5_path(output_dir, oid)
                     stm_cal.save(h5_path, overwrite=overwrite,
                                  compression='gzip', group=oid)
-
+                    _publish_self(dbs, output_dir, oid, obs_type, stm_cal, overwrite)
                     job.jstate = 'done'
+                    oids_processed.append(oid)
                     continue
                 except Exception as e:
                     logger.error(f'Failed to save {oid}: {e}')
@@ -247,6 +388,23 @@ def _main(
                 job.jstate = 'failed'
             else:
                 logger.error(f'Failed {oid}, try again later')
+
+        # Make correspondence between normal observations and stimulator calibration
+        keep = np.array([row['obs_id'] in oids_processed for row in obs_rows], dtype=bool)
+        stm_rows_available = stm_rows.subset(rows=keep)
+        obs_rows = ctx.obsdb.query(
+            "type=='obs'",
+            sort=['start_time'],
+        )[::-1]
+        obs_detsets = _detsets_by_obsid(
+            ctx.obsfiledb,
+            [row['obs_id'] for row in obs_rows],
+        )
+
+        for product in _DB_TYPES:
+            cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
+            _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
+                                  cal_index, max_days_before, output_dir)
 
 
 def main(pipeline_config, stm_config):
