@@ -547,6 +547,59 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
     return xi, eta, gamma
 
 
+def latr_tilt_shift_to_xieta(zemax_path, tilt_x=0.0, tilt_y=0.0, shift_x=0.0, shift_y=0.0, front_to_sec=200.0, roll=0.0):
+    """
+    Compute the sky offset from a rigid-body tilt and shift of the LATR.
+    Note that the coordinates here are the same convention as focal plane coordinates.
+
+    Arguments:
+
+        zemax_path: Path to the LAT optics data from zemax.
+
+        tilt_x: LATR tilt about x in radians.
+
+        tilt_y: LATR tilt about y in radians.
+
+        shift_x: LATR x shift in mm.
+
+        shift_y: LATR y shift in mm.
+
+        front_to_sec: Distance from the LATR front plate to the LATR
+            secondary focus in mm.
+
+        roll: Rotation about the line of sight in degrees.
+
+    Returns:
+
+        dxi: Offset in xi on sky in radians.
+
+        deta: Offset in eta on sky in radians.
+    """
+    rot = R.from_euler("xy", [tilt_x, tilt_y], degrees=False)
+    translation = np.array([shift_x, shift_y, 0.0])
+
+    # Position of the LATR secondary focus relative to the front plate
+    sec0 = np.array([0.0, 0.0, -front_to_sec])
+    sec = rot.apply(sec0) + translation
+
+    # Map to sky
+    sec2el, sec2xel = LAT_optics(zemax_path)
+    el0 = sec2el(np.array([0.0]), np.array([0.0]))
+    xel0 = sec2xel(np.array([0.0]), np.array([0.0]))
+    el = sec2el(np.array([sec[0]]), np.array([sec[1]]))
+    xel = sec2xel(np.array([sec[0]]), np.array([sec[1]]))
+
+    rot = np.deg2rad(roll + 180.0)
+    def to_xieta(el, xel):
+        xrot = xel * np.cos(rot) - el * np.sin(rot)
+        yrot = el * np.cos(rot) + xel * np.sin(rot)
+        return quat.decompose_xieta( quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-xrot, yrot))[:2]
+
+    xi0, eta0 = to_xieta(el0, xel0)
+    xi, eta = to_xieta(el, xel)
+
+    return xi[0] - xi0[0], eta[0] - eta0[0]
+
 @lru_cache(maxsize=None)
 def sat_to_sky(r_fp, r_sky):
     """
