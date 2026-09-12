@@ -111,12 +111,13 @@ def _open_stm_manifest_dbs(output_dir, logger):
             logger.info(f'Creating {db_path}')
             scheme = core.metadata.ManifestScheme()
             scheme.add_exact_match('obs:obs_id')
+            scheme.add_exact_match('dets:detset')
             scheme.add_data_field('dataset')
             dbs[key] = core.metadata.ManifestDb(db_path, scheme=scheme)
     return dbs
 
 
-def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, overwrite):
+def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite):
     h5_path = _get_stm_h5_path(output_dir, obs_id)
 
     for product in _PRODUCTS[obs_type]:
@@ -126,12 +127,14 @@ def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, overwrite):
             continue
         if product == 'readout_delay' and 'readout_delay' not in stm_cal._fields:
             continue
-        if product == 'stm_gain_with_tau_correction' and \
+        if product == 'gain_with_tau_correction' and \
             'stm_gain_with_tau_correction' not in stm_cal._fields:
             continue
 
         dbs[product].add_entry(
-            {'obs:obs_id': obs_id, 'dataset': obs_id},
+            {'obs:obs_id': obs_id,
+             'detset:detset': detset,
+             'dataset': obs_id},
             filename=h5_path,
             replace=overwrite,
         )
@@ -224,14 +227,32 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before,
                 db.add_entry(
                     {
                         'obs:obs_id': obs_id,
+                        'dets:detset': detset,
                         'dataset': stm_obs_id,
                     },
-                    filename=_get_stm_h5_path(output_dir, obs_id),
+                    filename=_get_stm_h5_path(output_dir, stm_obs_id),
                     replace=True,
                     commit=False,
                 )
 
         db.conn.commit()
+
+
+def load_stimulator_cal(db: core.metadata.ManifestDb):
+    """Return processed stimulator calibration entries from a ManifestDb.
+    """
+    available = {}
+
+    for entry in db.inspect({}):
+        obs_id = entry['obs:obs_id']
+        dataset = entry['dataset']
+
+        if obs_id != dataset:
+            continue
+
+        available[dataset] = entry
+
+    return available
 
 
 def _main(
@@ -293,7 +314,7 @@ def _main(
     # Collect (obs_id, obs_type) pairs to process
     stm_pairs = []
     obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
-    stm_rows = ctx.obsdb.query(obs_type_query, tags=obs_type_tags,
+    stm_rows = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
                                sort=['start_time'])
 
     if obs_id is not None:
@@ -350,6 +371,7 @@ def _main(
 
         for future in as_completed_callable(futures):
             oid, stm_cal, error_info = future.result()
+            detsets = ctx.obsfiledb.get_detsets(oid)
             for job in jobs:
                 if job.tags['obs_id'] == oid:
                     break
@@ -372,7 +394,8 @@ def _main(
                     h5_path = _get_stm_h5_path(output_dir, oid)
                     stm_cal.save(h5_path, overwrite=overwrite,
                                  compression='gzip', group=oid)
-                    _publish_self(dbs, output_dir, oid, obs_type, stm_cal, overwrite)
+                    for detset in detsets:
+                        _publish_self(dbs, output_dir, oid, obs_type, stm_cal, detset, overwrite)
                     job.jstate = 'done'
                     oids_processed.append(oid)
                     continue
@@ -390,8 +413,6 @@ def _main(
                 logger.error(f'Failed {oid}, try again later')
 
         # Make correspondence between normal observations and stimulator calibration
-        keep = np.array([row['obs_id'] in oids_processed for row in obs_rows], dtype=bool)
-        stm_rows_available = stm_rows.subset(rows=keep)
         obs_rows = ctx.obsdb.query(
             "type=='obs'",
             sort=['start_time'],
@@ -402,6 +423,7 @@ def _main(
         )
 
         for product in _DB_TYPES:
+            stm_rows_available = load_stimulator_cal(dbs[product])
             cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
             _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
                                   cal_index, max_days_before, output_dir)
