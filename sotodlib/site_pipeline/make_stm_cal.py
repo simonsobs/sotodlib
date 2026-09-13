@@ -277,7 +277,8 @@ def _main(
     nprocs: Optional[int] = 1,
     max_retry: Optional[int] = 3,
     stale: Optional[float] = 60.,
-    max_days_before: Optional[float] = 1.0
+    max_days_before: Optional[float] = 1.0,
+    update_obs_corresp: Optional[bool] = True,
 ):
     """Main function for making stimulator calibration metadata.
 
@@ -309,6 +310,9 @@ def _main(
         Jobs locked longer than this many seconds are unlocked before starting.
     max_days_before : float (default 1.0)
         Maximum age of stimulator calibration to use for a given observation.
+    update_obs_corresp : bool (default True)
+        If True, update the ManifestDb entries for the correspondence between
+        stimulator calibration and observations.
     """
     logger = init_logger(__name__, 'make_stm_cal: ', verbosity=verbosity)
     errlog = os.path.join(output_dir, 'errlog.txt')
@@ -362,7 +366,6 @@ def _main(
 
     futures = []
     with jdb.locked(to_do, count=len(to_do)) as jobs:
-        oids_processed = []
         for job in jobs:
             job.mark_visited()
             futures.append(executor.submit(
@@ -404,7 +407,6 @@ def _main(
                     for detset in detsets:
                         _publish_self(dbs, output_dir, oid, obs_type, stm_cal, detset, overwrite)
                     job.jstate = 'done'
-                    oids_processed.append(oid)
                     continue
                 except Exception as e:
                     logger.error(f'Failed to save {oid}: {e}')
@@ -419,28 +421,28 @@ def _main(
             else:
                 logger.error(f'Failed {oid}, try again later')
 
-        # Make correspondence between normal observations and stimulator calibration
-        obs_rows = ctx.obsdb.query(
-            "type=='obs'",
-            sort=['start_time'],
-        )[::-1]
-        obs_detsets = _detsets_by_obsid(
-            ctx.obsfiledb,
-            [row['obs_id'] for row in obs_rows],
-        )
-        query_stm_all = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
-        stm_all = ctx.obsdb.query(query_stm_all, tags=list(_OBS_TYPES),
-                               sort=['start_time'])
+        if update_obs_corresp:
+            obs_rows = ctx.obsdb.query(
+                "type=='obs'",
+                sort=['start_time'],
+            )[::-1]
+            obs_detsets = _detsets_by_obsid(
+                ctx.obsfiledb,
+                [row['obs_id'] for row in obs_rows],
+            )
+            query_stm_all = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
+            stm_all = ctx.obsdb.query(query_stm_all, tags=list(_OBS_TYPES),
+                                sort=['start_time'])
 
-        for product in _DB_TYPES:
-            stm_cal_mandb = load_stimulator_cal(dbs[product])
-            stm_rows_available = [
-                row for row in stm_all
-                if row['obs_id'] in stm_cal_mandb
-            ]
-            cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
-            _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
-                                  cal_index, max_days_before, output_dir)
+            for product in _DB_TYPES:
+                stm_cal_mandb = load_stimulator_cal(dbs[product])
+                stm_rows_available = [
+                    row for row in stm_all
+                    if row['obs_id'] in stm_cal_mandb
+                ]
+                cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
+                _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
+                                    cal_index, max_days_before, output_dir)
 
 
 def main(pipeline_config, stm_config):
