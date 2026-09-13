@@ -217,6 +217,12 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before,
         obs_start_time = row['start_time']
 
         for detset in obs_detsets.get(obs_id, []):
+            query = {'obs:obs_id': obs_id, 'dets:detset': detset}
+            existing = db.inspect(query, strict=False)
+            # Remove any existing entries
+            for entry in existing:
+                db.remove_entry(entry['_id'], commit=False)
+
             stm_obs_id = _find_latest_stm_cal(
                 cal_index,
                 detset,
@@ -225,12 +231,6 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before,
             )
 
             if stm_obs_id is not None:
-                query = {'obs:obs_id': obs_id, 'dets:detset': detset}
-                existing = db.inspect(query, strict=False)
-                # Remove any existing entries
-                for entry in existing:
-                    db.remove_entry(entry['_id'], commit=False)
-
                 db.add_entry(
                     {
                         'obs:obs_id': obs_id,
@@ -429,7 +429,7 @@ def _main(
             [row['obs_id'] for row in obs_rows],
         )
         query_stm_all = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
-        stm_all = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
+        stm_all = ctx.obsdb.query(query_stm_all, tags=list(_OBS_TYPES),
                                sort=['start_time'])
 
         for product in _DB_TYPES:
