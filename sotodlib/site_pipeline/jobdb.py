@@ -167,6 +167,10 @@ class Tag(Base):
     job_id = sqy.Column(sqy.Integer, sqy.ForeignKey('jobs.id'))
     key = sqy.Column(sqy.String)
     value = sqy.Column(sqy.String)
+    __table_args__ = (
+        sqy.Index("idx_tags_job_id", "job_id"),
+        sqy.UniqueConstraint("job_id", "key", name="uq_tags_job_key"),
+    )
 
     def __repr__(self):
         return f'Tag(@job_id={self.id}:{self.key}={self.value})'
@@ -381,6 +385,41 @@ class JobManager:
             session.commit()
         if n == 0:
             raise JobLockedError()
+
+    def update_jobs(self, jobs):
+        with self.session_scope() as session:
+            for job in jobs:
+                # Update scalar columns
+                session.query(Job).filter(
+                    Job.id == job.id
+                ).update(
+                    {
+                        "jstate": job.jstate,
+                        "visit_time": job.visit_time,
+                        "visit_count": job.visit_count,
+                        "lock": job.lock,
+                        "lock_owner": job.lock_owner,
+                    },
+                    synchronize_session=False,
+                )
+    
+                # Figure out tags
+                existing_tags = {tag.key: tag.value for tag in session.query(Tag) .filter(Tag.job_id == job.id) .all()}
+                new_tags = {k: str(v) for k, v in job.tags.items()}
+                delete_keys = set(existing_tags) - set(new_tags)
+                if delete_keys:
+                    session.query(Tag).filter(
+                        Tag.job_id == job.id,
+                        Tag.key.in_(delete_keys),
+                    ).delete(synchronize_session=False)
+                for key, value in new_tags.items():
+                    if key not in existing_tags:
+                        session.add(Tag(job_id=job.id, key=key, value=value))
+                    elif existing_tags[key] != value: # type: ignore
+                        session.query(Tag).filter(
+                            Tag.job_id == job.id,
+                            Tag.key == key,
+                        ).update({"value": value}, synchronize_session=False)
 
     @contextmanager
     def locked(self, jobs, count=None, owner=None):
