@@ -567,6 +567,9 @@ param_defaults={
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
         'roll_dist_model': 0,
+        'arc_amp': 0.,
+        'arc_r0': 0.,
+        'arc_roll0': 0.,
     },
     'lat_v2' : {
         'enc_offset_az': 0,
@@ -584,6 +587,9 @@ param_defaults={
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
         'roll_dist_model': 0,
+        'arc_amp': 0.,
+        'arc_r0': 0.,
+        'arc_roll0': 0.,
     },
     'sat_v1' : {
         'enc_offset_az': 0.,
