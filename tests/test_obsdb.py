@@ -2,6 +2,7 @@ import unittest
 from sotodlib.core import metadata
 
 import os
+import sqlite3
 import time
 
 from ._helpers import mpi_multi
@@ -86,6 +87,49 @@ class TestObsDb(unittest.TestCase):
         with self.assertWarns(UserWarning):
             r1 = db.query('drift == "setting"')
 
+    def test_tag_arguments(self):
+        db = get_example()
+        for expression in ["tag()", "tag(1)", "tag(obs_id)", "tag('a', 'b')"]:
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                db.query(expression)
+        with self.assertRaises(sqlite3.OperationalError):
+            db.query("tag('planet') and misspelled_column=1")
+        with self.assertRaises(ValueError):
+            db.query("tag('planet'); SELECT 1")
+
+    def test_tag_functions(self):
+        db = get_example()
+        keys = ['obs:' + key for key in db.query().keys]
+        for expression, count in [
+            ("tag('planet') or tag('cryo_problem')", 3),
+            ("timestamp > 0 and not tag('planet')", 8),
+            ("TAG /* comment */ ('planet') = 1", 2),
+            ("tag('unknown')", 0), ("not tag('unknown')", 10),
+            ("length('tag(''planet'')') > 0 /* tag('planet') */", 10),
+        ]:
+            with self.subTest(expression=expression):
+                result = db.query(expression, add_prefix='obs:')
+                self.assertEqual(len(result), count)
+                self.assertEqual(result.keys, keys)
+        for tag in ["it's a tag", 'a"tag', 'bad-tag', 'timestamp', "x') OR 1=1 --"]:
+            with self.subTest(tag=tag):
+                db.update_obs('myobs0', tags=[tag])
+                literal = tag.replace("'", "''")
+                self.assertEqual(list(db.query(f"tag('{literal}')")['obs_id']), ['myobs0'])
+                db.update_obs('myobs0', tags=['!' + tag])
+                self.assertEqual(len(db.query(f"tag('{literal}')")), 0)
+
+    def test_mixed_tag_queries(self):
+        db = get_example()
+        rows = db.query("tag('planet') or tag('cryo_problem')",
+                        tags=['planet=0', 'cryo_problem', 'unknown'])
+        self.assertEqual(list(rows['obs_id']), ['myobs6'])
+        self.assertEqual((rows[0]['planet'], rows[0]['cryo_problem'], rows[0]['unknown']),
+                         (0, 1, 0))
+        rows = db.query("not tag('cryo_problem')", ['planet=1'])
+        self.assertEqual(list(rows['obs_id']), ['myobs8', 'myobs9'])
+        self.assertTrue(all(row['planet'] == 1 for row in rows))
+
     def test_owb_query(self):
         """Test querying with wafer_info keys."""
         db = get_owb_example()
@@ -110,7 +154,7 @@ class TestObsDb(unittest.TestCase):
         db = get_example()
         existing_obs = db.query()
         obs_id = existing_obs[0]['obs_id']
-        tag = 'a8-{}-😭'
+        tag = 'a8-{}-tag'
         db.update_obs(obs_id, tags=[tag])
         
         # Three things we need to check: =0, =1, and a separate query
@@ -135,6 +179,14 @@ class TestObsDb(unittest.TestCase):
         self.assertIn('test_tag', result['tags'])
         result_other = db.get('myobs0', wafer_info=('ws4', 'f090'), tags=True)
         self.assertNotIn('test_tag', result_other['tags'])
+
+        rows = db.query("tag('test_tag')")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]['wafer_slot'], rows[0]['bandpass']), ('ws3', 'f090'))
+        self.assertEqual(len(db.query("not tag('test_tag')")), len(db) - 1)
+        query = ("EXISTS (SELECT 1 FROM obs AS _obsdb_tag "
+                 "WHERE _obsdb_tag.obs_id = obs.obs_id AND tag('test_tag'))")
+        self.assertEqual(len(db.query(query)), 1)
 
     def test_owb_tag_deletion(self):
         """Test deleting tags for specific wafer_info keys."""
