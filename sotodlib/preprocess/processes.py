@@ -3632,10 +3632,12 @@ class GetTauHWP(_Preprocess):
 class Move(_Preprocess):
     """Rename or remove a data field.
     To delete the field, pass new_name=None.
+    If proc_aman is True, move a data field of proc_aman.
 
     Example config block::
 
         - name: "move"
+          proc_aman: False
           process:
             name: "name"
             new_name: "new_name"
@@ -3646,13 +3648,17 @@ class Move(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.save_name = None
+        self.proc_aman = step_cfgs.get('proc_aman', False)
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:
             raise NotImplementedError("No support for using data AxisManager in process")
-        aman.move(**self.process_cfgs)
+        if self.proc_aman:
+            proc_aman.move(**self.process_cfgs)
+        else:
+            aman.move(**self.process_cfgs)
         return aman, proc_aman
 
 _Preprocess.register(SplitFlags)
