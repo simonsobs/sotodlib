@@ -154,7 +154,7 @@ class TestObsDb(unittest.TestCase):
         db = get_example()
         existing_obs = db.query()
         obs_id = existing_obs[0]['obs_id']
-        tag = 'a8-{}-tag'
+        tag = 'a8-{}-😭'
         db.update_obs(obs_id, tags=[tag])
         
         # Three things we need to check: =0, =1, and a separate query
