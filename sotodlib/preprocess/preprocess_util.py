@@ -1007,7 +1007,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
     if os.path.exists(configs['archive']['index']):
         db = core.metadata.ManifestDb(configs['archive']['index'])
         dbix = {'obs:obs_id':obs_id}
-        for gb, g in zip(group_by, cur_groups[0]):
+        for gb, g in zip(group_by, cur_groups):
             dbix[f'dets:{gb}'] = g
         if len(db.inspect(dbix)) == 0:
             dbexist = False
@@ -1102,12 +1102,12 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
     cur_groups = [str(val) for val in dets.values() if np.isscalar(val)]
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     newpath = f'{subdir}/{obs_id}'
-    for cg in cur_groups[0]:
+    for cg in cur_groups:
         newpath += f'_{cg}'
     temp_config = swap_archive(configs, newpath+'.h5')
     policy = ArchivePolicy.from_params(temp_config['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
-    for gb, g in zip(group_by, cur_groups[0]):
+    for gb, g in zip(group_by, cur_groups):
         if gb == 'detset':
             dest_dataset += "_" + g
         else:
@@ -1120,7 +1120,7 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
     # Collect index info.
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
-    for gb, g in zip(group_by, cur_groups[0]):
+    for gb, g in zip(group_by, cur_groups):
         db_data['dets:'+gb] = g
     outputs['db_data'] = db_data
 
