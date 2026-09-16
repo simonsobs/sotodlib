@@ -26,7 +26,7 @@ from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed, Future
+from concurrent.futures import ProcessPoolExecutor, Future
 import sodetlib.tes_param_correction as tpc
 from sodetlib.operations.iv import IVAnalysis
 from sodetlib.operations.bias_steps import BiasStepAnalysis
@@ -921,8 +921,22 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
 
     pb = tqdm(total=len(obs_ids), disable=(not cfg.show_pb))
 
+    # Futures are deliberately not kept anywhere. A Future holds its result
+    # (the full CalRessetResult, including per-channel IV arrays in
+    # correction_results) until it is garbage collected, so keeping a list of
+    # them retains every processed observation in memory for the whole run.
+    # Completion is awaited with executor.shutdown(wait=True) instead, which
+    # returns only after all done-callbacks have run. Exceptions raised inside
+    # a done-callback are swallowed by concurrent.futures, so they are recorded
+    # here and re-raised once everything has finished.
+    resset_errors: list[BaseException] = []
+
     def callback(fut: Future):
-        result = fut.result()
+        try:
+            result = fut.result()
+        except Exception as e:
+            resset_errors.append(e)
+            return
         pb.update()
         handle_result(result, cfg)
 
@@ -937,17 +951,12 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     executor1 = ProcessPoolExecutor(max_workers=cfg.nprocs_obs_info)
     executor2 = ProcessPoolExecutor(max_workers=cfg.nprocs_result_set)
 
-    resset_futures: list[Future] = []
-    obsinfo_futures: list[Future] = []
-
-
     def get_obs_info_callback(fut: Future):
         try:
             result = fut.result()
             if result.success:
                 future = executor2.submit(get_cal_resset, cfg, result.obs_info)
                 future.add_done_callback(callback)
-                resset_futures.append(future)
             else:
                 pb.update()
                 add_to_failed_cache(cfg, result.obs_id, result.traceback)
@@ -959,18 +968,17 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
         for obs_id in obs_ids:
             future = executor1.submit(get_obs_info, cfg, obs_id)
             future.add_done_callback(get_obs_info_callback)
-            obsinfo_futures.append(future)
 
-        # Wait for all obsinfo tasks to complete
-        for fut in as_completed(obsinfo_futures):
-            pass  # results handled in callback
+        # Wait for all obsinfo tasks to complete. Their callbacks (which
+        # submit the resset tasks) are guaranteed to have run by the time
+        # this returns.
+        executor1.shutdown(wait=True)
 
         # Wait for all resset tasks to complete
-        for fut in as_completed(resset_futures):
-            try:
-                fut.result()  # Force exceptions to be raised here if any
-            except Exception as e:
-                errback(e)
+        executor2.shutdown(wait=True)
+
+        if resset_errors:
+            errback(resset_errors[0])
 
     finally:
         executor1.shutdown(wait=True, cancel_futures=True)
