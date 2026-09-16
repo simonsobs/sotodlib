@@ -206,7 +206,7 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
       zero point.
 
     In addition to the above parameters (which affect only the
-    boresight), the parameter ``roll_dist_model`` (an integer)
+    boresight), the parameter ``roll_dist_model`` (a string)
     activates distortions of the focal plane, which can consume other
     parameters. See details in :func:`apply_lat_distortion_model`.
 
@@ -331,22 +331,22 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
     that was passed in, if in_place is True.)
 
     Two models are supported in addition to the do-nothing model.
-    These are selected via parameter ``roll_dist_model`` (integer):
+    These are selected via parameter ``roll_dist_model`` (str):
 
-      - 0: No distortion correction.
-      - 1: Empirical "arc" correction.  This is further parametrized by:
+      - 'none': No distortion correction.
+      - 'arc': Empirical correction.  This is further parametrized by:
 
         - ``arc_amp``: the amplitude of the radial term (radians).
         - ``arc_r0``: the cross-over radius (radians).
         - ``arc_roll0``: the reference roll value (radians) at which
           the effect is fully null.
 
-      - 2: Optical modeling result.  This is based on Zemax models and
-        has no parameters.
+      - 'optics': Optical modeling result.  This is based on Zemax
+        models and currently has no parameters.
 
     """
     dist_model = params.get('roll_dist_model')
-    if dist_model in [None, 0]:
+    if dist_model in [None, 'none']:
         if in_place or focal_plane is None:
             return focal_plane
         else:
@@ -388,8 +388,8 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
             * quat.rotation_xieta(focal_plane.xi, focal_plane.eta))
 
         # Get distortion
-        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_xi_bsp'])
-        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_eta_bsp'])
+        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp'])
+        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_eta_bsp'])
 
         # Apply distortion and return to un-rolled focal_plane.
         xi2, eta2, _ = quat.decompose_xieta(
@@ -566,7 +566,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
-        'roll_dist_model': 0,
+        'roll_dist_model': 'none',
         'arc_amp': 0.,
         'arc_r0': 0.,
         'arc_roll0': 0.,
@@ -586,7 +586,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
-        'roll_dist_model': 0,
+        'roll_dist_model': 'none',
         'arc_amp': 0.,
         'arc_r0': 0.,
         'arc_roll0': 0.,
@@ -667,12 +667,12 @@ def get_base_tilt_q_2nd(az, el, dE_C2A, dE_S2A, dA_C2A, dA_S2A):
 
 # Parameter store.
 #
-# LAT_ROLL_DIST_V2 are the 2d spline parameters for roll_dist_model=2.
-# These are obtained from an analysis of ray tracing result
-# ID9_checked_trace_data.npz (md5:862da7).
+# LAT_ROLL_DIST_OPTICS_V1 are the 2d spline parameters for
+# roll_dist_model='optics'.  These are obtained from an analysis of
+# ray tracing result ID9_chief_nopol_v2.npz (md5:862da7).
 #
 
-LAT_ROLL_DIST_V2 = {
+LAT_ROLL_DIST_OPTICS_V1 = {
     'd_xi_bsp': [
         np.array([-0.06582537, -0.06582537, -0.06582537, -0.06582537,  0.06675579,
                   0.06675579,  0.06675579,  0.06675579]),
