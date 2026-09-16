@@ -310,8 +310,11 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
     az = az_orig + change
 
     # Apply any (non-linear) focal plane distortions.
+    _fp = None
+    if focal_plane_template is not None:
+        _fp = focal_plane_template.copy()
     focal_plane = apply_lat_distortion_model(
-        params, az, el, roll, focal_plane=focal_plane_template)
+        params, az, el, roll, _fp)
 
     return (az, el, roll), focal_plane
 
@@ -321,14 +324,13 @@ def model_lat_v1(params, az, el, roll, focal_plane_template=None):
 def model_lat_v2(params, az, el, roll, focal_plane_template=None):
     return model_lat_v1_v2(params, az, el, roll, focal_plane_template=focal_plane_template, version='lat_v2')
 
-def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
-                               in_place=False):
+def apply_lat_distortion_model(params, az, el, roll, focal_plane):
     """Apply focal plane corrections due to non-linear projection
     effects of the mirrors.  The models here may use the boresight az,
     el, and roll vectors to compute the corrections.
 
-    Returns the updated focal_plane (which will be the same object
-    that was passed in, if in_place is True.)
+    Returns the updated focal_plane, which is the same object passed
+    as ``focal_plane`` (modified in place).
 
     Two models are supported in addition to the do-nothing model.
     These are selected via parameter ``roll_dist_model`` (str):
@@ -345,14 +347,12 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
         models and currently has no parameters.
 
     """
-    dist_model = params.get('roll_dist_model')
-    if dist_model in [None, 'none']:
-        if in_place or focal_plane is None:
-            return focal_plane
-        else:
-            return focal_plane.copy()
+    dist_model = params['roll_dist_model']
+    if dist_model == 'none':
+        return focal_plane
 
-    assert focal_plane is not None, "LAT non-linear distortions require focal_plane to be passed in."
+    assert focal_plane is not None, "LAT non-linear distortions (model='{dist_model}') "\
+        "require focal_plane != None to be passed in."
 
     # Make sure pointing inputs can be treated as vectors.
     az, el, roll = [np.atleast_1d(x) for x in [az, el, roll]]
@@ -364,9 +364,9 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
         xi, eta = focal_plane.xi, focal_plane.eta
         r2 = xi**2 + eta**2
         scale = amp * (1 - r2 / r0**2)
-        xi1 = xi + scale * (_c - 1)
-        eta1 = eta + scale * _s
-        return _update_focal_plane(focal_plane, xi1, eta1, focal_plane.gamma, in_place=in_place)
+        focal_plane.xi += scale * (_c - 1)
+        focal_plane.eta += scale * _s
+        return focal_plane
 
     elif dist_model == 'optics':
         if len(roll) > 1:
@@ -396,9 +396,9 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
             quat.euler(2, -roll_mean)
             * quat.rotation_xieta(xi1 + dxi, eta1 + deta))
 
-        return _update_focal_plane(
-            focal_plane, xi2, eta2,
-            focal_plane.gamma, in_place=in_place)
+        focal_plane.xi[:] = xi2
+        focal_plane.eta[:] = eta2
+        return focal_plane
 
     raise ValueError(f"Unimplemented distortion model '{dist_model}'")
 
@@ -450,20 +450,6 @@ def _reset_focal_plane(tod, focal_plane_template=None, wrap=None):
     if wrap is not False:
         tod.wrap(wrap, fp, overwrite=True)
     return fp
-
-
-def _update_focal_plane(focal_plane, xi, eta, gamma, in_place=False):
-    if in_place:
-        dest = focal_plane
-    else:
-        dest = core.AxisManager(focal_plane.dets)
-    for k, v in [
-            ('xi', xi),
-            ('eta', eta),
-            ('gamma', gamma)]:
-        dest.wrap(k, v, axis_map=[(0, 'dets')], overwrite=True)
-    return dest
-
 
 
 #

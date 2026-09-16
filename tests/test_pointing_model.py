@@ -43,7 +43,9 @@ def quick_focal_plane(size, count):
     xi, eta = xi.ravel(), eta.ravel()
     det_count = len(xi)
     fp = core.AxisManager(core.LabelAxis('dets', ['d%02i' % i for i in range(det_count)]))
-    pm._update_focal_plane(fp, xi, eta, xi*0, in_place=True)
+    fp.wrap('xi', xi, axis_map=[(0, 'dets')])
+    fp.wrap('eta', eta, axis_map=[(0, 'dets')])
+    fp.wrap('gamma', xi*0, axis_map=[(0, 'dets')])
     return fp
 
 def bigness(*args):
@@ -276,7 +278,6 @@ class CoordsUtilsTest(unittest.TestCase):
 
         # These all mean "no correction".
         for params in [
-                {},
                 {'roll_dist_model': 'none'},
                 {'roll_dist_model': 'arc',
                  'arc_amp':        0.,
@@ -289,7 +290,7 @@ class CoordsUtilsTest(unittest.TestCase):
                  'arc_roll0':      0,
                  },
         ]:
-            fp1 = pm.apply_lat_distortion_model(params, az, el, rollz, fp0, in_place=False)
+            fp1 = pm.apply_lat_distortion_model(params, az, el, rollz, fp0.copy())
             dx, dy = fp1.xi - fp0.xi, fp1.eta - fp0.eta
             assert bigness(dx, dy) < .01 * ARCMIN
 
@@ -308,7 +309,7 @@ class CoordsUtilsTest(unittest.TestCase):
         ]:
             params['arc_roll0'] = roll0 * DEG
             fp1 = pm.apply_lat_distortion_model(params, az, el, rollz + roll,
-                                                fp0, in_place=False)
+                                                fp0.copy())
             dx, dy = fp1.xi - fp0.xi, fp1.eta - fp0.eta
             assert (not big_x) ^ (bigness(dx) >= .1 * ARCMIN)
             assert (not big_y) ^ (bigness(dy) >= .1 * ARCMIN)
@@ -318,7 +319,7 @@ class CoordsUtilsTest(unittest.TestCase):
         params = {
             'roll_dist_model': 'optics',
         }
-        fp1 = pm.apply_lat_distortion_model(params, az, el, rollz, fp0, in_place=False)
+        fp1 = pm.apply_lat_distortion_model(params, az, el, rollz, fp0.copy())
 
         dx, dy = fp1.xi - fp0.xi, fp1.eta - fp0.eta
         assert bigness(dx, dy) > .1 * ARCMIN
@@ -327,7 +328,7 @@ class CoordsUtilsTest(unittest.TestCase):
         results = [fp0]
         for roll in [0., 30 * DEG, 180 * DEG]:
             fp1 = pm.apply_lat_distortion_model(params, az, el, rollz + roll,
-                                                fp0, in_place=False)
+                                                fp0.copy())
             # Must differ from all previous results...
             for fp in results:
                 assert bigness(fp1.xi - fp.xi, fp1.eta - fp.eta) > .1 * ARCMIN
