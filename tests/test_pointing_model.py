@@ -146,7 +146,7 @@ class CoordsUtilsTest(unittest.TestCase):
         tod = tod0.copy()
         update_pmodel(tod,
                       version='lat_v2',
-                      roll_dist_model=2)
+                      roll_dist_model='optics')
         with self.assertRaises(Exception):
             pm.apply_pointing_model(tod)
 
@@ -155,7 +155,7 @@ class CoordsUtilsTest(unittest.TestCase):
         tod = tod0.copy()
         update_pmodel(tod,
                       version='lat_v2',
-                      roll_dist_model=2)
+                      roll_dist_model='optics')
         tod.wrap('focal_plane', quick_focal_plane(3., 20))
         pm.apply_pointing_model(tod)
         assert 'focal_plane_template' in tod
@@ -164,7 +164,7 @@ class CoordsUtilsTest(unittest.TestCase):
         tod = tod0.copy()
         update_pmodel(tod,
                       version='lat_v2',
-                      roll_dist_model=2)
+                      roll_dist_model='optics')
         tod.wrap('focal_plane_template', quick_focal_plane(3., 20))
         pm.apply_pointing_model(tod)
         assert 'focal_plane' in tod
@@ -277,13 +277,13 @@ class CoordsUtilsTest(unittest.TestCase):
         # These all mean "no correction".
         for params in [
                 {},
-                {'roll_dist_model': 0},
-                {'roll_dist_model': 1,
+                {'roll_dist_model': 'none'},
+                {'roll_dist_model': 'arc',
                  'arc_amp':        0.,
                  'arc_r0':         3.1913387e-02,
                  'arc_roll0':      90 * DEG,
                  },
-                {'roll_dist_model': 1,
+                {'roll_dist_model': 'arc',
                  'arc_amp':        0.0001,
                  'arc_r0':         3.1913387e-02,
                  'arc_roll0':      0,
@@ -295,7 +295,7 @@ class CoordsUtilsTest(unittest.TestCase):
 
         # Model 1 - empirical correction for non-linear secondary effects.
         params = {
-            'roll_dist_model': 1,
+            'roll_dist_model': 'arc',
             'arc_amp':        1.0083065e-04,
             'arc_r0':         3.1913387e-02,
             'arc_roll0':      0., # 3.4087353e-02,
@@ -316,7 +316,7 @@ class CoordsUtilsTest(unittest.TestCase):
         # Model 2 - secondary distortion model from ray tracing. No
         # params other than to set roll_dist_model.
         params = {
-            'roll_dist_model': 2,
+            'roll_dist_model': 'optics',
         }
         fp1 = pm.apply_lat_distortion_model(params, az, el, rollz, fp0, in_place=False)
 

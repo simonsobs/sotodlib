@@ -357,7 +357,7 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
     # Make sure pointing inputs can be treated as vectors.
     az, el, roll = [np.atleast_1d(x) for x in [az, el, roll]]
 
-    if dist_model == 1:
+    if dist_model == 'arc':
         # Empirical model.
         amp, r0, roll0 = [params[k] for k in ['arc_amp', 'arc_r0', 'arc_roll0']]
         _c, _s = np.cos(roll-roll0).mean(), np.sin(roll-roll0).mean()
@@ -368,7 +368,7 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
         eta1 = eta + scale * _s
         return _update_focal_plane(focal_plane, xi1, eta1, focal_plane.gamma, in_place=in_place)
 
-    elif dist_model == 2:
+    elif dist_model == 'optics':
         if len(roll) > 1:
             # Check that roll is ~stable and get typical value.
             droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
@@ -400,7 +400,7 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
             focal_plane, xi2, eta2,
             focal_plane.gamma, in_place=in_place)
 
-    raise ValueError(f"Unimplemented distortion model {dist_model}")
+    raise ValueError(f"Unimplemented distortion model '{dist_model}'")
 
 
 def _ensure_focal_plane_template(tod):
