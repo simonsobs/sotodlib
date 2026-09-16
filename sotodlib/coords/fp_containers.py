@@ -11,12 +11,14 @@ calculations or as static attributes for loading saved results.
 
 from __future__ import annotations
 
+import logging
 from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Literal, Optional, Self, cast, overload
+from typing import Any, Iterable, Literal, Optional, Self, cast, overload
 
+import h5py
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
@@ -24,10 +26,33 @@ from jaxtyping import Float, Integer, Shaped
 from scipy.optimize import minimize
 from so3g.proj import quat
 from sotodlib.coords.pointing_model import apply_pointing_model, param_defaults
-from sotodlib.core import AxisManager, IndexAxis
+from sotodlib.core import AxisManager, IndexAxis, metadata
 from sotodlib.core.metadata import ManifestDb, MetadataSpec
-from sotodlib.io.metadata import SuperLoader
+from sotodlib.io.metadata import SuperLoader, read_dataset, write_dataset
 from sotodlib.utils import epochs
+
+_COORDSYS_COLUMNS = {
+    "xieta": ("xi", "eta", "gamma"),
+    "horizon": ("az", "el", "roll"),
+}
+
+logger = logging.getLogger("finalize_staic_pointing")
+
+
+def _add_attrs(dset, attrs):
+    for k, v in attrs.items():
+        if v is None:
+            logger.warning("Not adding attribute %s because it is None", k)
+            continue
+        dset.attrs[k] = v
+
+
+def _create_group(f, path, overwrite=True):
+    if path in f:
+        if not overwrite:
+            raise ValueError(f"HDF5 path already exists: {path}")
+        del f[path]
+    return f.create_group(path)
 
 
 def gamma_fit(src, dst):
@@ -211,6 +236,56 @@ class PointingModel:
         to_ret.xyz = np.column_stack((xi, eta, gamma))
         return to_ret
 
+    def save(self, f: h5py.File, path: str, overwrite: bool = True):
+        """
+        Save the pointing model to an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            HDF5 file object to save to.
+        path : str
+            Path within the HDF5 file at which to save the pointing model.
+        overwrite : bool
+            If True, overwrite an existing pointing model at `path`.
+        """
+        group = _create_group(f, path, overwrite)
+        _add_attrs(
+            group, {"epoch": self.epoch, "force_zero_roll": self.force_zero_roll}
+        )
+
+        parameters = AxisManager()
+        for name, value in self.parameters.items():
+            parameters.wrap(name, value)
+        parameters.save(f, f"{path}/parameters")
+
+    @classmethod
+    def load(cls, f: h5py.File, path: str) -> Self:
+        """
+        Load a pointing model from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            HDF5 file object containing the pointing model.
+        path : str
+            Path within the HDF5 file from which to load the pointing model.
+
+        Returns
+        -------
+        PointingModel
+            The loaded pointing model.
+        """
+        group = f[path]
+        parameters = AxisManager.load(f, f"{path}/parameters")
+        parameters = {name: parameters[name] for name in parameters._fields}
+
+        return cls(
+            epoch=cast(str, group.attrs["epoch"]),
+            parameters=parameters,
+            force_zero_roll=cast(bool, group.attrs["force_zero_roll"]),
+        )
+
 
 @dataclass
 class Transform:
@@ -280,6 +355,48 @@ class Transform:
     def rot(self):
         return self.decompose[2]
 
+    def save(self, f: h5py.File, path: str, overwrite: bool = True):
+        """
+        Save the transform to an HDF5 group.
+
+        Parameters
+        ----------
+        f : h5py.File
+            Open HDF5 file.
+        path : str
+            Path within the HDF5 file where the transform should be stored.
+        overwrite : bool, default: True
+            If True overwrite any existing h5groups.
+        """
+        group = _create_group(f, path, overwrite=overwrite)
+
+        group = f.create_group(path)
+        group.create_dataset("shift", data=self.shift)
+        group.create_dataset("affine", data=self.affine)
+
+    @classmethod
+    def load(cls, f: h5py.File, path: str) -> Self:
+        """
+        Load a transform from an HDF5 group.
+
+        Parameters
+        ----------
+        f : h5py.File
+            Open HDF5 file.
+        path : str
+            Path within the HDF5 file containing the transform.
+
+        Returns
+        -------
+        Transform
+            Loaded transform.
+        """
+        group = cast(h5py.Group, f[path])
+        shift = np.array(group["shift"])
+        affine = np.array(group["affine"])
+
+        return cls(shift=shift, affine=affine)
+
 
 @dataclass
 class DetectorOffsets:
@@ -290,7 +407,7 @@ class DetectorOffsets:
 
     Attributes
     ----------
-    xyz : Float[np.ndarray, "3 ndet"]
+    xyz : Float[np.ndarray, "ndet 3"]
         The `x` axis of the detector offsets.
         For `xieta` this is `xi`.
         For `horizon` this is `az`.
@@ -381,6 +498,91 @@ class DetectorOffsets:
         ancil.wrap("roll_enc", np.rad2deg(self.roll))
         ancil.wrap("boresight_enc", -1 * np.rad2deg(self.roll))  # for SATs
         return ancil
+
+    def save(self, f: h5py.File, path: str, overwrite: bool = True):
+        """Save detector offsets to an HDF5 ResultSet.
+
+        The ResultSet contains one row per detector with columns for the
+        detector ID, coordinate values, and split. Coordinate column names
+        are determined by `coordsys`: `xi`, `eta`, `gamma` for
+        `xieta` and `az`, `el`, `roll` for `horizon`.
+
+        The coordinate system and center are stored as HDF5 attributes.
+
+        Parameters
+        ----------
+        f : h5py.File
+            HDF5 file to save to.
+        path : str
+            Path within the HDF5 file at which to save the ResultSet.
+        overwrite : bool, default: True
+            Whether to overwrite an existing dataset at `path`.
+        """
+        columns = _COORDSYS_COLUMNS[self.coordsys]
+        dtype = [
+            ("dets:det_id", self.det_id.dtype),
+            *((name, self.xyz.dtype) for name in columns),
+            ("split", self.split.dtype),
+        ]
+
+        data = np.empty(len(self.det_id), dtype=dtype)
+        data["dets:det_id"] = self.det_id
+        data[columns[0]] = self.xyz[:, 0]
+        data[columns[1]] = self.xyz[:, 1]
+        data[columns[2]] = self.xyz[:, 2]
+        data["split"] = self.split
+
+        write_dataset(
+            metadata.ResultSet.from_friend(data),
+            f,
+            path,
+            overwrite=overwrite,
+        )
+        _add_attrs(
+            f[path],
+            {
+                "coordsys": self.coordsys,
+                "center": self.center,
+            },
+        )
+
+    @classmethod
+    def load(cls, f: h5py.File, path: str) -> Self:
+        """Load detector offsets from an HDF5 ResultSet.
+
+        Parameters
+        ----------
+        f : h5py.File
+            HDF5 file containing the detector offsets.
+        path : str
+            Path within the HDF5 file containing the ResultSet.
+
+        Returns
+        -------
+        DetectorOffsets
+            Detector offsets loaded from the ResultSet.
+        """
+        rs = read_dataset(f, path)
+        coordsys = cast(str, f[path].attrs["coordsys"])
+        columns = _COORDSYS_COLUMNS[coordsys]
+        xyz = np.column_stack(
+            [
+                np.asarray(rs[columns[0]]),
+                np.asarray(rs[columns[1]]),
+                np.asarray(rs[columns[2]]),
+            ]
+        )
+        center = (
+            np.asarray(f[path].attrs["center"]) if "center" in f[path].attrs else None
+        )
+
+        return cls(
+            xyz=xyz,
+            det_id=np.asarray(rs["dets:det_id"]),
+            split=np.asarray(rs["split"]),
+            center=center,
+            coordsys=coordsys,
+        )
 
 
 @dataclass
@@ -651,6 +853,130 @@ class FocalPlane:
     def pm_resid(self):
         return self.data_pm.xyz - self.pm_transformed.xyz
 
+    def save(
+        self,
+        f: h5py.File,
+        path: str,
+        pointing_models: tuple[PointingModel, ...],
+        overwrite: bool = True,
+    ):
+        """
+        Save the focal plane to an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object to save to.
+        path : str
+            The path within the HDF5 file where the focal plane will be saved.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+        overwrite : bool, default: True
+            Whether to overwrite existing datasets.
+        """
+        group = _create_group(f, path, overwrite)
+        pm_epcs = [pm.epoch for pm in pointing_models]
+        try:
+            pm_idx = pm_epcs.index(self.pointing_model.epoch)
+        except ValueError:
+            raise ValueError(
+                f"Can't find pointing model with epoch {self.pointing_model.epoch} (in {self.name}+{self.meas_id})"
+            )
+
+        _add_attrs(
+            group,
+            {
+                "name": self.name,
+                "meas_id": self.meas_id,
+                "static": self.static,
+                "autofreeze": self.autofreeze,
+                "fake_gamma": self.fake_gamma,
+                "pm_idx": pm_idx,
+            },
+        )
+
+        self.data.save(f, f"{path}/data", overwrite=overwrite)
+        self.enc.save(f, f"{path}/enc", overwrite=overwrite)
+        if f"{path}/weights" in f:
+            if overwrite:
+                del f[f"{path}/weights"]
+            else:
+                raise ValueError(f"{path}/weights already exists")
+        f.create_dataset(f"{path}/weights", data=self.weights)
+
+        if "_data_pm_stat" in self.__dict__:
+            self._data_pm_stat.save(f, f"{path}/data_pm", overwrite=overwrite)
+        if "_transform_stat" in self.__dict__:
+            self._transform_stat.save(f, f"{path}/transform", overwrite=overwrite)
+        if "_transformed_stat" in self.__dict__:
+            self._transformed_stat.save(f, f"{path}/transformed", overwrite=overwrite)
+        if "_pm_transform_stat" in self.__dict__:
+            self._pm_transform_stat.save(f, f"{path}/pm_transform", overwrite=overwrite)
+        if "_pm_transformed_stat" in self.__dict__:
+            self._pm_transformed_stat.save(
+                f, f"{path}/pm_transformed", overwrite=overwrite
+            )
+
+    @classmethod
+    def load(
+        cls,
+        f: h5py.File,
+        path: str,
+        template: DetectorOffsets,
+        pointing_models: tuple[PointingModel, ...],
+    ) -> Self:
+        """
+        Load a focal plane from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object containing the focal plane.
+        path : str
+            The path within the HDF5 file where the focal plane is stored.
+        template : DetectorOffsets
+            The template shared by the focal planes in the collection.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+
+
+        Returns
+        -------
+        FocalPlane
+            The loaded focal plane.
+        """
+        group = cast(h5py.Group, f[path])
+        data = DetectorOffsets.load(f, f"{path}/data")
+        enc = DetectorOffsets.load(f, f"{path}/enc")
+        weights = np.asarray(f[f"{path}/weights"])
+
+        pm_idx = cast(int, group.attrs["pm_idx"])
+        fp = cls(
+            name=cast(str, group.attrs["name"]),
+            meas_id=cast(str, group.attrs["meas_id"]),
+            data=data,
+            enc=enc,
+            weights=weights,
+            template=template,
+            pointing_model=pointing_models[pm_idx],
+            static=cast(bool, group.attrs["static"]),
+            autofreeze=cast(bool, group.attrs["autofreeze"]),
+            fake_gamma=cast(bool, group.attrs["fake_gamma"]),
+        )
+
+        if "data_pm" in group:
+            fp._data_pm_stat = DetectorOffsets.load(f, f"{path}/data_pm")
+        if "transform" in group:
+            fp._transform_stat = Transform.load(f, f"{path}/transform")
+        if "transformed" in group:
+            fp._transformed_stat = DetectorOffsets.load(f, f"{path}/transformed")
+        if "pm_transform" in group:
+            fp._pm_transform_stat = Transform.load(f, f"{path}/pm_transform")
+        if "pm_transformed" in group:
+            fp._pm_transformed_stat = DetectorOffsets.load(f, f"{path}/pm_transformed")
+
+        return fp
+
 
 @dataclass
 class FocalPlaneCollection:
@@ -779,6 +1105,132 @@ class FocalPlaneCollection:
     @property
     def resid(self):
         return self.data.xyz - self.transformed.xyz
+
+    def save(
+        self,
+        f: h5py.File,
+        path: str,
+        pointing_models: tuple[PointingModel, ...],
+        overwrite: bool = True,
+    ):
+        """
+        Save the focal plane collection to an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object to save to.
+        path : str
+            The path within the HDF5 file where the collection will be saved.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+        overwrite : bool, default: True
+            Whether to overwrite existing datasets.
+        """
+        meas_ids = [fp.meas_id for fp in self.focal_planes]
+        if len(meas_ids) != len(set(meas_ids)):
+            raise ValueError("FocalPlaneCollection contains overlapping meas_ids")
+
+        group = _create_group(f, path, overwrite)
+        _add_attrs(
+            group,
+            {
+                "name": self.name,
+                "static": self.static,
+                "autofreeze": self.autofreeze,
+                "pad": self.pad,
+                "fake_gamma": self.fake_gamma,
+            },
+        )
+        self.template.save(f, f"{path}/template", overwrite=overwrite)
+        for fp in self.focal_planes:
+            fp.save(
+                f,
+                f"{path}/{fp.meas_id}",
+                pointing_models=pointing_models,
+                overwrite=overwrite,
+            )
+
+        if "_data_stat" in self.__dict__:
+            self._data_stat.save(f, f"{path}/data", overwrite=overwrite)
+        if "_weights_stat" in self.__dict__:
+            if f"{path}/weights" in f:
+                if overwrite:
+                    del f[f"{path}/weights"]
+                else:
+                    raise ValueError(f"{path}/weights already exists")
+            f.create_dataset(f"{path}/weights", data=self._weights_stat)
+        if "_transform_stat" in self.__dict__:
+            self._transform_stat.save(f, f"{path}/transform")
+        if "_transformed_stat" in self.__dict__:
+            self._transformed_stat.save(f, f"{path}/transformed", overwrite=overwrite)
+
+    @classmethod
+    def load(
+        cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...]
+    ) -> Self:
+        """
+        Load a focal plane collection from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object containing the collection.
+        path : str
+            The path within the HDF5 file where the collection is stored.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+
+        Returns
+        -------
+        FocalPlaneCollection
+            The loaded focal plane collection.
+        """
+        template = DetectorOffsets.load(
+            f,
+            f"{path}/template",
+        )
+        group = cast(h5py.Group, f[path])
+
+        focal_planes = []
+        for name in group:
+            if name in {"template", "data", "weights", "transform", "transformed"}:
+                continue
+            focal_planes.append(
+                FocalPlane.load(
+                    f,
+                    f"{path}/{name}",
+                    template=template,
+                    pointing_models=pointing_models,
+                )
+            )
+
+        collection = cls(
+            name=cast(str, group.attrs["name"]),
+            focal_planes=focal_planes,
+            template=template,
+            static=cast(bool, group.attrs["static"]),
+            autofreeze=cast(bool, group.attrs["autofreeze"]),
+            pad=cast(bool, group.attrs["pad"]),
+            fake_gamma=cast(bool, group.attrs["fake_gamma"]),
+        )
+
+        if "data" in group:
+            collection._data_stat = DetectorOffsets.load(
+                f,
+                f"{path}/data",
+            )
+        if "weights" in group:
+            collection._weights_stat = np.asarray(f[f"{path}/weights"])
+        if "transform" in group:
+            collection._transform_stat = Transform.load(f, f"{path}/transform")
+        if "transformed" in group:
+            collection._transformed_stat = DetectorOffsets.load(
+                f,
+                f"{path}/transformed",
+            )
+
+        return collection
 
 
 @dataclass
@@ -911,6 +1363,90 @@ class OpticsTube:
         )
         self.cm_transform_norx = Transform(sft, aff)
 
+    def save(
+        self,
+        f: h5py.File,
+        path: str,
+        pointing_models: tuple[PointingModel, ...],
+        overwrite: bool = True,
+    ):
+        """
+        Save the optics tube to an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object to save to.
+        path : str
+            The path within the HDF5 file where the optics tube will be saved.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+        overwrite : bool, default: True
+            Whether to overwrite existing datasets.
+        """
+        group = _create_group(f, path, overwrite)
+        _add_attrs(
+            group,
+            {
+                "name": self.name,
+                "wafer_slots": np.asarray(self.wafer_slots),
+                "static": self.static,
+                "autofreeze": self.autofreeze,
+            },
+        )
+        for fp in self.focal_planes:
+            fp.save(f, f"{path}/{fp.name}", pointing_models, overwrite=overwrite)
+        if "_cm_transform_stat" in self.__dict__:
+            self._cm_transform_stat.save(f, f"{path}/cm_transform")
+        if "cm_transform_norx" in self.__dict__:
+            self.cm_transform_norx.save(f, f"{path}/cm_transform_norx")
+
+    @classmethod
+    def load(
+        cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...]
+    ) -> Self:
+        """
+        Load an optics tube from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object containing the optics tube.
+        path : str
+            The path within the HDF5 file where the optics tube is stored.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+
+        Returns
+        -------
+        OpticsTube
+            The loaded optics tube.
+        """
+        focal_planes = []
+        group = cast(h5py.Group, f[path])
+        for name in group:
+            if name in {"cm_transform", "cm_transform_norx"}:
+                continue
+            focal_planes.append(
+                FocalPlaneCollection.load(
+                    f, f"{path}/{name}", pointing_models=pointing_models
+                )
+            )
+        tube = cls(
+            name=cast(str, group.attrs["name"]),
+            focal_planes=focal_planes,
+            wafer_slots=list(np.asarray(group.attrs["wafer_slots"])),
+            static=cast(bool, group.attrs["static"]),
+            autofreeze=cast(bool, group.attrs["autofreeze"]),
+        )
+
+        group = cast(h5py.Group, f[path])
+        if "cm_transform" in group:
+            tube._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
+        tube.cm_transform_norx = Transform.load(f, f"{path}/cm_transform_norx")
+
+        return tube
+
 
 @dataclass
 class Receiver:
@@ -1017,6 +1553,88 @@ class Receiver:
         for ot in self.optics_tubes:
             ot.remove_rx(self.cm_transform)
 
+    def save(self, f, path, pointing_models: tuple[PointingModel, ...], overwrite=True):
+        """
+        Save the receiver and its optics tubes to an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            HDF5 file object to save to.
+        path : str
+            Path within the HDF5 file at which to save the receiver.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+        overwrite : bool, default: True
+            If True, overwrite an existing receiver at `path`.
+
+        Raises
+        ------
+        ValueError
+            If multiple optics tubes have the same name.
+        """
+        group = _create_group(f, path, overwrite)
+        _add_attrs(
+            group,
+            {
+                "name": self.name,
+                "epoch": self.epoch,
+                "static": self.static,
+                "autofreeze": self.autofreeze,
+            },
+        )
+        if "_cm_transform_stat" in self.__dict__:
+            self._cm_transform_stat.save(f, f"{path}/cm_transform")
+        names = [ot.name for ot in self.optics_tubes]
+        if len(names) != len(set(names)):
+            raise ValueError("Optics tube names must be unique")
+        for ot in self.optics_tubes:
+            ot.save(f, f"{path}/{ot.name}", pointing_models, overwrite=overwrite)
+
+    @classmethod
+    def load(
+        cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...]
+    ) -> Self:
+        """
+        Load a receiver from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            The HDF5 file object containing the optics tube.
+        path : str
+            The path within the HDF5 file where the optics tube is stored.
+        pointing_models : tuple[PointingModel, ...]
+            The pointing models used by the focal-planes.
+
+        Returns
+        -------
+        Receiver
+            The loaded receiver.
+        """
+        group = cast(h5py.Group, f[path])
+        name = cast(str, group.attrs["name"])
+        epoch = cast(str, group.attrs["epoch"])
+        static = cast(bool, group.attrs["static"])
+        autofreeze = cast(bool, group.attrs["autofreeze"])
+        optics_tubes = [
+            OpticsTube.load(f, f"{path}/{ot_name}", pointing_models)
+            for ot_name in group.keys()
+            if ot_name != "cm_transform"
+        ]
+
+        receiver = cls(
+            name=name,
+            epoch=epoch,
+            optics_tubes=optics_tubes,
+            static=static,
+            autofreeze=autofreeze,
+        )
+
+        if "cm_transform" in group:
+            receiver._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
+        return receiver
+
 
 @dataclass
 class PointingSystem:
@@ -1042,6 +1660,10 @@ class PointingSystem:
         Names without parenthesis apply to all other epochs.
     parameter_map : tuple[Integer[np.ndarray, "?npar_mapped"], ...]
         Mapping between parameters and what pointing models to apply them to.
+    config_str : str
+        A serialized configuration yaml string.
+    calender_str : str
+        A serialized calendar yaml string.
     parameters : Float[np.ndarray, "npar"]
         The current values of the parameters.
     chisq : float
@@ -1055,6 +1677,8 @@ class PointingSystem:
     receivers: tuple[Receiver, ...]
     parameter_names: tuple[str, ...]
     parameter_map: tuple[Integer[np.ndarray, "?npar"], ...]
+    config_str: str
+    calender_str: str
 
     def __post_init__(self):
         # Force consistancy
@@ -1223,7 +1847,9 @@ class PointingSystem:
         self.update_parameters(self.parameters)
 
     @classmethod
-    def empty(cls, era: epochs.Era, cfg: Namespace) -> Self:
+    def empty(
+        cls, era: epochs.Era, cfg: Namespace, config_str: str, calender_str: str
+    ) -> Self:
         """
         Create an empty pointing system from an observing era.
 
@@ -1240,6 +1866,10 @@ class PointingSystem:
         cfg : Namespace
             Configuration containing the receiver name, epoch groups,
             pointing model settings, and focal plane options.
+        config_str : str
+            A serialized configuration yaml string.
+        calender_str : str
+            A serialized calendar yaml string.
 
         Returns
         -------
@@ -1334,4 +1964,119 @@ class PointingSystem:
         par_names = tuple(name for name, n in zip(par_names, n_mapped) if n > 0)
         par_map = tuple(np.array(pmap) for pmap, n in zip(par_map, n_mapped) if n > 0)
 
-        return cls(era, tuple(pms), tuple(rxs), par_names, par_map)
+        return cls(
+            era, tuple(pms), tuple(rxs), par_names, par_map, config_str, calender_str
+        )
+
+    def save(self, f: h5py.File, path: str, overwrite: bool = True):
+        """
+        Save the pointing system to an HDF5 file.
+
+        The receiver-to-pointing-model relationship is stored explicitly as
+        an integer array. Element `i` of `receiver_pointing_model` gives
+        the index of the pointing model that should be passed to
+        `Receiver.load` for receiver `i`.
+
+        Parameters
+        ----------
+        f : h5py.File
+            Open HDF5 file to save to.
+        path : str
+            Path within the HDF5 file at which to save the pointing system.
+        overwrite : bool, default: True
+            Whether to overwrite an existing pointing system at ``path``.
+
+        Raises
+        ------
+        ValueError
+            If there are no pointing models but receivers are present.
+            If a receiver cannot be associated with a pointing model.
+        """
+        group = _create_group(f, path, overwrite=overwrite)
+        _add_attrs(
+            group,
+            {
+                "config_str": self.config_str,
+                "calender_str": self.calender_str,
+                "era": self.era.name,
+            },
+        )
+        _ = _create_group(f, f"{path}/pointing_models", overwrite=overwrite)
+        for idx, pointing_model in enumerate(self.pointing_models):
+            pointing_model.save(
+                f,
+                f"{path}/pointing_models/{idx}_{pointing_model.epoch}",
+                overwrite=overwrite,
+            )
+        _ = _create_group(f, f"{path}/receivers", overwrite=overwrite)
+        for rx_idx, receiver in enumerate(self.receivers):
+            receiver.save(
+                f,
+                f"{path}/receivers/{rx_idx}_{receiver.name}_{receiver.epoch}",
+                self.pointing_models,
+                overwrite=overwrite,
+            )
+        group.attrs["parameter_names"] = np.asarray(
+            self.parameter_names, dtype=h5py.string_dtype()
+        )
+        parameter_map_group = _create_group(
+            f, f"{path}/parameter_map", overwrite=overwrite
+        )
+        for idx, par_map in enumerate(self.parameter_map):
+            parameter_map_group.create_dataset(
+                str(idx), data=np.asarray(par_map, dtype=np.int64)
+            )
+
+    @classmethod
+    def load(cls, f: h5py.File, path: str) -> Self:
+        """
+        Load a pointing system from an HDF5 file.
+
+        Parameters
+        ----------
+        f : h5py.File
+            Open HDF5 file containing the pointing system.
+        path : str
+            Path within the HDF5 file containing the pointing system.
+
+        Returns
+        -------
+        PointingSystem
+            The reconstructed pointing system.
+        """
+        group = f[path]
+        config_str = cast(str, group.attrs["config_str"])
+        calender_str = cast(str, group.attrs["config_str"])
+        era_str = cast(str, group.attrs["era"])
+        cal = epochs.Calendar.load(calender_str)
+        era = cal.eras[era_str]
+        parameter_names = tuple(
+            str(name) for name in cast(Iterable[object], group.attrs["parameter_names"])
+        )
+
+        parameter_map_group = cast(h5py.Group, f[f"{path}/parameter_map"])
+        parameter_map = tuple(
+            np.asarray(parameter_map_group[name], dtype=np.int64)
+            for name in sorted(parameter_map_group.keys())
+        )
+
+        pm_group = cast(h5py.Group, f[f"{path}/pointing_models"])
+        pointing_models = tuple(
+            PointingModel.load(f, f"{path}/pointing_models/{name}")
+            for name in sorted(pm_group.keys())
+        )
+
+        rx_group = cast(h5py.Group, f[f"{path}/receivers"])
+        receivers = tuple(
+            Receiver.load(f, name, pointing_models) for name in sorted(rx_group.keys())
+        )
+
+        return cls(
+            era=era,
+            pointing_models=pointing_models,
+            receivers=receivers,
+            parameter_names=parameter_names,
+            parameter_map=parameter_map,
+            config_str=config_str,
+            calender_str=calender_str,
+        )
