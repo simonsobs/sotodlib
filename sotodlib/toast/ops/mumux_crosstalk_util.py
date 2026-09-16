@@ -163,10 +163,6 @@ def chi_simulated_obs(focalplane, dets, alpha, tol, collision):
 
     # Mapping between wafer slots and array names
     wafer_to_array = {
-        "dummy00": "Cv4",
-        "dummy01": "Cv5",
-        "dummy04": "Mv9",
-        "dummy05": "Sv5",
         "w00": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
         "w01": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
         "w02": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
