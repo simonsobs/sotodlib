@@ -153,53 +153,59 @@ def chi_simulated_obs(focalplane, dets, alpha, tol, collision):
         (dict):  The chi for every detector pair.
 
     """
-    # SAT1 MF wafers  = w25-w31
-    # SAT2 MF wafers  = w32-w38
-    # SAT3 HF wafers  = w06-w12
-    # SAT4 LF wafers  = w42-w48
-    # LAT LF wafers  = w39-w41
-    # LAT MF wafers  = w13-w24
-    # LAT HF wafers  = w00-w05
+    # SATp1 MF wafers  = w25-w31
+    # SATp2 UHF wafers = w06-w12
+    # SATp3 MF wafers  = w32-w38
+    # SATp4 LF wafers  = w42-w48
+    # LAT LF wafers    = w39-w41
+    # LAT MF wafers    = w13-w24
+    # LAT UHF wafers   = w00-w05
 
-    # Arbitrary mapping between wafer slots and array names
+    # Mapping between wafer slots and array names
     wafer_to_array = {
-        "dummy00": "Cv4",  # LAT
+        "dummy00": "Cv4",
         "dummy01": "Cv5",
-        "w13": "Mv6",  # LAT  1/12
-        "w14": "Mv7",  # LAT  2/12
         "dummy04": "Mv9",
-        "w15": "Mv11",  # LAT  3/12
-        "w16": "Mv12",  # LAT  4/12
-        "w25": "Mv13",  # SAT1 1/7
-        "w26": "Mv14",  # SAT1 2/7
-        # "Mv15",  # LAT (missing)
-        "w17": "Mv17",  # LAT  5/12
-        "w27": "Mv18",  # SAT1 3/7
-        "w28": "Mv19",  # SAT1 4/7
-        "w29": "Mv22",  # SAT1 5/7
-        "w30": "Mv23",  # SAT1 6/7
-        "w31": "Mv24",  # SAT1 7/7
-        "w18": "Mv25",  # LAT  6/12
-        "w19": "Mv26",  # LAT  7/12
-        "w20": "Mv27",  # LAT  8/12
-        "w21": "Mv28",  # LAT  9/12
-        "w22": "Mv29",  # LAT 10/12
-        "w23": "Mv32",  # LAT 11/12
-        "w24": "Mv33",  # LAT 12/12
         "dummy05": "Sv5",
-        "w06": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w07": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w08": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w09": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w10": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w11": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w12": "Uv31",  # Only one SAT HF wafer in DetMap
-        "w00": "Uv8",  # Only one LAT HF wafer in DetMap
-        "w01": "Uv8",  # Only one LAT HF wafer in DetMap
-        "w02": "Uv8",  # Only one LAT HF wafer in DetMap
-        "w03": "Uv8",  # Only one LAT HF wafer in DetMap
-        "w04": "Uv8",  # Only one LAT HF wafer in DetMap
-        "w05": "Uv8",  # Only one LAT HF wafer in DetMap
+        "w00": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
+        "w01": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
+        "w02": "Uv31",  # LAT OTc1, only one LAT UHF wafer in DetMap
+        "w03": "Uv31",  # LAT OTi5, only one LAT UHF wafer in DetMap
+        "w04": "Uv31",  # LAT OTi5, only one LAT UHF wafer in DetMap
+        "w05": "Uv31",  # LAT OTi5, only one LAT UHF wafer in DetMap
+        "w06": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w07": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w08": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w09": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w10": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w11": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w12": "Uv8",   # SATp2, only one SAT UHF wafer in DetMap
+        "w13": "Mv25",  # LAT OTi6
+        "w14": "Mv26",  # LAT OTi6
+        "w15": "Mv11",  # LAT OTi6
+        "w16": "Mv21",  # LAT OTi1
+        "w17": "Mv24",  # LAT OTi1
+        "w18": "Mv28",  # LAT OTi1
+        "w19": "Mv13",  # LAT OTi3
+        "w20": "Mv20",  # LAT OTi3
+        "w21": "Mv28",  # LAT OTi3, Mv34 missing from DetMap
+        "w22": "Mv14",  # LAT OTi4
+        "w23": "Mv32",  # LAT OTi4
+        "w24": "Mv11",  # LAT OTi4, Mv49 missing from DetMap
+        "w25": "Mv19",  # SATp1
+        "w26": "Mv27",  # SATp1, Mv48 missing from DetMap
+        "w27": "Mv12",  # SATp1, Mv50r2 missing from DetMap
+        "w28": "Mv22",  # SATp1
+        "w29": "Mv18",  # SATp1
+        "w30": "Mv33",  # SATp1, Mv52r1 missing from DetMap
+        "w31": "Mv17",  # SATp1, Mv51 missing from DetMap
+        "w32": "Mv19",  # SATp3, Mv5 mising from DetMap
+        "w33": "Mv27",  # SATp3
+        "w34": "Mv22",  # SATp3, Mv35 missing from DetMap
+        "w35": "Mv12",  # SATp3
+        "w36": "Mv23",  # SATp3
+        "w37": "Mv33",  # SATp3
+        "w38": "Mv17",  # SATp3
     }
 
     # Get the bandpass, polarization and position for every detector
