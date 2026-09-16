@@ -183,8 +183,9 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
-      focal_plane_template: focal_plane to be modified, for models
-        that include focal_plane distortions.
+      focal_plane_template: template to use as base for updating with
+        focal plane distortions. Must not be None, if the model
+        includes focal_plane distortions.
 
     The implemented model parameters are all in radians:
 
@@ -310,11 +311,9 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
     az = az_orig + change
 
     # Apply any (non-linear) focal plane distortions.
-    _fp = None
-    if focal_plane_template is not None:
-        _fp = focal_plane_template.copy()
-    focal_plane = apply_lat_distortion_model(
-        params, az, el, roll, _fp)
+    focal_plane = (None if focal_plane_template is None \
+                   else focal_plane_template.copy())
+    apply_lat_distortion_model(params, az, el, roll, focal_plane)
 
     return (az, el, roll), focal_plane
 
@@ -375,7 +374,7 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane):
             roll_mean = roll[0] + droll.mean()
             # Note a 5 degree tolerance here is pretty generous; this is
             # meant to not choke on "type 3" obs, where there is a ~1 deg
-            # elevatio nod during the scan.
+            # elevation nod during the scan.
             assert droll.std() < 5 * DEG, \
                 "This distortion approximation does not work when roll varies significantly."
         else:
@@ -466,7 +465,9 @@ def model_sat_v1(params, az, el, roll, focal_plane_template=None):
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
-      focal_plane_template: ignored in this function.
+      focal_plane_template: template to use as base for updating with
+        focal plane distortions. (The current SAT models have no such
+        corrections implemented.)
 
     The implemented model parameters are:
 
@@ -532,7 +533,7 @@ def model_sat_v1(params, az, el, roll, focal_plane_template=None):
 
     focal_plane = (None if focal_plane_template is None \
                    else focal_plane_template.copy())
-    return (new_az, el, roll), focal_plane_template
+    return (new_az, el, roll), focal_plane
 
 
 # Support functions
