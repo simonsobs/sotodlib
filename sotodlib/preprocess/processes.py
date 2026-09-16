@@ -1580,6 +1580,9 @@ class FlagTurnarounds(_Preprocess):
 
     Saves results in proc_aman under the "turnaround_flags" field, with
     sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
+    To save multiple turnaround definitions, use a distinct ``save.wrap_name``
+    for each definition instead of renaming saved fields with a ``move`` step.
+    ``save: True`` retains the default name ``turnaround_flags``.
 
     The example block below includes optional arguments such as t_buffer, 
     az_throw_threshold, and a min_ta. The az_throw_threshold and min_ta (minimum number
@@ -1597,7 +1600,8 @@ class FlagTurnarounds(_Preprocess):
           method: "scanspeed"
           t_buffer: 4.
           az_throw_threshold: 1.
-        save: True
+        save:
+          wrap_name: turnaround_flags
         select:
           min_ta: 1.
 
@@ -1605,7 +1609,9 @@ class FlagTurnarounds(_Preprocess):
     """
     name = 'flag_turnarounds'
     def __init__(self, step_cfgs):
-        self.save_name = "turnaround_flags"
+        save_cfgs = step_cfgs.get('save')
+        self.save_name = (save_cfgs.get('wrap_name', 'turnaround_flags')
+                          if isinstance(save_cfgs, dict) else 'turnaround_flags')
 
         super().__init__(step_cfgs)
 
