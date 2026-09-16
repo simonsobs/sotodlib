@@ -1,3 +1,4 @@
+import os
 import operator
 import re
 from bisect import bisect_right
@@ -576,8 +577,11 @@ class Calendar:
 
     @classmethod
     def load(cls, fpath: str) -> Self:
-        with open(fpath, "r") as f:
-            cfg = yaml.safe_load(f)
+        if os.isfile(fpath):
+            with open(fpath, "r") as f:
+                cfg = yaml.safe_load(f)
+        else:
+            cfg = yaml.safe_load(fpath)
         if "intervals" not in cfg:
             raise ValueError("At minimum an intervals section must be provided")
 
