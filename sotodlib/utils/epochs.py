@@ -577,7 +577,7 @@ class Calendar:
 
     @classmethod
     def load(cls, fpath: str) -> Self:
-        if os.isfile(fpath):
+        if os.path.isfile(fpath):
             with open(fpath, "r") as f:
                 cfg = yaml.safe_load(f)
         else:
