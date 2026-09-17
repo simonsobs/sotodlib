@@ -183,8 +183,9 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
-      focal_plane_template: focal_plane to be modified, for models
-        that include focal_plane distortions.
+      focal_plane_template: template to use as base for updating with
+        focal plane distortions. Must not be None, if the model
+        includes focal_plane distortions.
 
     The implemented model parameters are all in radians:
 
@@ -206,7 +207,7 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
       zero point.
 
     In addition to the above parameters (which affect only the
-    boresight), the parameter ``roll_dist_model`` (an integer)
+    boresight), the parameter ``roll_dist_model`` (a string)
     activates distortions of the focal plane, which can consume other
     parameters. See details in :func:`apply_lat_distortion_model`.
 
@@ -310,8 +311,9 @@ def model_lat_v1_v2(params, az, el, roll, focal_plane_template=None, version='la
     az = az_orig + change
 
     # Apply any (non-linear) focal plane distortions.
-    focal_plane = apply_lat_distortion_model(
-        params, az, el, roll, focal_plane=focal_plane_template)
+    focal_plane = (None if focal_plane_template is None \
+                   else focal_plane_template.copy())
+    apply_lat_distortion_model(params, az, el, roll, focal_plane)
 
     return (az, el, roll), focal_plane
 
@@ -321,61 +323,58 @@ def model_lat_v1(params, az, el, roll, focal_plane_template=None):
 def model_lat_v2(params, az, el, roll, focal_plane_template=None):
     return model_lat_v1_v2(params, az, el, roll, focal_plane_template=focal_plane_template, version='lat_v2')
 
-def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
-                               in_place=False):
+def apply_lat_distortion_model(params, az, el, roll, focal_plane):
     """Apply focal plane corrections due to non-linear projection
     effects of the mirrors.  The models here may use the boresight az,
     el, and roll vectors to compute the corrections.
 
-    Returns the updated focal_plane (which will be the same object
-    that was passed in, if in_place is True.)
+    Returns the updated focal_plane, which is the same object passed
+    as ``focal_plane`` (modified in place).
 
     Two models are supported in addition to the do-nothing model.
-    These are selected via parameter ``roll_dist_model`` (integer):
+    These are selected via parameter ``roll_dist_model`` (str):
 
-      - 0: No distortion correction.
-      - 1: Empirical "arc" correction.  This is further parametrized by:
+      - 'none': No distortion correction.
+      - 'arc': Empirical correction.  This is further parametrized by:
 
         - ``arc_amp``: the amplitude of the radial term (radians).
         - ``arc_r0``: the cross-over radius (radians).
         - ``arc_roll0``: the reference roll value (radians) at which
           the effect is fully null.
 
-      - 2: Optical modeling result.  This is based on Zemax models and
-        has no parameters.
+      - 'optics': Optical modeling result.  This is based on Zemax
+        models and currently has no parameters.
 
     """
-    dist_model = params.get('roll_dist_model')
-    if dist_model in [None, 0]:
-        if in_place or focal_plane is None:
-            return focal_plane
-        else:
-            return focal_plane.copy()
+    dist_model = params['roll_dist_model']
+    if dist_model == 'none':
+        return focal_plane
 
-    assert focal_plane is not None, "LAT non-linear distortions require focal_plane to be passed in."
+    assert focal_plane is not None, "LAT non-linear distortions (model='{dist_model}') "\
+        "require focal_plane != None to be passed in."
 
     # Make sure pointing inputs can be treated as vectors.
     az, el, roll = [np.atleast_1d(x) for x in [az, el, roll]]
 
-    if dist_model == 1:
+    if dist_model == 'arc':
         # Empirical model.
         amp, r0, roll0 = [params[k] for k in ['arc_amp', 'arc_r0', 'arc_roll0']]
         _c, _s = np.cos(roll-roll0).mean(), np.sin(roll-roll0).mean()
         xi, eta = focal_plane.xi, focal_plane.eta
         r2 = xi**2 + eta**2
         scale = amp * (1 - r2 / r0**2)
-        xi1 = xi + scale * (_c - 1)
-        eta1 = eta + scale * _s
-        return _update_focal_plane(focal_plane, xi1, eta1, focal_plane.gamma, in_place=in_place)
+        focal_plane.xi += scale * (_c - 1)
+        focal_plane.eta += scale * _s
+        return focal_plane
 
-    elif dist_model == 2:
+    elif dist_model == 'optics':
         if len(roll) > 1:
             # Check that roll is ~stable and get typical value.
             droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
             roll_mean = roll[0] + droll.mean()
             # Note a 5 degree tolerance here is pretty generous; this is
             # meant to not choke on "type 3" obs, where there is a ~1 deg
-            # elevatio nod during the scan.
+            # elevation nod during the scan.
             assert droll.std() < 5 * DEG, \
                 "This distortion approximation does not work when roll varies significantly."
         else:
@@ -388,19 +387,19 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane=None,
             * quat.rotation_xieta(focal_plane.xi, focal_plane.eta))
 
         # Get distortion
-        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_xi_bsp'])
-        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_V2['d_eta_bsp'])
+        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp'])
+        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_eta_bsp'])
 
         # Apply distortion and return to un-rolled focal_plane.
         xi2, eta2, _ = quat.decompose_xieta(
             quat.euler(2, -roll_mean)
             * quat.rotation_xieta(xi1 + dxi, eta1 + deta))
 
-        return _update_focal_plane(
-            focal_plane, xi2, eta2,
-            focal_plane.gamma, in_place=in_place)
+        focal_plane.xi[:] = xi2
+        focal_plane.eta[:] = eta2
+        return focal_plane
 
-    raise ValueError(f"Unimplemented distortion model {dist_model}")
+    raise ValueError(f"Unimplemented distortion model '{dist_model}'")
 
 
 def _ensure_focal_plane_template(tod):
@@ -452,20 +451,6 @@ def _reset_focal_plane(tod, focal_plane_template=None, wrap=None):
     return fp
 
 
-def _update_focal_plane(focal_plane, xi, eta, gamma, in_place=False):
-    if in_place:
-        dest = focal_plane
-    else:
-        dest = core.AxisManager(focal_plane.dets)
-    for k, v in [
-            ('xi', xi),
-            ('eta', eta),
-            ('gamma', gamma)]:
-        dest.wrap(k, v, axis_map=[(0, 'dets')], overwrite=True)
-    return dest
-
-
-
 #
 # SAT model(s)
 #
@@ -480,7 +465,9 @@ def model_sat_v1(params, az, el, roll, focal_plane_template=None):
       params: AxisManager (or dict) of pointing parameters.
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
-      focal_plane_template: ignored in this function.
+      focal_plane_template: template to use as base for updating with
+        focal plane distortions. (The current SAT models have no such
+        corrections implemented.)
 
     The implemented model parameters are:
 
@@ -546,7 +533,7 @@ def model_sat_v1(params, az, el, roll, focal_plane_template=None):
 
     focal_plane = (None if focal_plane_template is None \
                    else focal_plane_template.copy())
-    return (new_az, el, roll), focal_plane_template
+    return (new_az, el, roll), focal_plane
 
 
 # Support functions
@@ -566,7 +553,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
-        'roll_dist_model': 0,
+        'roll_dist_model': 'none',
         'arc_amp': 0.,
         'arc_r0': 0.,
         'arc_roll0': 0.,
@@ -586,7 +573,7 @@ param_defaults={
         'el_sag_quad': 0,
         'el_sag_lin': 0,
         'el_sag_pivot': np.pi/2.,
-        'roll_dist_model': 0,
+        'roll_dist_model': 'none',
         'arc_amp': 0.,
         'arc_r0': 0.,
         'arc_roll0': 0.,
@@ -667,12 +654,12 @@ def get_base_tilt_q_2nd(az, el, dE_C2A, dE_S2A, dA_C2A, dA_S2A):
 
 # Parameter store.
 #
-# LAT_ROLL_DIST_V2 are the 2d spline parameters for roll_dist_model=2.
-# These are obtained from an analysis of ray tracing result
-# ID9_checked_trace_data.npz (md5:862da7).
+# LAT_ROLL_DIST_OPTICS_V1 are the 2d spline parameters for
+# roll_dist_model='optics'.  These are obtained from an analysis of
+# ray tracing result ID9_chief_nopol_v2.npz (md5:862da7).
 #
 
-LAT_ROLL_DIST_V2 = {
+LAT_ROLL_DIST_OPTICS_V1 = {
     'd_xi_bsp': [
         np.array([-0.06582537, -0.06582537, -0.06582537, -0.06582537,  0.06675579,
                   0.06675579,  0.06675579,  0.06675579]),
