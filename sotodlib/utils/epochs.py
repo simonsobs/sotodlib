@@ -1,11 +1,13 @@
+import os
+import operator
 import re
+from bisect import bisect_right
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import reduce
-import operator
 from typing import Any, Literal, Optional, Self, cast, overload
-import numpy as np
 
+import numpy as np
 import yaml
 from deepdiff import DeepDiff
 
@@ -265,6 +267,7 @@ class Era:
     epochs: tuple[Epoch, ...]
     operator: str
     _internal: Interval = field(init=False)
+    _lookup: tuple[tuple(float, float, int), ...] = field(init=False)
 
     def __post_init__(self):
         if self.operator not in OP_MAP:
@@ -272,9 +275,16 @@ class Era:
         self._internal = cast(
             Interval, reduce(OP_MAP[self.operator], [e._internal for e in self.epochs])
         )
+        self.lookup = sorted(
+            (ival.start, ival.stop, i)
+            for i, epoch in enumerate(self.epochs)
+            for ival in epoch.covers
+        )
 
     def __setattr__(self, name, value):
-        if (name == "epochs" or name == "strict") and "_internal" in self.__dict__:
+        if (name == "epochs" or name == "strict") and (
+            "_internal" in self.__dict__ or "_lookup" in self.__dict__
+        ):
             self.__post_init__()
         return super().__setattr__(name, value)
 
@@ -297,6 +307,29 @@ class Era:
             reduce(OP_MAP["&"], [e.check_data(field, strict) for e in self.epochs]),
         )
 
+    def find_epoch(self, timestamp: float) -> Optional[Epoch]:
+        """
+        Find the epoch from that a timestamp matches to.
+        Note that if your operator allows for overlapping Epochs then this will
+        just find the first epoch that matches.
+
+        Parameters
+        ----------
+        timestamp : float
+            The time to search for.
+
+        Returns
+        -------
+        found : Optional[Epoch]
+            The first matching Epoch.
+            Will be None if no matches are found.
+        """
+        starts = [x[0] for x in self._lookup]
+        j = bisect_right(starts, timestamp) - 1
+        if j >= 0 and timestamp < self._lookup[j][1]:
+            return self._lookup[j][2]
+        return None
+
 
 @dataclass
 class Calendar:
@@ -313,16 +346,15 @@ class Calendar:
     orphan_epochs: list[Epoch]
 
     @overload
-    def find_tagged(self, tag: str, search_in: Literal["eras"]) -> list[Era]:
-        ...
+    def find_tagged(self, tag: str, search_in: Literal["eras"]) -> list[Era]: ...
 
     @overload
-    def find_tagged(self, tag: str, search_in: Literal["epochs"]) -> list[Epoch]:
-        ...
+    def find_tagged(self, tag: str, search_in: Literal["epochs"]) -> list[Epoch]: ...
 
     @overload
-    def find_tagged(self, tag: str, search_in: Literal["intervals"]) -> list[Interval]:
-        ...
+    def find_tagged(
+        self, tag: str, search_in: Literal["intervals"]
+    ) -> list[Interval]: ...
 
     def find_tagged(
         self, tag: str, search_in: Literal["intervals", "epochs", "eras"]
@@ -356,18 +388,17 @@ class Calendar:
             raise ValueError(f"Invalid search_in: {search_in}")
 
     @overload
-    def find_data_field(self, field: str, search_in: Literal["eras"]) -> list[Era]:
-        ...
+    def find_data_field(self, field: str, search_in: Literal["eras"]) -> list[Era]: ...
 
     @overload
-    def find_data_field(self, field: str, search_in: Literal["epochs"]) -> list[Epoch]:
-        ...
+    def find_data_field(
+        self, field: str, search_in: Literal["epochs"]
+    ) -> list[Epoch]: ...
 
     @overload
     def find_data_field(
         self, field: str, search_in: Literal["intervals"]
-    ) -> list[Interval]:
-        ...
+    ) -> list[Interval]: ...
 
     def find_data_field(
         self, field: str, search_in: Literal["intervals", "epochs", "eras"]
@@ -546,8 +577,11 @@ class Calendar:
 
     @classmethod
     def load(cls, fpath: str) -> Self:
-        with open(fpath, "r") as f:
-            cfg = yaml.safe_load(f)
+        if os.path.isfile(fpath):
+            with open(fpath, "r") as f:
+                cfg = yaml.safe_load(f)
+        else:
+            cfg = yaml.safe_load(fpath)
         if "intervals" not in cfg:
             raise ValueError("At minimum an intervals section must be provided")
 
