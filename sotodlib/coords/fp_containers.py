@@ -5,8 +5,6 @@ Calculated transforms can either be treated at properties for ease of
 calculations or as static attributes for loading saved results.
 """
 
-# TODO: Function to update pointing model pars that is aware of joint fits
-# TODO: Serialization + ManifestDb
 # TODO: Reprs
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ import logging
 from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, reduce
 from typing import Any, Iterable, Literal, Optional, Self, cast, overload
 
 import h5py
@@ -34,9 +32,11 @@ from sotodlib.utils import epochs
 _COORDSYS_COLUMNS = {
     "xieta": ("xi", "eta", "gamma"),
     "horizon": ("az", "el", "roll"),
+    "fp": ("x_fp", "y_fp", "pol_fp"),
+    "ot": ("x_ot", "y_ot", "pol_ot"),
 }
 
-logger = logging.getLogger("finalize_staic_pointing")
+logger = logging.getLogger("solve_static_pointing")
 
 
 def _add_attrs(dset, attrs):
@@ -401,7 +401,7 @@ class Transform:
 @dataclass
 class DetectorOffsets:
     """
-    Class for storing detector offsets in either `xieta` or `horizon` coordinates.
+    Class for storing detector offsets in either `xieta`, `horizon`, 'fp', or 'ot' coordinates.
     `xi`, `eta`, `gamma`, `az`, `el`, and `roll` are included as properties for convenience.
     They will raise a `ValueError` if called with the wrong coordsys set.
 
@@ -438,7 +438,7 @@ class DetectorOffsets:
     coordsys: str
 
     def __post_init__(self):
-        if self.coordsys not in ("xieta", "horizon"):
+        if self.coordsys not in ("xieta", "horizon", "fp", "ot"):
             raise ValueError(f"Invalid coordsys {self.coordsys}")
 
     def __setattr__(self, name: str, value: Any, /) -> None:
@@ -628,7 +628,11 @@ class FocalPlane:
         Per-detector weights used when fitting transforms and combining
         measurements.
     template : DetectorOffsets
-        Reference detector layout used as the transform source.
+        Reference detector layout used as the transform source on sky.
+    template_fp : DetectorOffsets
+        Reference detector layout used as the transform source in focal plane coords.
+    template_ot : DetectorOffsets
+        Reference detector layout used as the transform source in OT coords.
     pointing_model : PointingModel
         Pointing model to apply before computing corrected transforms.
     static : bool
@@ -662,6 +666,8 @@ class FocalPlane:
     enc: DetectorOffsets
     weights: Float[np.ndarray, "ndet"]
     template: DetectorOffsets
+    template_fp: DetectorOffsets
+    template_ot: DetectorOffsets
     pointing_model: PointingModel
     static: bool
     autofreeze: bool
@@ -686,6 +692,8 @@ class FocalPlane:
         meas_id: str,
         aman: AxisManager,
         template: DetectorOffsets,
+        template_fp: DetectorOffsets,
+        template_ot: DetectorOffsets,
         pointing_model: PointingModel,
         autofreeze: bool = False,
         fake_gamma: bool = True,
@@ -711,6 +719,10 @@ class FocalPlane:
             See above for details on assumptions.
         template : DetectorOffsets
             Template focal plane.
+        template_fp : DetectorOffsets
+            Reference detector layout used as the transform source in focal plane coords.
+        template_ot : DetectorOffsets
+            Reference detector layout used as the transform source in OT coords.
         pointing_model : PointingModel
             Pointing model associated with the observation.
         autofreeze : bool, default: False
@@ -800,6 +812,8 @@ class FocalPlane:
             enc,
             weights,
             template,
+            template_fp,
+            template_ot,
             pointing_model,
             False,
             autofreeze,
@@ -923,6 +937,8 @@ class FocalPlane:
         f: h5py.File,
         path: str,
         template: DetectorOffsets,
+        template_fp: DetectorOffsets,
+        template_ot: DetectorOffsets,
         pointing_models: tuple[PointingModel, ...],
     ) -> Self:
         """
@@ -936,6 +952,10 @@ class FocalPlane:
             The path within the HDF5 file where the focal plane is stored.
         template : DetectorOffsets
             The template shared by the focal planes in the collection.
+        template_fp : DetectorOffsets
+            Reference detector layout used as the transform source in focal plane coords.
+        template_ot : DetectorOffsets
+            Reference detector layout used as the transform source in OT coords.
         pointing_models : tuple[PointingModel, ...]
             The pointing models used by the focal-planes.
 
@@ -958,6 +978,8 @@ class FocalPlane:
             enc=enc,
             weights=weights,
             template=template,
+            template_fp=template_fp,
+            template_ot=template_ot,
             pointing_model=pointing_models[pm_idx],
             static=cast(bool, group.attrs["static"]),
             autofreeze=cast(bool, group.attrs["autofreeze"]),
@@ -1014,6 +1036,10 @@ class FocalPlaneCollection:
         must contain the same detector set and detector ordering.
     template : DetectorOffsets
         Reference detector layout used as the transform source.
+    template_fp : DetectorOffsets
+        Reference detector layout used as the transform source in focal plane coords.
+    template_ot : DetectorOffsets
+        Reference detector layout used as the transform source in OT coords.
     static : bool
         If True, return values from the frozen static fields instead of
         recomputing them.
@@ -1044,6 +1070,8 @@ class FocalPlaneCollection:
     name: str
     focal_planes: list[FocalPlane]
     template: DetectorOffsets
+    template_fp: DetectorOffsets
+    template_ot: DetectorOffsets
     static: bool
     autofreeze: bool
     pad: bool
@@ -1143,6 +1171,8 @@ class FocalPlaneCollection:
             },
         )
         self.template.save(f, f"{path}/template", overwrite=overwrite)
+        self.template_fp.save(f, f"{path}/template_fp", overwrite=overwrite)
+        self.template_ot.save(f, f"{path}/template_ot", overwrite=overwrite)
         for fp in self.focal_planes:
             fp.save(
                 f,
@@ -1190,17 +1220,35 @@ class FocalPlaneCollection:
             f,
             f"{path}/template",
         )
+        template_fp = DetectorOffsets.load(
+            f,
+            f"{path}/template_fp",
+        )
+        template_ot = DetectorOffsets.load(
+            f,
+            f"{path}/template_ot",
+        )
         group = cast(h5py.Group, f[path])
 
         focal_planes = []
         for name in group:
-            if name in {"template", "data", "weights", "transform", "transformed"}:
+            if name in {
+                "template",
+                "template_fp",
+                "template_ot",
+                "data",
+                "weights",
+                "transform",
+                "transformed",
+            }:
                 continue
             focal_planes.append(
                 FocalPlane.load(
                     f,
                     f"{path}/{name}",
                     template=template,
+                    template_fp=template_fp,
+                    template_ot=template_ot,
                     pointing_models=pointing_models,
                 )
             )
@@ -1209,6 +1257,8 @@ class FocalPlaneCollection:
             name=cast(str, group.attrs["name"]),
             focal_planes=focal_planes,
             template=template,
+            template_fp=template_fp,
+            template_ot=template_ot,
             static=cast(bool, group.attrs["static"]),
             autofreeze=cast(bool, group.attrs["autofreeze"]),
             pad=cast(bool, group.attrs["pad"]),
@@ -1660,10 +1710,10 @@ class PointingSystem:
         Names without parenthesis apply to all other epochs.
     parameter_map : tuple[Integer[np.ndarray, "?npar_mapped"], ...]
         Mapping between parameters and what pointing models to apply them to.
-    config_str : str
-        A serialized configuration yaml string.
     calender_str : str
         A serialized calendar yaml string.
+    state_meta : dict[str, str]
+        String based metadata used for later forensics.
     parameters : Float[np.ndarray, "npar"]
         The current values of the parameters.
     chisq : float
@@ -1677,8 +1727,8 @@ class PointingSystem:
     receivers: tuple[Receiver, ...]
     parameter_names: tuple[str, ...]
     parameter_map: tuple[Integer[np.ndarray, "?npar"], ...]
-    config_str: str
     calender_str: str
+    state_meta: dict[str, str]
 
     def __post_init__(self):
         # Force consistancy
@@ -1707,6 +1757,8 @@ class PointingSystem:
         for rx in self.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
+                    if fp.pad:
+                        continue
                     chisq += np.nansum((fp.weights * fp.resid) ** 2).item()
         return chisq
 
@@ -1847,9 +1899,7 @@ class PointingSystem:
         self.update_parameters(self.parameters)
 
     @classmethod
-    def empty(
-        cls, era: epochs.Era, cfg: Namespace, config_str: str, calender_str: str
-    ) -> Self:
+    def empty(cls, era: epochs.Era, cfg: Namespace, calender_str: str) -> Self:
         """
         Create an empty pointing system from an observing era.
 
@@ -1866,8 +1916,6 @@ class PointingSystem:
         cfg : Namespace
             Configuration containing the receiver name, epoch groups,
             pointing model settings, and focal plane options.
-        config_str : str
-            A serialized configuration yaml string.
         calender_str : str
             A serialized calendar yaml string.
 
@@ -1897,12 +1945,14 @@ class PointingSystem:
             ots = []
             for ot, arrays in ws_map.items():
                 fps = []
-                for ufm in arrays.items():
+                for _, (_, ufm) in arrays.items():
                     fps += [
                         FocalPlaneCollection(
                             ufm,
                             [],
                             DetectorOffsets.empty("xieta"),
+                            DetectorOffsets.empty("fp"),
+                            DetectorOffsets.empty("ot"),
                             False,
                             False,
                             True,
@@ -1912,7 +1962,7 @@ class PointingSystem:
                 ots += [OpticsTube(ot, fps, list(arrays.keys()), False, False)]
             rxs += [Receiver(cfg.tel, epoch.name, ots, False, False)]
 
-        def _group_epochs(dat, groups, desc):
+        def _group_epochs(dat, groups, desc, check_fields):
             u, c = np.unique(np.concatenate(groups), return_counts=True)
             ng = [d for d in dat if d.epoch not in u]
 
@@ -1923,6 +1973,20 @@ class PointingSystem:
             for grp in groups:
                 if len(grp) == 0:
                     continue
+                for field in check_fields:
+                    good = reduce(
+                        epochs.OP_MAP["&"],
+                        [
+                            e.check_data(field, True)
+                            for e in era.epochs
+                            if e.name in grp
+                        ],
+                    )
+                    if good:
+                        allf = [
+                            e._internal.data[field] for e in era.epochs if e.name in grp
+                        ]
+                        good = all(x == allf[0] for x in allf)
                 in_group = [d for d in dat if d.epoch in grp]
                 if len(in_group) < len(grp):
                     raise ValueError(f"Unknown epoch in {desc} group {grp}")
@@ -1932,8 +1996,8 @@ class PointingSystem:
 
             return ng + ga
 
-        rxs = _group_epochs(rxs, cfg.rx_groups, "receiver")
-        pms = _group_epochs(pms, cfg.pm_group, "pointing model")
+        rxs = _group_epochs(rxs, cfg.rx_groups, "receiver", ["ws_mapping"])
+        pms = _group_epochs(pms, cfg.pm_groups, "pointing model", [])
 
         par_names = []
         for pm in pms:
@@ -1964,9 +2028,7 @@ class PointingSystem:
         par_names = tuple(name for name, n in zip(par_names, n_mapped) if n > 0)
         par_map = tuple(np.array(pmap) for pmap, n in zip(par_map, n_mapped) if n > 0)
 
-        return cls(
-            era, tuple(pms), tuple(rxs), par_names, par_map, config_str, calender_str
-        )
+        return cls(era, tuple(pms), tuple(rxs), par_names, par_map, calender_str, {})
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -1996,11 +2058,12 @@ class PointingSystem:
         _add_attrs(
             group,
             {
-                "config_str": self.config_str,
                 "calender_str": self.calender_str,
                 "era": self.era.name,
             },
         )
+        state_group = _create_group(f, f"{path}/state", overwrite=overwrite)
+        _add_attrs(state_group, self.state_meta)
         _ = _create_group(f, f"{path}/pointing_models", overwrite=overwrite)
         for idx, pointing_model in enumerate(self.pointing_models):
             pointing_model.save(
@@ -2045,14 +2108,15 @@ class PointingSystem:
             The reconstructed pointing system.
         """
         group = f[path]
-        config_str = cast(str, group.attrs["config_str"])
-        calender_str = cast(str, group.attrs["config_str"])
+        calender_str = cast(str, group.attrs["calender_str"])
         era_str = cast(str, group.attrs["era"])
         cal = epochs.Calendar.load(calender_str)
         era = cal.eras[era_str]
         parameter_names = tuple(
             str(name) for name in cast(Iterable[object], group.attrs["parameter_names"])
         )
+        state_group = f[f"{path}/state"]
+        state_meta = {key: val for key, val in state_group.attrs.items()}
 
         parameter_map_group = cast(h5py.Group, f[f"{path}/parameter_map"])
         parameter_map = tuple(
@@ -2077,6 +2141,6 @@ class PointingSystem:
             receivers=receivers,
             parameter_names=parameter_names,
             parameter_map=parameter_map,
-            config_str=config_str,
             calender_str=calender_str,
+            state_meta=state_meta,
         )
