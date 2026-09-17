@@ -16,7 +16,7 @@ from contextlib import nullcontext
 import numpy as np
 import h5py
 
-from sotodlib.core import AxisManager
+from sotodlib.core import AxisManager, LabelAxis
 from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
 from sotodlib.core.util import H5ContextManager
 import warnings
@@ -242,6 +242,25 @@ class ResultSetHdfLoader(LoaderInterface):
                                                   row_order=mask.nonzero()[0])
         return results
 
+class EnmapLoader(LoaderInterface):
+    """Load an enmap, wrapping it in an AxisManager for compatibility
+    with the loading system. The map itself will show up as the "map"
+    member. If the "fields" member of load_params is set, then it labels
+    the first axis of the resulting enmap. This is useful when multiple
+    logically different maps have been stacked, such as the moon and sun
+    sidelobe masks."""
+    def from_loadspec(self, load_params, **kwargs):
+        from pixell import enmap
+        map   = enmap.read_map(load_params["filename"])
+        aman  = AxisManager()
+        if "fields" in load_params:
+            # Optionally label the first axis. Useful when multiple logically
+            # different maps have been stacked, e.g. moon and sun sidelobe masks
+            fields = load_params["fields"].split(",")
+            aman.wrap("map", map, [(0, LabelAxis("fields", fields))])
+        else:
+            aman.wrap("map", map)
+        return aman
 
 def _decode_array(data_in, key_map={}):
     """Converts a structured numpy array to a structured numpy array,
@@ -288,6 +307,7 @@ def _decode_array(data_in, key_map={}):
 SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
 SuperLoader.register_metadata('AxisManagerHdf', AxisManagerHdfLoader)
 SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
+SuperLoader.register_metadata("Enmap", EnmapLoader)
 
 # The old name... remove some day.
 SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)
