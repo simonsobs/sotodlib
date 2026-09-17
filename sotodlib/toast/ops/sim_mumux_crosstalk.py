@@ -139,7 +139,7 @@ class SimMuMUXCrosstalk(Operator):
         super().__init__(**kwargs)
 
         # Set of real data band types for non-optical detectors
-        self._alt_band_keys = {"DARK", "NC", "SQID"}
+        self._alt_band_keys = {"BARE", "DARK", "NC", "SLOT", "SQID", "UNRT"}
 
         # The name of the temporary, scaled, detector data field.
         self._temp_detdata_name = "temp_umux_crosstalk_input"
