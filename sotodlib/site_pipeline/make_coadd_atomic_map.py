@@ -2,7 +2,6 @@ from argparse import ArgumentParser
 import os
 import yaml
 import traceback
-import sqlite3
 import datetime as dt
 from dateutil.relativedelta import relativedelta
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
@@ -12,6 +11,8 @@ from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
 
+from sotodlib.site_pipeline.utils.mapcat import commit_coadd_maps
+from mapcat.helper import Settings
 
 class CoaddAtomicConfig:
     """
@@ -52,6 +53,17 @@ class CoaddAtomicConfig:
         Path to directory for output map files.
     plot : bool
         Set to True to also output PNG plots when writing maps.
+    mapcat_database_name : str
+        Path to mapcat database.
+    mapcat_database_type : str
+        Choices: ["sqlite", "postgresql"]
+    mapcat_atomic_parent : str
+        Path to base directory of atomic maps
+    mapcat_atomic_coadd_parent : str
+        Path to base directory of atomic coadd maps
+    update_delay : int
+        Number of days in the past to start coadding. Overrides start_time, but
+        the calculated intervals retain the starting hour.
     """
     def __init__(
         self,
@@ -68,7 +80,12 @@ class CoaddAtomicConfig:
         unit: str = 'K',
         overwrite: bool = False,
         output_root: str = None,
-        plot: bool = False
+        plot: bool = False,
+        mapcat_database_name: str = None,
+        mapcat_database_type: str = None,
+        mapcat_atomic_parent: str = None,
+        mapcat_atomic_coadd_parent: str = None,
+        update_delay: Optional[int] = None,
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.interval = interval
@@ -81,6 +98,17 @@ class CoaddAtomicConfig:
         self.overwrite = overwrite
         self.output_root = output_root
         self.plot = plot
+        
+        self.mapcat_settings = Settings(
+            **{
+                k: v for k, v in {
+                    "database_name": mapcat_database_name,
+                    "database_type": mapcat_database_type,
+                    "atomic_parent": mapcat_atomic_parent,
+                    "atomic_coadd_parent": mapcat_atomic_coadd_parent,
+                }.items() if v is not None
+            }
+        )
         
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],
@@ -100,6 +128,12 @@ class CoaddAtomicConfig:
         self.stop_time = convert_to_datetime(stop_time)
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         time_of_day = dt.time(self.start_time.hour, self.start_time.minute, self.start_time.second, tzinfo=self.start_time.tzinfo)
+        
+        if update_delay is not None:
+            self.start_time = dt.datetime.combine((convert_to_datetime(None) - dt.timedelta(days=update_delay)).date(),
+                                                  time_of_day,
+                                                  tzinfo=self.start_time.tzinfo)
+        
         if self.interval == "daily":
             delta = dt.timedelta(days=1)
         elif self.interval == "weekly":
@@ -137,8 +171,7 @@ def main(config_file: str, verbosity: int) -> None:
     
     putils.mkdir(cfg.output_root)
 
-    logger.info(f"Database initialized at {cfg.output_db}")
-    init_output_db(cfg.output_db, cfg.interval)
+    logger.info(f"Using database at {cfg.output_db}")
 
     for start_time, stop_time in cfg.time_intervals:
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
@@ -147,38 +180,38 @@ def main(config_file: str, verbosity: int) -> None:
         for band in cfg.bands:
             logger.info(f'Coadding band {band}')
             try:
-                success, err = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
+                success, err, maps_made = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
                                                    cfg.output_db, band, cfg.platform, 
                                                    cfg.split_label, start_time, stop_time, 
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
-                                                   logger=logger, plot=cfg.plot)
+                                                   logger=logger, plot=cfg.plot, 
+                                                   mapcat_settings=cfg.mapcat_settings)
+
+
                 if not success:
                     logger.warning(err)
+                else:
+                    map_name = f"coadd_{time_str}_{band}_{cfg.split_label}"
+                    prefix_path = f"{cfg.interval}/{map_name}"
+                    
+                    commit_coadd_maps(maps=maps_made["maps"],
+                                      map_name=map_name,
+                                      prefix_path=prefix_path,
+                                      interval=cfg.interval,
+                                      band=band,
+                                      split_label=cfg.split_label,
+                                      platform=cfg.platform,
+                                      start_time=start_time.timestamp(),
+                                      stop_time=stop_time.timestamp(),
+                                      geom_file_path=f"{cfg.geom_file_prefix}_{band}",
+                                      coadd_atomic=maps_made["coadd_atomic"],
+                                      mapcat_settings=cfg.mapcat_settings)
+
             except Exception as e:
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.error(f"Failed to coadd map for {time_str}, {band}: {tb} {e}")
     return True
-
-def init_output_db(output_db, interval):
-    conn = sqlite3.connect(output_db)
-    cur = conn.cursor()
-    create_stmt = f'''
-        CREATE TABLE IF NOT EXISTS {interval} (
-            telescope TEXT,
-            freq_channel TEXT,
-            split_label TEXT,
-            prefix_path TEXT,
-            geom_file_path TEXT,
-            obslist TEXT,
-            start_time FLOAT,
-            stop_time FLOAT,
-            PRIMARY KEY (telescope, freq_channel, split_label, prefix_path, geom_file_path, obslist, start_time, stop_time)
-        )
-    '''
-    cur.execute(create_stmt)
-    conn.commit()
-    conn.close()
 
 
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
