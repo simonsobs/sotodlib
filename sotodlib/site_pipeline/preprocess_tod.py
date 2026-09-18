@@ -162,7 +162,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           compress: bool = False,
           run_from_jobdb: bool = False,
           raise_error: bool = False,
-          pb_path: Optional[str] = None):
+          pb_path: Optional[str] = None,
+          filter_by_errlog: Optional[bool] = False,
+):
 
     temp_subdir = "temp"
 
@@ -182,6 +184,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
+
+    # get pipeline step errors in errlog file
+    if filter_by_errlog and os.path.isfile(errlog):
+        failed_groups = pp_util.get_step_err_from_log(errlog)
+    else:
+        failed_groups = None
 
     if run_from_jobdb:
         if not overwrite:
@@ -250,7 +258,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
             for group in groups:
                 if 'NC' not in group:
-                    run_list.append((obs_id, group))
+                    if (
+                        failed_groups is None
+                        or (obs_id, group) not in failed_groups
+                    ):
+                        run_list.append((obs_id, group))
 
         if jobdb_path is not None:
             run_list = pp_util.filter_preproc_runlist_by_jobdb(
@@ -459,6 +471,12 @@ def get_parser(parser=None):
         type=str,
         default=None
     )
+    parser.add_argument(
+        '--filter-by-errlog',
+        help="Remove groups that failed with pipeline_step_error from runlist.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
@@ -476,7 +494,8 @@ def main(configs: str,
          compress: bool = False,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
-         pb_path: Optional[str] = None):
+         pb_path: Optional[str] = None,
+         filter_by_errlog[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -496,7 +515,9 @@ def main(configs: str,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error,
-              pb_path=pb_path)
+              pb_path=pb_path,
+              filter_by_errlog,
+             )
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)
