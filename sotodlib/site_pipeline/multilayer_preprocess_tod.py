@@ -192,7 +192,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           run_from_jobdb: bool = False,
           raise_error: bool = False,
           pb_path: Optional[str] = None,
-          filter_by_errlog: Optional[bool]):
+          filter_by_errlog: Optional[bool] = False):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
