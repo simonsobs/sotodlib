@@ -494,7 +494,7 @@ def main(configs: str,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
          pb_path: Optional[str] = None,
-         filter_by_errlog[bool] = False):
+         filter_by_errlog Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
