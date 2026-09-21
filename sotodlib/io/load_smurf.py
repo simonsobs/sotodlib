@@ -2026,8 +2026,7 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (SmurfStatus instance): object indexing of rogue variables
-            at specified time.
+            SmurfStatus: object indexing of rogue variables at specified time.
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
