@@ -179,11 +179,11 @@ def chi_simulated_obs(focalplane, dets, alpha, tol, collision):
         "w13": "Mv25",  # LAT OTi6
         "w14": "Mv26",  # LAT OTi6
         "w15": "Mv11",  # LAT OTi6
-        "w16": "Mv21",  # LAT OTi1
+        "w16": "Mv13",  # LAT OTi1, Mv21 missing from DetMap
         "w17": "Mv24",  # LAT OTi1
         "w18": "Mv28",  # LAT OTi1
         "w19": "Mv13",  # LAT OTi3
-        "w20": "Mv20",  # LAT OTi3
+        "w20": "Mv26",  # LAT OTi3, Mv20 missing from DetMap
         "w21": "Mv28",  # LAT OTi3, Mv34 missing from DetMap
         "w22": "Mv14",  # LAT OTi4
         "w23": "Mv32",  # LAT OTi4
