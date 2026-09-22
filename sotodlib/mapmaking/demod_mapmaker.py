@@ -380,8 +380,8 @@ class DemodSignalMap(DemodSignal):
 
     def remove_obs(self, id):
         """Release pointing data retained for one accumulated observation."""
-        for key in [key for key in self.data if key[0] == id]:
-            del self.data[key]
+        for n_split in range(self.Nsplits):
+            self.data.pop((id, n_split), None)
 
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
@@ -716,17 +716,20 @@ def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weights
     to_map = lambda *args, **kwargs : wrapper(pmap.to_map(*args, **kwargs))
 
     rhs = zeros()
-    rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
-    rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
-    rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
+    rhs[0] = to_map(signal=signalT, comps='T', det_weights=det_weightsT)[0]
 
-    # Combine directly into the output to avoid another two-component map.
-    rhs[0] = rhs_T[0]
-    del rhs_T
-    rhs[1][:] = rhs_demodQ[0]
-    rhs[1] -= rhs_demodU[1]
-    rhs[2][:] = rhs_demodQ[1]
-    rhs[2] += rhs_demodU[0]
+    # The demodulated streams obey
+    #   demodQ = Q*cos(2*gamma) + U*sin(2*gamma)
+    #   demodU = U*cos(2*gamma) - Q*sin(2*gamma).
+    # A QU projection supplies the cosine and sine terms, so invert this
+    # rotation as Q = Qproj[0] - Uproj[1], U = Qproj[1] + Uproj[0].
+    rhs_demod = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
+    rhs[1] = rhs_demod[0]
+    rhs[2] = rhs_demod[1]
+    del rhs_demod
+    rhs_demod = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
+    rhs[1] -= rhs_demod[1]
+    rhs[2] += rhs_demod[0]
     return rhs
 
 def project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x:x):
@@ -749,9 +752,7 @@ def project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x
 
     div = zeros(super_shape=(ncomp, ncomp))
     # Build the per-pixel inverse covmat for this observation
-    wT = to_weights(comps='T', det_weights=det_weightsT)
-    div[0,0] = wT
-    del wT
+    div[0,0] = to_weights(comps='T', det_weights=det_weightsT)
     wQU = to_weights(comps='T', det_weights=det_weightsQU)
     div[1,1] = wQU
     div[2,2] = wQU
