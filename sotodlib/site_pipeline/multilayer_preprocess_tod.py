@@ -210,7 +210,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     exist_ok=True)
 
     # jobdb
-    jobdb_path = configs_proc.get("jobdb", {}).get("path")
+    jobdb_path, jdb_batch_size = pp_util.get_jobdb_config(configs_proc)
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
          # get init jobs
@@ -369,7 +369,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 if not failed_job or overwrite:
                     run_list.append((obs_id, group))
 
-        jdb.commit_jobs(new_init_jobs)
+        if jobdb_path is not None:
+            jdb.commit_jobs(new_init_jobs)
 
     if len(run_list) == 0:
         logger.info("Nothing to run")
@@ -408,7 +409,6 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     if jobdb_path is not None:
         # batch updates to JobDb
-        jdb_batch_size = configs_proc['jobdb'].get('batch_size', 1)
         batched_job_count = 0
         batched_job_fields = []
 
@@ -491,14 +491,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                             batched_job_count += 1
 
                     if (batched_job_count >= jdb_batch_size) or (len(futures) == 0):
-                        jobs = [j['job'] for j in batched_job_fields]
-                        with jdb.locked(jobs, count=len(jobs)) as j:
-                            for job_idx, job in enumerate(j):
-                                job.mark_visited()
-                                job.jstate = batched_job_fields[job_idx]["jstate"]
-                                for _t in job._tags:
-                                    if _t.key == "error":
-                                        _t.value = batched_job_fields[job_idx]["error"]
+                        pp_util.update_jobdb(jdb, batched_job_fields)
                         batched_job_count = 0
                         batched_job_fields = []
 
