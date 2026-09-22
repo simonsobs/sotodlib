@@ -66,7 +66,7 @@ class DemodMapmaker:
 
     def add_obs(self, id, obs, noise_model=None, split_labels=None,
                 use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
-                apply_wobble=True):
+                apply_wobble=True, keep_data=True):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -90,13 +90,21 @@ class DemodMapmaker:
             build the ivar locally from the std of the TOD.
         wn_label : str, optional
             Path where to find the white noise per det estimated by the preprocessing.
+        keep_data : bool, optional
+            Retain per-observation noise and pointing objects for later reuse.
+            Disable this for one-pass filter-and-bin mapmaking to release them
+            after their contribution has been accumulated.
 
         """
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         if not(self.singlestream):
-            # now we have 3 signals, dsT / demodQ / demodU. We pack them into an array with shape (3,...)
-            tod    = np.array([obs.dsT.astype(self.dtype, copy=False), obs.demodQ.astype(self.dtype, copy=False), obs.demodU.astype(self.dtype, copy=False)])
+            # Use a zero-copy tuple to have indexed access (e.g. tod[1] -> demodQ)
+            # without packing the data into a second TOD-sized array
+            tod = tuple(
+                stream.astype(self.dtype, copy=False)
+                for stream in (obs.dsT, obs.demodQ, obs.demodU)
+            )
         else:
             tod = obs.signal.astype(self.dtype, copy=False)
         # Allow the user to override the noise model on a per-obs level
@@ -123,8 +131,11 @@ class DemodMapmaker:
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod, split_labels=split_labels,apply_wobble=apply_wobble)
+            if not keep_data:
+                signal.remove_obs(id)
         # Save what we need about this observation
-        self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
+        if keep_data:
+            self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
 class DemodSignal:
     def __init__(self, name, ofmt, output, ext):
@@ -150,6 +161,7 @@ class DemodSignal:
         self.dof    = None
         self.ready  = False
     def add_obs(self, id, obs, nmat, Nd): pass
+    def remove_obs(self, id): pass
     def prepare(self): self.ready = True
     def to_work  (self, x): return x.copy()
     def from_work(self, x): return x
@@ -291,11 +303,11 @@ class DemodSignalMap(DemodSignal):
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, apply_wobble=True):
-        # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
-        and Nd the result of applying the noise model to the detector time-ordered data.
+        and Nd the noise-filtered TOD for singlestream mapmaking. Demodulated
+        mapmaking reads dsT, demodQ and demodU directly from obs.
         """
         ctime  = obs.timestamps
         if apply_wobble:
@@ -345,7 +357,7 @@ class DemodSignalMap(DemodSignal):
                 self.wcs = wcs
 
             if not(self.singlestream):
-                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT.astype(self.dtype_tod), signalQ=obs.demodQ.astype(self.dtype_tod), signalU=obs.demodU.astype(self.dtype_tod),
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT.astype(self.dtype_tod, copy=False), signalQ=obs.demodQ.astype(self.dtype_tod, copy=False), signalU=obs.demodU.astype(self.dtype_tod, copy=False),
                                                                det_weightsT=2*nmat.ivar, det_weightsQU=nmat.ivar, ncomp=self.ncomp, wrapper=self.wrapper)
             else:
                 obs_rhs, obs_div, obs_hits = project_all_single(pmap=pmap_local, Nd=Nd, det_weights=nmat.ivar, comps='TQU', wrapper=self.wrapper)
@@ -365,6 +377,11 @@ class DemodSignalMap(DemodSignal):
             # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
             self.data[(id,n_split)] = bunch.Bunch(pmap=pmap_local, obs_geo=obs_geo)
         del Nd
+
+    def remove_obs(self, id):
+        """Release pointing data retained for one accumulated observation."""
+        for key in [key for key in self.data if key[0] == id]:
+            del self.data[key]
 
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
@@ -619,7 +636,7 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label, apply_wobble=apply_wobble)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label, apply_wobble=apply_wobble, keep_data=False)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
         n_dets += obs.dets.count
@@ -702,16 +719,14 @@ def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weights
     rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
     rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
     rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
-    rhs_demodQU = zeros(super_shape=(2), comps='QU')
 
-    rhs_demodQU[0][:] = rhs_demodQ[0] - rhs_demodU[1]
-    rhs_demodQU[1][:] = rhs_demodQ[1] + rhs_demodU[0]
-    del rhs_demodQ, rhs_demodU
-
-    # we write into the rhs.
+    # Combine directly into the output to avoid another two-component map.
     rhs[0] = rhs_T[0]
-    rhs[1] = rhs_demodQU[0]
-    rhs[2] = rhs_demodQU[1]
+    del rhs_T
+    rhs[1][:] = rhs_demodQ[0]
+    rhs[1] -= rhs_demodU[1]
+    rhs[2][:] = rhs_demodQ[1]
+    rhs[2] += rhs_demodU[0]
     return rhs
 
 def project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x:x):
@@ -735,8 +750,9 @@ def project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x
     div = zeros(super_shape=(ncomp, ncomp))
     # Build the per-pixel inverse covmat for this observation
     wT = to_weights(comps='T', det_weights=det_weightsT)
-    wQU = to_weights(comps='T', det_weights=det_weightsQU)
     div[0,0] = wT
+    del wT
+    wQU = to_weights(comps='T', det_weights=det_weightsQU)
     div[1,1] = wQU
     div[2,2] = wQU
     return div
