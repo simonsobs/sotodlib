@@ -174,7 +174,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     os.makedirs(os.path.dirname(configs['archive']['policy']['filename']),
                 exist_ok=True)
 
-    jobdb_path = configs.get("jobdb", {}).get("path")
+    jobdb_path, jdb_batch_size = pp_util.get_jobdb_config(configs)
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
     elif run_from_jobdb:
@@ -323,7 +323,6 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     if jobdb_path is not None:
         # batch updates to JobDb
-        jdb_batch_size = configs['jobdb'].get('batch_size', 1)
         batched_job_count = 0
         batched_job_fields = []
 
@@ -383,14 +382,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     batched_job_count += 1
 
                     if (batched_job_count >= jdb_batch_size) or (len(futures) == 0):
-                        jobs = [j['job'] for j in batched_job_fields]
-                        with jdb.locked(jobs, count=len(jobs)) as j:
-                            for job_idx, job in enumerate(j):
-                                job.mark_visited()
-                                job.jstate = batched_job_fields[job_idx]["jstate"]
-                                for _t in job._tags:
-                                    if _t.key == "error":
-                                        _t.value = batched_job_fields[job_idx]["error"]
+                        pp_util.update_jobdb(jdb, batched_job_fields)
                         batched_job_count = 0
                         batched_job_fields = []
 
