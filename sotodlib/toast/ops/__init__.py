@@ -14,6 +14,7 @@ from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
 from .sim_source import SimSource
 from .h_n import Hn
+from .hwp_wobble import HWPWobbleCorrect
 from .mlmapmaker import MLMapmaker
 from .sim_wiregrid import SimWireGrid
 from .sim_stimulator import SimStimulator

@@ -626,7 +626,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                 continue
 
             ridx = np.where((iva.bands == band) & (iva.channels == chan))[0]
-            if not ridx:  # Channel doesn't exist in IV analysis
+            if ridx.size == 0:  # Channel doesn't exist in IV analysis
                 continue
 
             ridx = ridx[0]
@@ -704,7 +704,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                 continue
 
             ridx = np.where((bsa.bands == band) & (bsa.channels == chan))[0]
-            if not ridx:  # Channel doesn't exist in bias step analysis
+            if ridx.size == 0:  # Channel doesn't exist in bias step analysis
                 continue
 
             if cfg.apply_cal_correction:
