@@ -34,16 +34,18 @@ default_config = {
     "pm_ver_override": {},
     "par_groups": {},
     "root_dir": "~",
-    "project_dir": "solve_static_pointing",
+    "project_dir": "pointing",
     "append": "",
 }
 
 
 def _setup_paths(root_dir, project, tel, append=""):
-    plot_dir = os.path.join(root_dir, "plots", project, tel, append)
-    data_dir = os.path.join(root_dir, "data", project, tel, append)
-    os.makedirs(os.path.expanduser(plot_dir), exist_ok=True)
-    os.makedirs(os.path.expanduser(data_dir), exist_ok=True)
+    plot_dir = os.path.join(root_dir, "plots", project, tel, "solve_static_pointing" + append)
+    data_dir = os.path.join(root_dir, "data", project, tel, "solve_static_pointing" + append)
+    plot_dir = os.path.expanduser(plot_dir) 
+    data_dir = os.path.expanduser(data_dir)
+    os.makedirs(plot_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
 
     return plot_dir, data_dir
 
@@ -74,8 +76,8 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
     check_old = old_system is not None and old_cfg is not None
     if check_old:
         check_old = {
-            key: val for key, val in cfg.optics_config if key != "zemax_path"
-        } == {key: val for key, val in old_cfg.optics_config if key != "zemax_path"}
+            key: val for key, val in cfg.optics_config.items() if key != "zemax_path"
+        } == {key: val for key, val in old_cfg.optics_config.items() if key != "zemax_path"}
         if "zemax_path" in cfg.optics_config:
             if "zemax_hash" not in old_system.state_meta:
                 check_old = False
@@ -104,7 +106,7 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
             old_ot = None
             if old_rx is not None:
                 matches = [
-                    oot for oot in old_rx.optics_tubes if f"{oot.name}" == f"{oot.name}"
+                    oot for oot in old_rx.optics_tubes if f"{oot.name}" == f"{ot.name}"
                 ]
                 if len(matches) == 1:
                     old_ot = matches[0]
@@ -115,10 +117,10 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                     matches = [
                         ofp
                         for ofp, ows in zip(old_ot.focal_planes, old_ot.wafer_slots)
-                        if f"{ofp.name}" == f"{ofp.name}" and ows == ws
+                        if f"{ofp.name}" == f"{fp.name}" and ows == ws
                     ]
                     if len(matches) == 1:
-                        old_ot = matches[0]
+                        old_fp = matches[0]
                 if old_fp is not None:
                     logger.info(
                         "%s: Matching focal plane found in old data! Copying template and data.",
@@ -145,7 +147,6 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                 split = np.array([f"{t}_{b}_{p}" for t, b, p in zip(wafer["dets:wafer.type"], wafer["dets:wafer.bandpass"], wafer["dets:wafer.pol"])])  # type: ignore
 
                 focal_plane_args = (
-                    None,
                     0,
                     cfg.tel[:3].upper(),
                     ot.name,
@@ -159,8 +160,8 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                     True,
                 )
 
-                coords = optics.get_focal_plane(det_x, det_y, det_pol, *focal_plane_args)  # type: ignore
-                centers = optics.get_focal_plane(np.zeros(1), np.zeros(1), np.zeros(1), *focal_plane_args)  # type: ignore
+                coords = optics.get_focal_plane(None, det_x, det_y, det_pol, *focal_plane_args)  # type: ignore
+                centers = optics.get_focal_plane(None, np.zeros(1), np.zeros(1), np.zeros(1), *focal_plane_args)  # type: ignore
 
                 xi, eta, gamma, x_fp, y_fp, pol_fp, x_ot, y_ot, pol_ot = coords
                 (
@@ -198,7 +199,7 @@ def _get_old(outfile, overwrite):
     old_cfg = None
     if not os.path.isfile(outfile):
         return old_system, old_cfg
-    logger.info("Existing file found at %s")
+    logger.info("Existing file found at %s", outfile)
     with h5py.File(outfile) as f:
         ts = f["state"].attrs["timestamp"]
     new_path = f"{outfile}.{ts}"
@@ -227,21 +228,25 @@ def run(config_path: str, overwrite: bool, timestamp: str):
     cfg, cfg_str = load_config_namespace(config_path, default_config, None, require)
     cal = epochs.Calendar.load(cfg.calendar)
     ctx = Context(cfg.context)
+    with open(cfg.calendar) as f:
+        cal_str = f.read()
+    with open(cfg.context) as f:
+        ctx_str = f.read() 
 
     # Figure out paths
     plot_dir, data_dir = _setup_paths(
         cfg.root_dir, cfg.project_dir, cfg.tel, cfg.append
     )
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(plot_dir, exist_ok=True)
     outfile = os.path.join(data_dir, "static_pointing.h5")
 
     # Setup output
     old_system, old_cfg = _get_old(outfile, overwrite)
-    system = fpc.PointingSystem.empty(
-        cal.eras[cfg.era], cfg, yaml.dump(yaml.safe_load(cfg.calendar))
-    )
+    system = fpc.PointingSystem.empty(cal.eras[cfg.era], cfg, cal_str)
     system.state_meta["timestamp"] = timestamp
     system.state_meta["config"] = cfg_str
-    system.state_meta["context"] = yaml.dump(yaml.safe_load(cfg.context))
+    system.state_meta["context"] = ctx_str
     repo = git.Repo(
         os.path.abspath(os.path.dirname(__file__)), search_parent_directories=True
     )

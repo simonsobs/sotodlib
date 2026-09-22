@@ -49,6 +49,8 @@ def _add_attrs(dset, attrs):
 
 def _create_group(f, path, overwrite=True):
     if path in f:
+        if path == "/":
+            return f[path]
         if not overwrite:
             raise ValueError(f"HDF5 path already exists: {path}")
         del f[path]
@@ -276,8 +278,8 @@ class PointingModel:
         PointingModel
             The loaded pointing model.
         """
-        group = f[path]
-        parameters = AxisManager.load(f, f"{path}/parameters")
+        group = cast(h5py.Group, f[path])
+        parameters = AxisManager.load(group["parameters"])
         parameters = {name: parameters[name] for name in parameters._fields}
 
         return cls(
@@ -1439,13 +1441,13 @@ class OpticsTube:
             group,
             {
                 "name": self.name,
-                "wafer_slots": np.asarray(self.wafer_slots),
+                "wafer_slots": self.wafer_slots,
                 "static": self.static,
                 "autofreeze": self.autofreeze,
             },
         )
-        for fp in self.focal_planes:
-            fp.save(f, f"{path}/{fp.name}", pointing_models, overwrite=overwrite)
+        for ws, fp in zip(self.wafer_slots, self.focal_planes):
+            fp.save(f, f"{path}/{ws}-{fp.name}", pointing_models, overwrite=overwrite)
         if "_cm_transform_stat" in self.__dict__:
             self._cm_transform_stat.save(f, f"{path}/cm_transform")
         if "cm_transform_norx" in self.__dict__:
@@ -1493,7 +1495,8 @@ class OpticsTube:
         group = cast(h5py.Group, f[path])
         if "cm_transform" in group:
             tube._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
-        tube.cm_transform_norx = Transform.load(f, f"{path}/cm_transform_norx")
+        if "cm_transform_norx" in group:
+            tube.cm_transform_norx = Transform.load(f, f"{path}/cm_transform_norx")
 
         return tube
 
@@ -2134,7 +2137,7 @@ class PointingSystem:
 
         rx_group = cast(h5py.Group, f[f"{path}/receivers"])
         receivers = tuple(
-            Receiver.load(f, name, pointing_models) for name in sorted(rx_group.keys())
+            Receiver.load(f, f"{path}/receivers/{name}", pointing_models) for name in sorted(rx_group.keys())
         )
 
         return cls(
