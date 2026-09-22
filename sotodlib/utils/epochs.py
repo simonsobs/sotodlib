@@ -267,7 +267,7 @@ class Era:
     epochs: tuple[Epoch, ...]
     operator: str
     _internal: Interval = field(init=False)
-    _lookup: tuple[tuple(float, float, int), ...] = field(init=False)
+    _lookup: tuple[tuple[float, float, int], ...] = field(init=False)
 
     def __post_init__(self):
         if self.operator not in OP_MAP:
@@ -275,7 +275,7 @@ class Era:
         self._internal = cast(
             Interval, reduce(OP_MAP[self.operator], [e._internal for e in self.epochs])
         )
-        self.lookup = sorted(
+        self._lookup = sorted(
             (ival.start, ival.stop, i)
             for i, epoch in enumerate(self.epochs)
             for ival in epoch.covers

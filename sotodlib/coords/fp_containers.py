@@ -1963,6 +1963,8 @@ class PointingSystem:
             rxs += [Receiver(cfg.tel, epoch.name, ots, False, False)]
 
         def _group_epochs(dat, groups, desc, check_fields):
+            if len(groups) == 0:
+                return dat
             u, c = np.unique(np.concatenate(groups), return_counts=True)
             ng = [d for d in dat if d.epoch not in u]
 
@@ -2005,7 +2007,7 @@ class PointingSystem:
             pars = deepcopy(param_defaults[pm_ver])
             par_names += list(pars.keys())
             pars["version"] = pm_ver
-            pm.pars = pars
+            pm.parameters = pars
         par_names = np.unique(par_names).tolist()
         par_map = [np.arange(len(pms), dtype=int).tolist()] * len(par_names)
         pm_epochs = [pm.epoch for pm in pms]

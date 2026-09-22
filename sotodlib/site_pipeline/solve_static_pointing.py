@@ -66,9 +66,9 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
             "wafer_info has unexpected ManifestScheme! Please annoy one of the usual suspects to modify this code!"
         )
 
-    if "zemax_path" in cfg.optics_cfg:
+    if "zemax_path" in cfg.optics_config:
         system.state_meta["zemax_hash"] = hashlib.md5(
-            open(cfg.optics_cfg["zemax_path"], "rb").read()
+            open(cfg.optics_config["zemax_path"], "rb").read()
         ).hexdigest()
 
     check_old = old_system is not None and old_cfg is not None
@@ -76,7 +76,7 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
         check_old = {
             key: val for key, val in cfg.optics_config if key != "zemax_path"
         } == {key: val for key, val in old_cfg.optics_config if key != "zemax_path"}
-        if "zemax_path" in cfg.optics_cfg:
+        if "zemax_path" in cfg.optics_config:
             if "zemax_hash" not in old_system.state_meta:
                 check_old = False
             else:
@@ -108,7 +108,7 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                 ]
                 if len(matches) == 1:
                     old_ot = matches[0]
-            for i, (fp, ws) in enumerate(zip(ot.focal_planes, ot.wafer_slot)):
+            for i, (fp, ws) in enumerate(zip(ot.focal_planes, ot.wafer_slots)):
                 fp_str = f"{rx.name}_{rx.epoch}:{ot.name}:{ws}:{fp.name}"
                 old_fp = None
                 if old_ot is not None:
@@ -150,11 +150,11 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                     cfg.tel[:3].upper(),
                     ot.name,
                     ws,
-                    cfg.optics_cfg["ufm_to_fp"],
+                    cfg.optics_config["ufm_to_fp"],
                     None,
-                    cfg.optics_cfg["fp_to_ot"],
+                    cfg.optics_config["fp_to_ot"],
                     None,
-                    cfg.optics_cfg.get("zemax_path"),
+                    cfg.optics_config.get("zemax_path"),
                     None,
                     True,
                 )
@@ -225,8 +225,8 @@ def run(config_path: str, overwrite: bool, timestamp: str):
         "context",
     )  # Not bothering with things we have defaults for
     cfg, cfg_str = load_config_namespace(config_path, default_config, None, require)
-    cal = epochs.Calendar.load(cfg.cal)
-    ctx = Context(cfg.context_path)
+    cal = epochs.Calendar.load(cfg.calendar)
+    ctx = Context(cfg.context)
 
     # Figure out paths
     plot_dir, data_dir = _setup_paths(
@@ -237,11 +237,11 @@ def run(config_path: str, overwrite: bool, timestamp: str):
     # Setup output
     old_system, old_cfg = _get_old(outfile, overwrite)
     system = fpc.PointingSystem.empty(
-        cal.eras[cfg.era], cfg, yaml.dump(yaml.safe_load(cfg.cal))
+        cal.eras[cfg.era], cfg, yaml.dump(yaml.safe_load(cfg.calendar))
     )
     system.state_meta["timestamp"] = timestamp
     system.state_meta["config"] = cfg_str
-    system.state_meta["context"] = yaml.dump(yaml.safe_load(cfg.context_path))
+    system.state_meta["context"] = yaml.dump(yaml.safe_load(cfg.context))
     repo = git.Repo(
         os.path.abspath(os.path.dirname(__file__)), search_parent_directories=True
     )
