@@ -191,7 +191,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           compress: bool = False,
           run_from_jobdb: bool = False,
           raise_error: bool = False,
-          pb_path: Optional[str] = None):
+          pb_path: Optional[str] = None,
+          filter_by_errlog: Optional[bool] = False):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -225,6 +226,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog_proc.txt')
+
+    # get pipeline step errors in errlog file
+    if filter_by_errlog and os.path.isfile(errlog):
+        failed_groups = pp_util.get_step_err_from_log(errlog)
+    else:
+        failed_groups = None
 
     if jobdb_path is not None and run_from_jobdb:
         if not overwrite:
@@ -313,7 +320,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                             new_init_jobs.append(new_init_job)
 
                     if not failed_job or overwrite:
-                        run_list.append((obs_id, group))
+                        if (
+                            failed_groups is None
+                            or (obs_id, group) not in failed_groups
+                        ):
+                            run_list.append((obs_id, group))
 
 
         # filter by jobdb status
@@ -559,6 +570,12 @@ def get_parser(parser=None):
         type=str,
         default=None
     )
+    parser.add_argument(
+        '--filter-by-errlog',
+        help="Remove groups that failed with pipeline_step_error from runlist.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
@@ -577,7 +594,8 @@ def main(configs_init: str,
          nproc: int = 4,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
-         pb_path: Optional[str] = None):
+         pb_path: Optional[str] = None,
+         filter_by_errlog Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -598,7 +616,8 @@ def main(configs_init: str,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error,
-              pb_path=pb_path)
+              pb_path=pb_path,
+              filter_by_errlog)
 
 
 if __name__ == '__main__':
