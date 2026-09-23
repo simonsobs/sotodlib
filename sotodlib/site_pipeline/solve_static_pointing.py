@@ -199,20 +199,23 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_
         fpp.plot_receiver_templates(rx, ot_locs, plot_dir)
 
 
-def _get_old(outfile, overwrite):
+def _get_old(outfile, overwrite, backup):
     old_system = None
     old_cfg = None
     if not os.path.isfile(outfile):
         return old_system, old_cfg
     logger.info("Existing file found at %s", outfile)
-    with h5py.File(outfile) as f:
-        ts = f["state"].attrs["timestamp"]
-    new_path = f"{outfile}.{ts}"
-    logger.info("Copying old file to %s", new_path)
+    if backup:
+        with h5py.File(outfile) as f:
+            ts = f["state"].attrs["timestamp"]
+        new_path = f"{outfile}.{ts}"
+        logger.info("Copying old file to %s", new_path)
+        if overwrite:
+            shutil.move(outfile, new_path)
+        else:
+            shutil.copyfile(outfile, new_path)
     if overwrite:
-        shutil.move(outfile, new_path)
         return old_system, old_cfg
-    shutil.copyfile(outfile, new_path)
     with h5py.File(outfile) as f:
         old_system = fpc.PointingSystem.load(f, "/")
     old_cfg, _ = load_config_namespace(old_system.state_meta["config"])
@@ -222,7 +225,7 @@ def _get_old(outfile, overwrite):
     return old_system, old_cfg
 
 
-def run(config_path: str, overwrite: bool, timestamp: str):
+def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
     require = (
         "optics_config",
@@ -247,7 +250,7 @@ def run(config_path: str, overwrite: bool, timestamp: str):
     outfile = os.path.join(data_dir, "static_pointing.h5")
 
     # Setup output
-    old_system, old_cfg = _get_old(outfile, overwrite)
+    old_system, old_cfg = _get_old(outfile, overwrite, backup)
     system = fpc.PointingSystem.empty(cal.eras[cfg.era], cfg, cal_str)
     system.state_meta["timestamp"] = timestamp
     system.state_meta["config"] = cfg_str
@@ -282,6 +285,9 @@ def main():
     parser.add_argument(
         "--overwrite", "-o", action="store_true", help="Overwrite existing data"
     )
+    parser.add_argument(
+        "--backup", "-b", action="store_true", help="Backup existing data"
+    )
     args = parser.parse_args()
 
     profiler = None
@@ -293,7 +299,7 @@ def main():
         profiler.start()
 
     try:
-        run(args.config_path, args.overwrite, timestamp)
+        run(args.config_path, args.overwrite, args.backup, timestamp)
     finally:
         if args.profile and profiler is not None:
             prof_out = f"solve_static_pointing_{timestamp}.html"
