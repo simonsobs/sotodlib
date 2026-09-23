@@ -16,6 +16,7 @@ import h5py
 import numpy as np
 import pyinstrument
 import sotodlib.coords.fp_containers as fpc
+import sotodlib.coords.fp_plots as fpp
 import yaml
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
@@ -40,9 +41,13 @@ default_config = {
 
 
 def _setup_paths(root_dir, project, tel, append=""):
-    plot_dir = os.path.join(root_dir, "plots", project, tel, "solve_static_pointing" + append)
-    data_dir = os.path.join(root_dir, "data", project, tel, "solve_static_pointing" + append)
-    plot_dir = os.path.expanduser(plot_dir) 
+    plot_dir = os.path.join(
+        root_dir, "plots", project, tel, "solve_static_pointing" + append
+    )
+    data_dir = os.path.join(
+        root_dir, "data", project, tel, "solve_static_pointing" + append
+    )
+    plot_dir = os.path.expanduser(plot_dir)
     data_dir = os.path.expanduser(data_dir)
     os.makedirs(plot_dir, exist_ok=True)
     os.makedirs(data_dir, exist_ok=True)
@@ -50,7 +55,7 @@ def _setup_paths(root_dir, project, tel, append=""):
     return plot_dir, data_dir
 
 
-def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
+def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir):
     logger.info("Computing templates and copying old data if compatible")
     dbs = [
         (metadata.ManifestDb(md["db"]), os.path.dirname(md["db"]))
@@ -73,12 +78,19 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
             open(cfg.optics_config["zemax_path"], "rb").read()
         ).hexdigest()
 
+    with open(cfg.optics_config["fp_to_ot"]) as f:
+        ot_locs = yaml.safe_load(f)
+
     check_old = old_system is not None and old_cfg is not None
-    if check_old:
+    if check_old and old_cfg is not None:
         check_old = {
             key: val for key, val in cfg.optics_config.items() if key != "zemax_path"
-        } == {key: val for key, val in old_cfg.optics_config.items() if key != "zemax_path"}
-        if "zemax_path" in cfg.optics_config:
+        } == {
+            key: val
+            for key, val in old_cfg.optics_config.items()
+            if key != "zemax_path"
+        }
+        if "zemax_path" in cfg.optics_config and old_system is not None:
             if "zemax_hash" not in old_system.state_meta:
                 check_old = False
             else:
@@ -94,7 +106,7 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
         epoch = epc_dict[rx.epoch.split("+")[0]]
         ws_mapping = epoch._internal.data["ws_mapping"]  # ot : ws : (stream_id, array)
         old_rx = None
-        if check_old:
+        if check_old and old_system is not None:
             matches = [
                 orx
                 for orx in old_system.receivers
@@ -160,21 +172,12 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                     True,
                 )
 
+                # fmt: off
                 coords = optics.get_focal_plane(None, det_x, det_y, det_pol, *focal_plane_args)  # type: ignore
                 centers = optics.get_focal_plane(None, np.zeros(1), np.zeros(1), np.zeros(1), *focal_plane_args)  # type: ignore
-
-                xi, eta, gamma, x_fp, y_fp, pol_fp, x_ot, y_ot, pol_ot = coords
-                (
-                    xi_c,
-                    eta_c,
-                    gamma_c,
-                    x_fp_c,
-                    y_fp_c,
-                    pol_fp_c,
-                    x_ot_c,
-                    y_ot_c,
-                    pol_ot_c,
-                ) = centers
+                xi, eta, gamma, x_fp, y_fp, pol_fp, x_ot, y_ot, pol_ot = coords # type: ignore
+                xi_c, eta_c, gamma_c, x_fp_c, y_fp_c, pol_fp_c, x_ot_c, y_ot_c, pol_ot_c = centers # type: ignore
+                # fmt: on
 
                 for name, values, center in (
                     ("xieta", (xi, eta, gamma), (xi_c, eta_c, gamma_c)),
@@ -192,6 +195,8 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx):
                             name,
                         ),
                     )
+        logger.info("Plotting %s", f"{rx.name}_{rx.epoch}")
+        fpp.plot_receiver_templates(rx, ot_locs, plot_dir)
 
 
 def _get_old(outfile, overwrite):
@@ -231,7 +236,7 @@ def run(config_path: str, overwrite: bool, timestamp: str):
     with open(cfg.calendar) as f:
         cal_str = f.read()
     with open(cfg.context) as f:
-        ctx_str = f.read() 
+        ctx_str = f.read()
 
     # Figure out paths
     plot_dir, data_dir = _setup_paths(
@@ -255,7 +260,7 @@ def run(config_path: str, overwrite: bool, timestamp: str):
     )
 
     # Make templates and load old data if we can
-    _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx)
+    _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
     # TODO: Mark pad epochs as pad
 
