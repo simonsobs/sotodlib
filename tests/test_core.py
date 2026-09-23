@@ -461,6 +461,50 @@ class TestAxisManager(unittest.TestCase):
         rman.test += 5
         self.assertNotEqual( aman.test[0,0], rman.test[0,0])
 
+    def test_403b_restrict_index_copies(self):
+        # Not-in-place restriction by labels or a mask must return correct,
+        # independent copies of top-level arrays.
+        dets = ['det0', 'det1', 'det2']
+        orig = np.arange(30.).reshape(3, 10)
+        for sel, idx in [(['det2', 'det0'], [2, 0]),
+                         (np.array([True, False, True]), [0, 2])]:
+            aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                    core.OffsetAxis('samps', 10))
+            aman.wrap('x', orig.copy(), [(0, 'dets'), (1, 'samps')])
+            rman = aman.restrict('dets', sel, in_place=False)
+            np.testing.assert_array_equal(rman.x, orig[idx])
+            self.assertFalse(np.shares_memory(rman.x, aman.x))
+            rman.x[...] = -1.
+            np.testing.assert_array_equal(aman.x, orig)
+
+    def test_404_restrict_children_independent(self):
+        # Restricting a parent must leave the original child AxisManagers
+        # untouched, and the restricted children must not share data with
+        # them, for both index (dets) and slice (samps) restrictions.
+        dets = ['det0', 'det1', 'det2']
+        n = 100
+        for axis, sel in [('dets', ['det2', 'det0']), ('samps', (10, 60))]:
+            for in_place in [True, False]:
+                aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                        core.OffsetAxis('samps', n))
+                child = core.AxisManager(aman.dets, aman.samps)
+                child.wrap_new('ds', ('dets', 'samps'))[:] = 1.
+                child.wrap_new('d', ('dets',))[:] = 1.
+                child.wrap_new('s', ('samps',))[:] = 1.
+                child.wrap('flags', core.FlagManager.for_tod(child))
+                child.flags.wrap_dets('f', np.array([True, False, True]))
+                aman.wrap('child', child)
+                out = aman.restrict(axis, sel, in_place=in_place)
+                self.assertIsNot(out.child, child)
+                self.assertIsInstance(out.child.flags, core.FlagManager)
+                self.assertEqual(child.ds.shape, (3, n))
+                for k in ['ds', 'd', 's']:
+                    out.child[k][...] = 7.
+                    self.assertTrue(np.all(child[k] == 1.))
+                if axis == 'dets':
+                    np.testing.assert_array_equal(
+                        out.child.flags.f.mask()[:, 0], [True, True])
+
     def test_405_restrict_identity(self):
         # An in-place restriction that keeps every item in order is a no-op.
         dets = ['det0', 'det1', 'det2']
