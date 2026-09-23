@@ -461,6 +461,25 @@ class TestAxisManager(unittest.TestCase):
         rman.test += 5
         self.assertNotEqual( aman.test[0,0], rman.test[0,0])
 
+    def test_405_restrict_identity(self):
+        # An in-place restriction that keeps every item in order is a no-op.
+        dets = ['det0', 'det1', 'det2']
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', 100))
+        aman.wrap_new('x', ('dets', 'samps'))
+        aman.wrap('child', core.AxisManager(aman.dets))
+        x, child = aman.x, aman.child
+        self.assertIs(aman.restrict('dets', dets), aman)
+        self.assertIs(aman.x, x)
+        self.assertIs(aman.child, child)
+        # A reordering is not an identity.
+        aman.restrict('dets', dets[::-1])
+        self.assertEqual(list(aman.dets.vals), dets[::-1])
+        # Not in place always returns an independent copy.
+        rman = aman.restrict('dets', aman.dets.vals, in_place=False)
+        self.assertIsNot(rman.x, aman.x)
+        self.assertFalse(np.shares_memory(rman.x, aman.x))
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0

@@ -1009,6 +1009,9 @@ class AxisManager:
             dest = self.copy(axes_only=True)
             dest._assignments.update(self._assignments)
         new_ax, sl = dest._axes[axis_name].restriction(selector)
+        if in_place and new_ax == dest._axes[axis_name]:
+            # Nothing is removed or reordered; skip copying every field.
+            return dest
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.copy()
