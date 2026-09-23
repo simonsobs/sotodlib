@@ -480,6 +480,16 @@ class TestAxisManager(unittest.TestCase):
         self.assertIsNot(rman.x, aman.x)
         self.assertFalse(np.shares_memory(rman.x, aman.x))
 
+    def test_406_restrict_copy_assignments(self):
+        # A not-in-place restriction must not share assignment lists with
+        # the source, so that axis removal on one does not affect the other.
+        aman = core.AxisManager(core.LabelAxis('dets', ['a', 'b']),
+                                core.OffsetAxis('samps', 10))
+        aman.wrap_new('x', ('dets', 'samps'))
+        rman = aman.restrict('dets', ['a'], in_place=False)
+        del rman['samps']
+        self.assertEqual(aman._assignments['x'], ['dets', 'samps'])
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
