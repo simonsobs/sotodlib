@@ -2,7 +2,7 @@ import so3g.proj
 import numpy as np
 from pixell import enmap, tilemap
 
-from .helpers import _get_csl, _valid_arg, _not_both, _confirm_wcs
+from .helpers import _get_csl, _valid_arg, _not_both, _confirm_wcs, DEG
 from . import helpers
 from . import healpix_utils as hp_utils
 
@@ -100,6 +100,11 @@ class P:
 
       Default: None
 
+    - det_left (optional): If True, the detector quaternions in fp
+      multiply the sight quaternions from the left (q_det * q_sight)
+      instead of from the right.  This is used for
+      instrument-centered coordinates (see for_tod).  Default: False
+
     These things can be updated freely, with the following caveats:
 
     - If the number of "samples" or "detectors" is changed in one
@@ -125,9 +130,11 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None,
+                 det_left=False):
         self.sight = sight
         self.fp = fp
+        self.det_left = det_left
         self.geom = wrap_geom(geom)
         self.comps = comps
         self.cuts = cuts
@@ -147,7 +154,8 @@ class P:
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None, hwp=False, qp_kwargs={}):
+                site='so', interpol=None, hwp=False, qp_kwargs={},
+                instrument_centered=None):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -175,7 +183,51 @@ class P:
         (gamma) are reflected (gamma' = -gamma) before storing in
         self.fp.
 
+        If instrument_centered is set to the name of a source (e.g.
+        'Moon' or 'Sun'), the pointing matrix is set up in
+        instrument-centered coordinates for that source, instead of
+        celestial coordinates.  In these coordinates, the map
+        position of each sample is the position of the source relative
+        to the detector, on axes fixed to the telescope structure (the
+        focal plane xi/eta axes at zero roll): the detector is at
+        (lon, lat) = (0, 0), and for small offsets lat ~ eta_src -
+        eta_det and lon ~ -(xi_src - xi_det).  This is appropriate
+        for mapping (or masking) sidelobe pickup of a bright source.
+        See get_instrument_centered for details.  In this mode:
+
+        - the boresight must be given in horizon coordinates (az, el,
+          roll; boresight_equ is not supported);
+        - geom must be provided, rot must be None, and comps must be
+          'T' (polarization is not supported).
+
         """
+        if instrument_centered is not None:
+            if comps != 'T':
+                raise ValueError("instrument_centered only supports comps='T'.")
+            if rot is not None:
+                raise ValueError("rot cannot be used with instrument_centered.")
+            if geom is None:
+                raise ValueError("geom must be provided with instrument_centered.")
+            if boresight_equ is not None:
+                raise ValueError("boresight_equ cannot be used with "
+                                 "instrument_centered; pass boresight instead.")
+            timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
+            boresight = _valid_arg(boresight, 'boresight', src=tod)
+            assert(boresight is not None)
+            roll = getattr(boresight, 'roll', None)
+            if sight is None:
+                sight = so3g.proj.CelestialSightLine.az_el(
+                    timestamps, boresight.az, boresight.el, roll=roll,
+                    site=site, weather=weather, **qp_kwargs)
+            else:
+                sight = _get_csl(sight)
+            fp = helpers.get_fplane(tod, focal_plane=focal_plane)
+            sight, fp = get_instrument_centered(
+                sight, fp, roll, instrument_centered, timestamps, site=site)
+            return cls(sight=sight, fp=fp, geom=geom, comps=comps,
+                       cuts=cuts, threads=threads, det_weights=det_weights,
+                       interpol=interpol, det_left=True)
+
         if sight is None:
             if boresight_equ is None:
                 if boresight is None:
@@ -551,7 +603,7 @@ class P:
     def _get_asm(self):
         """Bundles self.fp and self.sight into an "Assembly" for calling
         so3g.proj routines."""
-        return so3g.proj.Assembly.attach(self.sight, self.fp)
+        return so3g.proj.Assembly.attach(self.sight, self.fp, det_left=self.det_left)
 
     def _prepare_map(self, map):
         """Gently reformat a map in order to send it to so3g."""
@@ -656,6 +708,85 @@ class P_PrecompDebug:
         proj  = so3g.ProjEng_Precomp_NonTiled()
         proj.from_map(signal_map, self.pixels, self.phases, dest)
         return dest
+
+def get_instrument_centered(sight, fp, roll, source, timestamps, site='so',
+                            max_roll_spread=0.1*DEG):
+    """Get the sight line and focal plane for projecting in
+    instrument-centered coordinates of a source (e.g. the Moon).
+
+    In instrument-centered coordinates, the map position of each
+    sample is the position of the source relative to the detector.
+    The full rotation, for detector d and sample t, is::
+
+      q[d,t] = q_to_eq * Rz(roll0) * q_det[d]^-1 * Rz(-roll0)
+               * Rz(roll[t]) * q_bore[t]^-1 * q_src[t]
+
+    where q_bore = sight.Q is the boresight in celestial coordinates
+    (as from CelestialSightLine.az_el, i.e. including the Rz(roll)
+    applied on the right), q_src is the celestial position of the
+    source, q_det is the detector offset (with polarization angle
+    set to zero), roll0 is the mean roll angle and q_to_eq = Ry(pi/2)
+    moves the detector from the pole to (lon, lat) = (0, 0).
+
+    The per-sample rotations Rz(roll[t]) * q_bore[t]^-1 * q_src[t]
+    give the source position in telescope-fixed coordinates (the
+    focal plane at zero roll).  Conjugating q_det by Rz(roll0)
+    expresses the detector offsets in those same axes, so the
+    result does not rotate with the roll.  This is exact for a
+    constant roll; if the roll varies, only the detector offsets are
+    approximated (a warning is logged if the roll varies by more
+    than max_roll_spread).
+
+    Because the detector rotation is applied on the left, the
+    returned focal plane must be used with det_left=True.
+
+    Args:
+      sight (CelestialSightLine): boresight pointing, in celestial
+        coordinates. [samps]
+      fp (FocalPlane): detector offsets and responses; the
+        polarization angles are ignored. [dets]
+      roll (array or None): boresight roll angle, in radians. [samps]
+      source (str): source name, as accepted by
+        planets.get_source_pos (e.g. 'Moon', 'Sun').
+      timestamps (array): unix timestamps. [samps]
+      site (str or EarthlySite): observing site.
+      max_roll_spread (float): threshold for the roll variation
+        warning, in radians.
+
+    Returns:
+      (sight, fp): a CelestialSightLine holding the per-sample
+      rotations, and a FocalPlane holding the per-detector rotations,
+      to be combined as fp.quats[d] * sight.Q[t].
+
+    """
+    from . import planets
+    quat = so3g.proj.quat
+    n_samp = len(sight.Q)
+
+    if roll is None:
+        roll = np.zeros(n_samp)
+    roll = np.broadcast_to(np.asarray(roll, dtype=float), (n_samp,))
+    roll0 = np.arctan2(np.mean(np.sin(roll)), np.mean(np.cos(roll)))
+    spread = np.max(np.abs((roll - roll0 + np.pi) % (2*np.pi) - np.pi))
+    if spread > max_roll_spread:
+        logger.warning(f'get_instrument_centered: roll varies by up to '
+                       f'{spread/DEG:.3f} deg from its mean; detector '
+                       f'offsets will be approximate.')
+
+    # Per-sample part: the source in telescope-fixed boresight coordinates.
+    q_src = planets.get_source_quat(source, timestamps, site=site)
+    ic_sight = so3g.proj.CelestialSightLine()
+    ic_sight.Q = quat.euler(2, roll) * ~sight.Q * q_src
+
+    # Per-detector part: center on the detector (with gamma = 0, so
+    # that all detectors share the same axes), then move to the equator.
+    xi, eta, _ = quat.decompose_xieta(fp.quats)
+    q_det = quat.rotation_xieta(np.atleast_1d(xi), np.atleast_1d(eta), 0.)
+    q_left = (quat.euler(1, np.pi/2) * quat.euler(2, roll0) * ~q_det
+              * quat.euler(2, -roll0))
+    ic_fp = so3g.proj.FocalPlane(quats=q_left, resps=fp.resps)
+    return ic_sight, ic_fp
+
 
 def wrap_geom(geom):
     if isinstance(geom, tuple) or isinstance(geom, list):
