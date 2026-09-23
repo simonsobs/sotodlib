@@ -3,7 +3,7 @@ import so3g
 
 class PmatCut:
     """Implementation of cuts-as-extra-degrees-of-freedom for a single obs."""
-    def __init__(self, cuts, model=None, params={"resolution":100, "nmax":100}):
+    def __init__(self, cuts, model=None, params={"resolution":100, "nmax":10}):
         self.cuts   = cuts
         self.model  = model or "full"
         self.params = params

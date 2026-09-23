@@ -11,6 +11,7 @@ import argparse
 import time
 
 from sotodlib.coords import det_match, optics
+from sotodlib.coords.det_match_solutions import SolutionsCfg, solve_all
 from sotodlib import core
 from sotodlib.core.metadata import ManifestDb
 from sotodlib.io.metadata import write_dataset
@@ -23,6 +24,14 @@ if len(logger.handlers) == 0:
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
 
 
 @dataclass
@@ -105,6 +114,8 @@ class UpdateDetMatchesConfig:
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
     time_before_cache_failure: float = float(3600 * 24 * 7)
+    start_time: int = 0
+    stop_time: int = 2**32
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -178,6 +189,8 @@ class Runner:
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
         if self.cfg.ufms:
             detsets_all = set([d for d in detsets_all if '_'.join(d.split('_')[:2]) in self.cfg.ufms])
+        ts = [get_detset_time(d) for d in detsets_all]
+        detsets_all = set([d for t, d in zip(ts, detsets_all) if t > self.cfg.start_time and t < self.cfg.stop_time])
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
@@ -204,13 +217,6 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs = det_match.ResSet.from_array(rs_arr)
         rs.name = 'sol'
         return rs
-
-def get_detset_time(detset: str) -> float:
-    """
-    Gets timestamp associated with a detset. Will parse this from the detset
-    name, assuming it is of the form <stream_id>_<time>_tune.
-    """
-    return float(detset.split('_')[-2])
 
 def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
     if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
@@ -296,7 +302,11 @@ def run_match(runner: Runner, detset: str) -> bool:
     finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
     new_detsets = []
     for detset in np.unique(aman.det_info.detset):
-        if detset not in finished_detsets:
+        if (
+            detset not in finished_detsets and
+            get_detset_time(detset) > runner.cfg.start_time and
+            get_detset_time(detset) < runner.cfg.stop_time
+        ):
             new_detsets.append(detset)
 
     logger.info(f"Loaded obs_id {obs_id}. Running matches for detsets:")
@@ -427,33 +437,56 @@ def update_manifests_all(runner):
         logger.info(f"Adding {ds} to manifests")
         update_manifests(runner, ds)
 
-def make_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('config', type=str, help='path to config file')
-    parser.add_argument('--all', action='store_true', help='run all detsets')
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    parser.add_argument('config_file', type=str, help='path to config file')
+    parser.add_argument('--run-all', action='store_true', help='run all detsets')
+    parser.add_argument('--solutions-mode', action='store_true',
+                         help='create a det_match solution set')
     return parser
 
-def main(config_file: str, all: bool=False):
-    with open(config_file, 'r') as f:
-        cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+def main(config_file: str, run_all: bool=False, solutions_mode: bool=False):
+    """
+    Site-pipeline script to peform detector matching of tunesets to a solution
+    set.
 
-    runner = Runner(cfg)
-
-    remaining_detsets = runner.get_remaining_detsets()
-    logger.info(f"{len(remaining_detsets)} detsets to match")
-    if all:
-        update_manifests_all(runner)
-        for detset in remaining_detsets:
-            run_match(runner, detset)
-            update_manifests_all(runner)
+    ------
+    config_file: str
+        Yaml configuration file for tuneset matching (or solution set matching
+        if solutions_mode is True).
+    run_all: bool
+        Run all detsets if True, otherwise exit after first successful match.
+    solutions_mode: bool
+        Create a det_match solution instead of matching a solution to a tuneset.
+        Requires a solutions configuration file.
+    """
+    if solutions_mode:
+        with open(config_file, "r") as f:
+            cfg = SolutionsCfg(**yaml.safe_load(f))
+        solve_all(cfg)
     else:
-        for detset in remaining_detsets:
-            success = run_match(runner, detset)
+        with open(config_file, 'r') as f:
+            cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+
+        runner = Runner(cfg)
+
+        remaining_detsets = runner.get_remaining_detsets()
+        logger.info(f"{len(remaining_detsets)} detsets to match")
+        if run_all:
             update_manifests_all(runner)
-            if success:
-                break
+            for detset in remaining_detsets:
+                logger.info(f"running: {detset}")
+                run_match(runner, detset)
+                update_manifests_all(runner)
+        else:
+            for detset in remaining_detsets:
+                success = run_match(runner, detset)
+                update_manifests_all(runner)
+                if success:
+                    break
 
 if __name__ == '__main__':
-    parser = make_parser()
+    parser = get_parser()
     args = parser.parse_args()
-    main(args.config, all=args.all)
+    main(args.config_file, run_all=args.run_all, solutions_mode=args.solutions_mode)

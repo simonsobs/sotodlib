@@ -190,18 +190,24 @@ class G3tHk:
         max_vals = []
         stds = []
 
-        for i in range(len(hkfs)):
-            data = arc.simple(hkfs[i])
-            time = data[0]
+        data = arc.simple(hkfs)
+
+        for index, field in enumerate(data):
+            time = field[0]
             starts.append(time[0])
             stops.append(time[-1])
+
             try:
-                medians.append(np.median(data[1]))
-                means.append(np.mean(data[1]))
-                min_vals.append(np.min(data[1]))
-                max_vals.append(np.max(data[1]))
-                stds.append(np.std(data[1]))
-            except:
+                medians.append(np.median(field[1]))
+                means.append(np.mean(field[1]))
+                min_vals.append(np.min(field[1]))
+                max_vals.append(np.max(field[1]))
+                stds.append(np.std(field[1]))
+            except Exception as e:
+                if not isinstance(e, TypeError):
+                    # TypeErrors are expected from attempting to take the median of a list of strings.
+                    logger.warning(f"Error processing field {index} for {hk_path}, setting to nan (Error: {e})")
+
                 medians.append(np.nan)
                 means.append(np.nan)
                 min_vals.append(np.nan)
@@ -298,6 +304,8 @@ class G3tHk:
             update_last_file=update_last_file,
         )
 
+        logger.info(f"Adding {len(file_list)} files to hkfiles database")
+
         for path in tqdm(sorted(file_list), disable=(not show_pb)):
             try:
                 root, filename = os.path.split(path)
@@ -322,6 +330,7 @@ class G3tHk:
                 logger.warning(f"Failed on file {filename}:\n{e}")
 
     def add_file(self, path, overwrite=False):
+        logger.debug(f"Adding file {path} to database")
         db_file = (
             self.session.query(HKFiles)
             .filter(
@@ -331,6 +340,7 @@ class G3tHk:
         )
 
         if db_file is not None and not overwrite:
+            logger.debug(f"File {path} already exists in database")
             return
         if db_file is None:
             db_file = HKFiles(path=path)

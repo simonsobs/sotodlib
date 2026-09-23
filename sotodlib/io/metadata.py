@@ -12,7 +12,7 @@ then back to 'U' type on load from HDF5.  See
 http://docs.h5py.org/en/stable/strings.html for a little more info.
 
 """
-
+from contextlib import nullcontext
 import numpy as np
 import h5py
 
@@ -45,13 +45,13 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
         raise TypeError("I do not know how to write type %s" % data.__class__)
 
     if isinstance(filename, str):
-        context = H5ContextManager(filename, mode).open()
+        context = H5ContextManager(filename, mode=mode)
     else:
         # Wrap in a nullcontext so that the block below doesn't
         # close the File on exit.
         fout = filename
         filename = fout.filename
-        context = _nullcontext(fout)
+        context = nullcontext(fout)
 
     with context as fout:
         if address in fout:
@@ -283,18 +283,6 @@ def _decode_array(data_in, key_map={}):
     for k, c in zip(new_dtype.names, columns):
         output[k] = c
     return output
-
-
-# Starting in Python 3.7, this can be had from contextlib.
-class _nullcontext:
-    def __init__(self, enter_result=None):
-        self.enter_result = enter_result
-
-    def __enter__(self):
-        return self.enter_result
-
-    def __exit__(self, *excinfo):
-        pass
 
 
 SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
