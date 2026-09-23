@@ -193,7 +193,6 @@ def main(**args):
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbosity>=2)
-        sidelobe_cutters = {}
 
         nkept = 0
 
@@ -299,7 +298,7 @@ def main(**args):
 
                 # sidelobes cuts
                 if not args.no_sidelobe:
-                    cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
+                    cutss = sidelobes.get_cuts(obs)
                     for cut in cutss:
                         obs.flags.glitch_flags += cut
 
