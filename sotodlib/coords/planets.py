@@ -1031,7 +1031,7 @@ class GetSourcePosition:
     """ 
 
     def __init__(self, timestamp, source, site='_default', weather='typical'):
-        self.timestamp = timestamp
+        self.timestamp = np.atleast_1d(timestamp)
         self.source = coords.planets.get_source_list_fromstr(source)
         self.site = site
         self.weather = weather
@@ -1051,8 +1051,12 @@ class GetSourcePosition:
             print('Source is the Moon. Will use SlowSource to get ra/dec by deviding timestamps into subchunk')
             # Need interval = 10 sec for sub-arcsec accuracy.
             divnum = int((self.timestamp[-1] - self.timestamp[0])/interval)
-            print(f'Total data duration = {self.timestamp[-1] - self.timestamp[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
-            ts = np.array_split(self.timestamp, divnum)
+            if divnum == 0:
+                print(f'Total data duration = {self.timestamp[-1] - self.timestamp[0]} s, Interval is {interval}, so data is not divided.')
+                ts = [self.timestamp]
+            else:
+                print(f'Total data duration = {self.timestamp[-1] - self.timestamp[0]} s, Interval is {interval}, so data is divided into {divnum} chunk.')
+                ts = np.array_split(self.timestamp, divnum)
         else:
             ts = [self.timestamp]
     

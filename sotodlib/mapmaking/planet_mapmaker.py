@@ -320,7 +320,7 @@ def planet_mapmake_single_obs(
     dbinfo.detnum = [len(np.where(idetid)[0]) for idetid in valids]
 
     # MapFit
-    if configs["mapmaking"]["fitmap"]["process"]:
+    if configs["mapmaking"]["fitmap"].get("process", False):
         try:
             fitr = fit_map(
                         coadd_map["map"],
@@ -328,7 +328,7 @@ def planet_mapmake_single_obs(
                         sig_ran=configs["fitmap"].get("sig_ran", 1.0),
                     )
         except Exception as e:
-            logger.info(f'Failed map fit: {e}')
+            logger.info(f'MapFit Failed: {e}')
             fitr = None
         del coadd_map
         add_mapfit_info(dbinfo, fitr=fitr)
