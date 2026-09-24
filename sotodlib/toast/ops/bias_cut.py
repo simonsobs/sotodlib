@@ -98,6 +98,7 @@ class DetBiasCuts(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
+        gcomm = data.comm.comm_group
 
         bg_key = f"{self.detcal_prefix}bg"
         r_tes_key = f"{self.detcal_prefix}r_tes"
@@ -111,34 +112,42 @@ class DetBiasCuts(Operator):
             bias_flags = dict()
             fp = ob.telescope.focalplane
             cnames = set(fp.detector_data.colnames)
+            ndet = 0
+            ncut = 0
             for det in ob.select_local_detectors(detectors, flagmask=self.det_mask):
+                ndet += 1
                 fp_det = fp[det]
                 if bg_key not in cnames:
                     msg = f"{ob.name}:{det} no focalplane key '{bg_key}', cutting"
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if fp_det[bg_key] < 0:
                     msg = f"{ob.name}:{det} {bg_key}={fp_det[bg_key]} < 0."
                     msg += " Cutting."
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if r_tes_key not in cnames:
                     msg = f"{ob.name}:{det} no focalplane key '{r_tes_key}', cutting"
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if fp_det[r_tes_key] <= 0:
                     msg = f"{ob.name}:{det} {r_tes_key}={fp_det[r_tes_key]} <= 0."
                     msg += " Cutting."
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if r_frac_key not in cnames:
                     msg = f"{ob.name}:{det} no focalplane key '{r_frac_key}', cutting"
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if (
                     fp_det[r_frac_key] < self.rfrac_range[0]
@@ -148,6 +157,7 @@ class DetBiasCuts(Operator):
                     msg += f" range {self.rfrac_range}. Cutting."
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
+                    ncut += 1
                     continue
                 if len(self.psat_range) != 0:
                     if len(self.psat_range) != 2:
@@ -158,6 +168,7 @@ class DetBiasCuts(Operator):
                         msg += " but PSAT range specified. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
                     if (
                         fp_det[p_sat_key] * 1e12 < self.psat_range[0]
@@ -167,6 +178,7 @@ class DetBiasCuts(Operator):
                         msg += f" range {self.psat_range}. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
                 if len(self.rn_range) != 0:
                     if len(self.rn_range) != 2:
@@ -177,6 +189,7 @@ class DetBiasCuts(Operator):
                         msg += " but r_n range specified. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
                     if (
                         fp_det[r_n_key] < self.rn_range[0]
@@ -186,6 +199,7 @@ class DetBiasCuts(Operator):
                         msg += f" range {self.rn_range}. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
                 if self.si_nan:
                     if s_i_key not in cnames:
@@ -193,14 +207,23 @@ class DetBiasCuts(Operator):
                         msg += " but s_i NaN check is True. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
                     if np.isnan(fp_det[s_i_key]):
                         msg = f"{ob.name}:{det} {s_i_key} is NaN. Cutting."
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
+                        ncut += 1
                         continue
             ob.update_local_detector_flags(bias_flags)
 
+            if gcomm is not None:
+                ndet = gcomm.reduce(ndet)
+                ncut = gcomm.reduce(ncut)
+            log.debug_rank(
+                f"DetBiasCuts flagged {ncut} / {ndet} surviving detectors in {ob.name}",
+                comm=gcomm
+            )
     def _finalize(self, data, **kwargs):
         return
 
