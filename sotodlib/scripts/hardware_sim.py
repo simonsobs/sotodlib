@@ -1,7 +1,15 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulate the nominal hardware model.
 """
+
+# sim_hardware seems to hang sometimes when importing TOAST.
+# Solution is to import it early
+try:
+    import toast
+except ImportError:
+    msg = "Toast package is not importable, cannot simulate detector positions"
+    raise RuntimeError(msg)
 
 import sys
 import argparse
@@ -39,7 +47,7 @@ def main():
     for tele, teleprops in hw.data["telescopes"].items():
         print("Simulating detectors for telescope {}...".format(tele),
               flush=True)
-        sim_detectors_toast(hw, tele)
+        sim_detectors_toast(hw, tele, verbose=True)
 
     if args.plain:
         outpath = "{}.toml".format(args.out)
