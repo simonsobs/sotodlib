@@ -519,7 +519,7 @@ def fill_zeros_biases(am):
                 bias[i] = last
 
 
-def load_and_reanalyze_bs(bsa, ctx, obs_id):
+def load_and_reanalyze_bs(bsa, ctx, obs_id, hwpss=False):
     """
     Load raw data of biassteps and reanalyze it with hwpss subtraction
 
@@ -529,24 +529,27 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         obs_id: observation id of bias steps
     """
     am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
-    am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
-            [(0, 'samps')])
-    if np.all(am.hwp_angle == 0):
-        return
-
     bsa.am = am
-    zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
-    if zero_bias_count > 0:
-        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
-        fill_zeros_biases(am)
     bsa._find_bias_edges()
-    flags = biases_flags(bsa)
-    get_hwpss(am, flags=flags, merge_stats=True)
-    subtract_hwpss(am, subtract_name='signal')
-    bsa._get_step_response()
+    if hwpss:
+        am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
+                [(0, 'samps')])
+        if np.all(am.hwp_angle == 0):
+            return
+
+        bsa.am = am
+        zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
+        if zero_bias_count > 0:
+            logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+            fill_zeros_biases(am)
+        bsa._find_bias_edges()
+        flags = biases_flags(bsa)
+        get_hwpss(am, flags=flags, merge_stats=True)
+        subtract_hwpss(am, subtract_name='signal')
+        bsa._get_step_response()
+        del bsa.am
     bsa._compute_dc_params()
     bsa._fit_tau_effs()
-    del bsa.am
 
 
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
