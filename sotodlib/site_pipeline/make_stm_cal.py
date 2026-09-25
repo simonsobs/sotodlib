@@ -117,6 +117,25 @@ def _open_stm_manifest_dbs(output_dir, logger):
     return dbs
 
 
+def _get_latest_stm_time(db, stm_rows):
+    registered = {
+        entry['dataset']
+        for entry in db.inspect({})
+        if entry['obs:obs_id'] == entry['dataset']
+    }
+
+    times = [
+        row['start_time']
+        for row in stm_rows
+        if row['obs_id'] in registered
+    ]
+
+    if not times:
+        return None
+
+    return max(times)
+
+
 def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite):
     h5_path = _get_stm_h5_path(output_dir, obs_id)
 
@@ -312,8 +331,8 @@ def _main(
     update_obs_scope : str (default 'all')
         Scope of observations to update correspondence for. Options:
         - 'all': all observations in the obsdb.
-        - 'processed': only observations that start after the earliest
-           processed stimulator calibration observation.
+        - 'processed': observations starting from the latest stimulator
+          calibration already registered in the ManifestDb.
     """
     logger = init_logger(__name__, 'make_stm_cal: ', verbosity=verbosity)
     errlog = os.path.join(output_dir, 'errlog.txt')
@@ -328,7 +347,6 @@ def _main(
     obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
     stm_rows = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
                                sort=['start_time'])
-    stm_start_times = {row['obs_id']: row['start_time'] for row in stm_rows}
 
     if obs_id is not None:
         rows_by_obs_id = {
@@ -349,6 +367,21 @@ def _main(
 
     # ManifestDb: one per calibration product
     dbs = _open_stm_manifest_dbs(output_dir, logger)
+    latest_stm_times = {}
+
+    query_stm_db = ' or '.join(
+        f'`{tag}`=1' for tag in _OBS_TYPES
+    )
+    stm_rows_all = ctx.obsdb.query(
+        query_stm_db,
+        tags=list(_OBS_TYPES),
+        sort=['start_time'],
+    )
+
+    for key, db in dbs.items():
+        latest_stm_times[key] = _get_latest_stm_time(db, stm_rows_all)
+        if latest_stm_times[key] is None:
+            logger.info(f'No {key} stimulator calibration found in ManifestDb.')
 
     jclass = 'stm_cal'
     jdb_path = os.path.join(output_dir, 'jobdb.sqlite')
@@ -426,41 +459,35 @@ def _main(
                 logger.error(f'Failed {oid}, try again later')
 
         if update_obs_corresp:
-            if update_obs_scope == 'all':
+            if update_obs_scope not in ('all', 'processed'):
+                raise ValueError(f'Invalid update_obs_scope: {update_obs_scope}')
+
+            if update_obs_scope == 'processed' and not processed_stm_obsids:
+                logger.info('No processed stimulator obs to update correspondence.')
+                return
+
+            do_all = any(v is None for v in latest_stm_times.values())
+            if update_obs_scope == 'all' or do_all:
                 obs_rows = ctx.obsdb.query(
                     "type=='obs'",
                     sort=['start_time'],
                 )
             elif update_obs_scope == 'processed':
-                if not processed_stm_obsids:
-                    logger.info('No processed stimulator obs to update correspondence.')
-                    return
-
-                start_time = min(
-                    stm_start_times[oid]
-                    for oid in processed_stm_obsids
-                )
+                start_time = min(latest_stm_times.values())
                 obs_rows = ctx.obsdb.query(
                     f"type='obs' and start_time >= {start_time}",
                     sort=['start_time'],
                 )
-            else:
-                raise ValueError(f'Invalid update_obs_scope: {update_obs_scope}')
 
             obs_detsets = _detsets_by_obsid(
                 ctx.obsfiledb,
                 [row['obs_id'] for row in obs_rows],
             )
 
-            query_stm_db = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
-            stm_rows_db = ctx.obsdb.query(query_stm_db,
-                                                 tags=list(_OBS_TYPES),
-                                                 sort=['start_time'])
-
             for product in _DB_TYPES:
                 stm_cal_mandb = load_stimulator_cal(dbs[product])
                 stm_rows_available = [
-                    row for row in stm_rows_db
+                    row for row in stm_rows_all
                     if row['obs_id'] in stm_cal_mandb
                 ]
                 cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
