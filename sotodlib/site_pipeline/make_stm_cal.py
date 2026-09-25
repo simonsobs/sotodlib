@@ -22,13 +22,13 @@ from sotodlib.stimulator.stimulator import (
 )
 
 _OBS_TYPES = ('gain', 'time_constant', 'gain_and_timeconstant')
-_DB_TYPES = ('gain', 'time_constant', 'readout_delay', 'gain_with_tau_correction')
+_DB_TYPES = ('gain', 'time_constant')
 _PRODUCTS = {
     'gain': ['gain'],
-    'time_constant': ['time_constant', 'readout_delay'],
-    'gain_and_timeconstant': ['gain', 'time_constant',
-                              'readout_delay', 'gain_with_tau_correction'],
+    'time_constant': ['gain', 'time_constant'],
+    'gain_and_timeconstant': ['gain', 'time_constant'],
 }
+
 
 def run(
     logger,
@@ -124,11 +124,6 @@ def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite)
         if product == 'gain' and 'stm_gain' not in stm_cal._fields:
             continue
         if product == 'time_constant' and 'stm_tau' not in stm_cal._fields:
-            continue
-        if product == 'readout_delay' and 'readout_delay' not in stm_cal._fields:
-            continue
-        if product == 'gain_with_tau_correction' and \
-            'stm_gain_with_tau_correction' not in stm_cal._fields:
             continue
 
         dbs[product].add_entry(
@@ -432,7 +427,7 @@ def _main(
             )
             query_stm_all = ' or '.join(f'`{tag}`=1' for tag in _OBS_TYPES)
             stm_all = ctx.obsdb.query(query_stm_all, tags=list(_OBS_TYPES),
-                                sort=['start_time'])
+                                      sort=['start_time'])
 
             for product in _DB_TYPES:
                 stm_cal_mandb = load_stimulator_cal(dbs[product])
@@ -442,7 +437,7 @@ def _main(
                 ]
                 cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
                 _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
-                                    cal_index, max_days_before, output_dir)
+                                      cal_index, max_days_before, output_dir)
 
 
 def main(pipeline_config, stm_config):
