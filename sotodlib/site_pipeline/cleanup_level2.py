@@ -1,3 +1,52 @@
+"""
+The deletion stage of data packaging: verify that a timecode has been
+completely packaged into Books, then delete the staged copy of those Books and
+the level 2 originals.
+
+This is the only data packaging element addressed by *platform* rather than by
+config path. It uses the ``DATAPKG_ENV`` environment file to resolve
+``<configs>/<platform>/imprinter.yaml``.
+
+It walks timecodes (5-digit ctimes, ``ctime // 1e5``, about 27.8 hours each)
+in order and runs up to three operations per timecode, all built on
+``sotodlib.io.datapkg_completion.DataPackaging``:
+
+1. **Completion check** -- always runs. ``make_timecode_complete`` is an
+   aggressive self-repair pass: re-index files on disk that are missing from
+   G3tSmurf, force-complete dangling level 2 observations, register level 2
+   observations that never made it into a Book (falling back to single-wafer
+   registration), bind anything still UNBOUND, autofix anything FAILED, force
+   the timecode final if a server was off, and register the hk/smurf/stray
+   Books. Then ``verify_timecode_deletable`` reconciles the files on disk
+   against the files the Book database claims to have archived and fails if
+   anything on disk is unaccounted for.
+2. **Staged deletion** (``--delete-staged``) -- remove the bound copy from the
+   imprinter's ``output_root``; the Book now lives only in the Librarian.
+   Books move to status DONE.
+3. **Level 2 deletion** (``--delete-lvl2``) -- remove the raw level 2 files,
+   after asking the Librarian to confirm two independent copies exist. Books
+   get ``lvl2_deleted`` set.
+
+Each range is set either by a lag in days before now (``--completion-lag``,
+``--staged-deletion-lag``, ``--lvl2-deletion-lag``) or by explicit
+``--min-*``/``--max-*`` timecode overrides. The completion-check range must
+fully contain both deletion ranges; this is validated at startup, so it is not
+possible to delete a timecode that was never checked.
+
+``--dry-run`` logs the plan without touching anything, and should always be
+used first when setting the timecode ranges by hand. ``--max-runtime``
+(minutes) stops cleanly at the next timecode boundary, which matters because a
+from-scratch completion pass over years of timecodes can run for a very long
+time; failures accumulated up to that point are still raised.
+
+.. warning::
+
+    This script deletes raw data.
+
+See the Data Packaging page of the sotodlib documentation for the full
+pipeline description.
+"""
+
 import numpy as np
 import datetime as dt
 from typing import Optional
@@ -249,13 +298,20 @@ def main(
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Verify that each timecode has been completely "
+            "packaged into Books, then optionally delete the staged Books and "
+            "the level 2 originals. Requires DATAPKG_ENV to be set. Run with "
+            "--dry-run first."
+        )
 
-    parser.add_argument('platform', type=str, help="Platform for Imprinter")
+    parser.add_argument('platform', type=str,
+        help="Platform for Imprinter (lat, satp1, satp2, satp3). Resolved to "
+        "<configs>/<platform>/imprinter.yaml via DATAPKG_ENV.")
     parser.add_argument('--delete-lvl2', action="store_true",
-        help="If passed, delete lvl2 raw data")
+        help="If passed, delete lvl2 raw data. Requires two Librarian copies.")
     parser.add_argument('--delete-staged', action="store_true",
-        help="If passed, delete lvl2 staged data")
+        help="If passed, delete the bound Books from the staging area")
 
     parser.add_argument('--completion-lag', type=float, default=14,
         help="Buffer days before we start failing completion")

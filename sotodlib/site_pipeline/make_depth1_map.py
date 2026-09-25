@@ -62,6 +62,7 @@ def get_parser(parser=None):
     parser.add_argument(
         "-d", "--downsample", type=int, help="Downsample TOD by this factor"
     )
+    parser.add_argument("--cut-type", type=str, default="full", help="Cut type: full or poly")
     parser.add_argument("--maxiter", type=int, help="Maximum number of iterative steps")
     parser.add_argument("-T", "--tiled", type=int)
     parser.add_argument(
@@ -132,13 +133,14 @@ def make_depth1_map(
     srcsamp_mask=None,
     unit="K",
     min_dets=50,
+    cut_type='full',
 ):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0:
         L.info(f"{pre} Initializing equation system")
 
     # Set up our mapmaking equation
-    signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
+    signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod, cut_type=cut_type)
     signal_map = mapmaking.SignalMap(
         shape,
         wcs,
@@ -425,6 +427,7 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
                 srcsamp_mask=srcsamp_mask,
                 unit=args["unit"],
                 min_dets=args["min_dets"],
+                cut_type=args["cut_type"],
             )
 
             # Write them
