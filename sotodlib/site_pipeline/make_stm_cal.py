@@ -386,8 +386,6 @@ def _main(
     for key, db in dbs.items():
         available = load_stimulator_cal(db)
         latest_stm_times[key] = _get_latest_stm_times(available, stm_rows_all)
-        if latest_stm_times[key] is None:
-            logger.info(f'No {key} stimulator calibration found in ManifestDb.')
 
     jclass = 'stm_cal'
     jdb_path = os.path.join(output_dir, 'jobdb.sqlite')
@@ -406,7 +404,6 @@ def _main(
     to_do = jdb.get_jobs(jclass=jclass, jstate=jstate, locked=False)
 
     futures = []
-    processed_stm_obsids = []
     with jdb.locked(to_do, count=len(to_do)) as jobs:
         for job in jobs:
             job.mark_visited()
@@ -449,7 +446,6 @@ def _main(
                     for detset in detsets:
                         _publish_self(dbs, output_dir, oid, obs_type, stm_cal, detset, overwrite)
                     job.jstate = 'done'
-                    processed_stm_obsids.append(oid)
                     continue
                 except Exception as e:
                     logger.error(f'Failed to save {oid}: {e}')
@@ -467,17 +463,6 @@ def _main(
         if update_obs_corresp:
             if update_obs_scope not in ('all', 'processed'):
                 raise ValueError(f'Invalid update_obs_scope: {update_obs_scope}')
-
-            if update_obs_scope == 'processed' and not processed_stm_obsids:
-                logger.info('No processed stimulator obs to update correspondence.')
-                return
-
-            
-
-            obs_detsets = _detsets_by_obsid(
-                ctx.obsfiledb,
-                [row['obs_id'] for row in obs_rows],
-            )
 
             for product in _DB_TYPES:
                 available = load_stimulator_cal(dbs[product])
