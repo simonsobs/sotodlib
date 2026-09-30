@@ -21,7 +21,7 @@ import argparse
 from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
-from sotodlib.io.load_book import get_cal_obsids
+from sotodlib.io.load_book import get_cal_obsids, get_smurf_npy_file
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
@@ -30,6 +30,7 @@ from concurrent.futures import ProcessPoolExecutor, Future
 import sodetlib.tes_param_correction as tpc
 from sodetlib.operations.iv import IVAnalysis
 from sodetlib.operations.bias_steps import BiasStepAnalysis
+from sodetlib import load_bgmap
 
 
 # stolen  from pysmurf, max bias volt / num_bits
@@ -519,7 +520,7 @@ def fill_zeros_biases(am):
                 bias[i] = last
 
 
-def load_and_reanalyze_bs(bsa, ctx, obs_id, hwpss=False):
+def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, hwpss=False):
     """
     Load raw data of biassteps and reanalyze it with hwpss subtraction
 
@@ -529,9 +530,9 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, hwpss=False):
         obs_id: observation id of bias steps
     """
     am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
-    bsa.am = am
-    bsa._find_bias_edges()
     if hwpss:
+        bsa.am = am
+        bsa._find_bias_edges()
         am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
                 [(0, 'samps')])
         if np.all(am.hwp_angle == 0):
@@ -547,9 +548,16 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, hwpss=False):
         get_hwpss(am, flags=flags, merge_stats=True)
         subtract_hwpss(am, subtract_name='signal')
         bsa._get_step_response()
+        bsa._compute_dc_params()
+        bsa._fit_tau_effs()
         del bsa.am
-    bsa._compute_dc_params()
-    bsa._fit_tau_effs()
+    else:  # reload bgmap and remove R0_ thresh
+        bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
+        bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
+        R0, I0, Pj = bsa._compute_R0_I0_Pj()
+        Si = -1./(I0 * (R0 - bsa.meta['R_sh']))
+        bsa.R0, bsa.I0, bsa.Pj, bsa.Si = R0, I0, Pj, Si
+        bsa._fit_tau_effs()
 
 
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
@@ -606,10 +614,12 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             # Reanalyze biasstep with hwpss subtraction
             ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
             bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
+            bgmap_obsids = get_cal_obsids(ctx, obs_id, "bgmap")
 
             for dset, bsa in bsas.items():
                 oid = bias_step_obsids[dset]
-                load_and_reanalyze_bs(bsa, ctx, oid)
+                bgmap_id = bgmap_obsids[dset]
+                load_and_reanalyze_bs(bsa, ctx, oid, bgmap_id)
 
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
@@ -920,6 +930,7 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     # obs_ids = ['obs_1713962395_satp1_0000100']
     # obs_ids = ['obs_1713758716_satp1_1000000']
     # obs_ids = ['obs_1701383445_satp3_1000000']
+    # obs_ids = ['obs_1786327632_lato6_111']
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
     pb = tqdm(total=len(obs_ids), disable=(not cfg.show_pb))

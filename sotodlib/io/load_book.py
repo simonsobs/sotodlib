@@ -246,9 +246,9 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False,
                             sample0=samples[0])
 
 
-def load_smurf_npy_data(ctx, obs_id, substr):
+def get_smurf_npy_file(ctx, obs_id, substr):
     """
-    Loads an sodetlib npy file from Z_smurf archive of book.
+    return an sodetlib npy file path from Z_smurf archive of book.
 
     Args
     _____
@@ -266,6 +266,21 @@ def load_smurf_npy_data(ctx, obs_id, substr):
             break
     else:
         raise FileNotFoundError("Could not find npy file")
+    return fpath
+
+
+def load_smurf_npy_data(ctx, obs_id, substr):
+    """
+    Loads an sodetlib npy file from Z_smurf archive of book.
+
+    Args
+    _____
+    obs_id: str
+        obs-id of book to load file from
+    substr: str
+        substring to use to find numpy file in Z_smurf
+    """
+    fpath = get_smurf_npy_file(ctx, obs_id, substr)
     res = np.load(fpath, allow_pickle=True).item()
     return res
 
