@@ -117,23 +117,13 @@ def _open_stm_manifest_dbs(output_dir, logger):
     return dbs
 
 
-def _get_latest_stm_time(db, stm_rows):
-    registered = {
-        entry['dataset']
-        for entry in db.inspect({})
-        if entry['obs:obs_id'] == entry['dataset']
-    }
+def _get_latest_stm_times(available, stm_rows):
+    latest = {}
+    for row in stm_rows:
+        for detset in available.get(row['obs_id'], {}):
+            latest[detset] = row['start_time']    
 
-    times = [
-        row['start_time']
-        for row in stm_rows
-        if row['obs_id'] in registered
-    ]
-
-    if not times:
-        return None
-
-    return max(times)
+    return latest
 
 
 def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite):
@@ -161,27 +151,18 @@ def _detsets_by_obsid(obsfiledb, obsids):
     }
 
 
-def _build_stm_cal_index(ctx, stm_rows, product):
-    stm_detsets = _detsets_by_obsid(
-        ctx.obsfiledb,
-        [row['obs_id'] for row in stm_rows],
-    )
-
+def _build_stm_cal_index(stm_rows, available):
     cal_index = defaultdict(lambda: {
         'times': [],
         'obs_ids': [],
     })
 
     for row in stm_rows:
-        if product not in _PRODUCTS[_tag_resolver(row)]:
-            continue
+        obs_id = row['obs_id']
 
-        stm_obs_id = row['obs_id']
-        start_time = row['start_time']
-
-        for detset in stm_detsets[stm_obs_id]:
-            cal_index[detset]['times'].append(start_time)
-            cal_index[detset]['obs_ids'].append(stm_obs_id)
+        for detset in available.get(obs_id, {}):
+            cal_index[detset]['times'].append(row['start_time'])
+            cal_index[detset]['obs_ids'].append(obs_id)
 
     # List -> np.array for faster search later
     out = {}
@@ -225,12 +206,35 @@ def _tag_resolver(row):
         raise ValueError(f'Row {row} has no valid obs_type tag.')
 
 
-def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before, output_dir):
+def _build_update_start_times(latest_stm_times, cal_index):
+    update_start_times = {}
+
+    for detset, items in cal_index.items():
+        if len(items['times']) == 0:
+            continue
+
+        update_start_times[detset] = latest_stm_times.get(
+            detset,
+            float(items['times'][0]),
+        )
+
+    return update_start_times
+
+
+def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, update_start_times,
+                          max_days_before, output_dir):
+
     for row in obs_rows:
         obs_id = row['obs_id']
         obs_start_time = row['start_time']
 
         for detset in obs_detsets.get(obs_id, []):
+            if update_start_times is not None:
+                if detset not in update_start_times:
+                    continue
+                if obs_start_time < update_start_times[detset]:
+                    continue
+
             query = {'obs:obs_id': obs_id, 'dets:detset': detset}
             existing = db.inspect(query, strict=False)
             # Remove any existing entries
@@ -262,16 +266,17 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, max_days_before,
 def load_stimulator_cal(db: core.metadata.ManifestDb):
     """Return processed stimulator calibration entries from a ManifestDb.
     """
-    available = {}
+    available = defaultdict(dict)
 
     for entry in db.inspect({}):
         obs_id = entry['obs:obs_id']
         dataset = entry['dataset']
+        detset = entry['dets:detset']
 
         if obs_id != dataset:
             continue
 
-        available[dataset] = entry
+        available[dataset][detset] = entry
 
     return available
 
@@ -379,7 +384,8 @@ def _main(
     )
 
     for key, db in dbs.items():
-        latest_stm_times[key] = _get_latest_stm_time(db, stm_rows_all)
+        available = load_stimulator_cal(db)
+        latest_stm_times[key] = _get_latest_stm_times(available, stm_rows_all)
         if latest_stm_times[key] is None:
             logger.info(f'No {key} stimulator calibration found in ManifestDb.')
 
@@ -466,18 +472,7 @@ def _main(
                 logger.info('No processed stimulator obs to update correspondence.')
                 return
 
-            do_all = any(v is None for v in latest_stm_times.values())
-            if update_obs_scope == 'all' or do_all:
-                obs_rows = ctx.obsdb.query(
-                    "type=='obs'",
-                    sort=['start_time'],
-                )
-            elif update_obs_scope == 'processed':
-                start_time = min(latest_stm_times.values())
-                obs_rows = ctx.obsdb.query(
-                    f"type='obs' and start_time >= {start_time}",
-                    sort=['start_time'],
-                )
+            
 
             obs_detsets = _detsets_by_obsid(
                 ctx.obsfiledb,
@@ -485,14 +480,34 @@ def _main(
             )
 
             for product in _DB_TYPES:
-                stm_cal_mandb = load_stimulator_cal(dbs[product])
-                stm_rows_available = [
-                    row for row in stm_rows_all
-                    if row['obs_id'] in stm_cal_mandb
-                ]
-                cal_index = _build_stm_cal_index(ctx, stm_rows_available, product)
+                available = load_stimulator_cal(dbs[product])
+                cal_index = _build_stm_cal_index(stm_rows_all, available)
+
+                obs_query = "type='obs'"
+                update_start_times = None
+
+                if update_obs_scope == 'processed':
+                    update_start_times = _build_update_start_times(latest_stm_times[product],
+                                                                   cal_index)
+
+                    if not update_start_times:
+                        continue
+
+                    start_time = min(update_start_times.values())
+                    obs_query += f" and start_time>={start_time}"
+
+                obs_rows = ctx.obsdb.query(
+                    obs_query, 
+                    sort=['start_time']
+                )
+                obs_detsets = _detsets_by_obsid(
+                    ctx.obsfiledb,
+                    obs_rows['obs_id']
+                )
+                   
                 _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
-                                      cal_index, max_days_before, output_dir)
+                                      cal_index, update_start_times,
+                                      max_days_before, output_dir)
 
 
 def main(pipeline_config, stm_config):
