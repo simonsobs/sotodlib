@@ -287,6 +287,8 @@ class SimMuMUXCrosstalk(Operator):
             dPhidPhi0 = 2 * np.pi
             dPhi0dT[det] = dPdT * dIdP * dPhi0dI * dPhidPhi0  # K_CMB -> [rad]
 
+        if use_det_el:
+            toast.ops.Delete(detdata=[self.detector_pointing.quats]).apply(data)
         return dPhi0dT
 
     @function_timer
@@ -464,6 +466,11 @@ class SimMuMUXCrosstalk(Operator):
                 proc_rows,
                 times=self.times,
                 override_sample_sets=obs.dist.sample_sets,
+            )
+
+            # Recompute valid detectors, since some may have been flagged.
+            good_dets = temp_obs.select_local_detectors(
+                selection=detectors, flagmask=self.det_mask
             )
 
             # Copy data to original observation
