@@ -543,6 +543,7 @@ def fit_with_circle(tod):
     -------
         fit_results : list
             the result of the circle fitting of the wires' signal in the Q/U plane.
+            Elements are None if the number of wire grid steps is fewer than 3.
 
     Notes
     -----
@@ -564,7 +565,23 @@ def fit_with_circle(tod):
     res_vars = []
     is_success = []
 
+    # a circle has 3 parameters, so it is undetermined with fewer than 3 steps
+    n_params = 3
+    n_steps = _cal.wg_steps.count
+    if n_steps < n_params:
+        logger.warning(f"Only {n_steps} wire grid steps, fewer than the {n_params} "
+                       "circle parameters. Skip the circle fitting and fill NaN.")
+
     for _i in range(tod.dets.count):
+        if n_steps < n_params:
+            fit_results.append(None)
+            params_val.append(np.full(n_params, np.nan))
+            params_err.append(np.full(n_params, np.nan))
+            covs.append(np.full((n_params, n_params), np.nan))
+            res_vars.append(np.nan)
+            is_success.append(False)
+            continue
+
         _obs_data = np.array([_cal.Q[:, _i], _cal.U[:, _i]])
         _obs_std = np.array([_cal.Qerr[:, _i], _cal.Uerr[:, _i]])
 
@@ -585,7 +602,8 @@ def fit_with_circle(tod):
         # Jacobian matrix and covariance matrix
         J = out.jac
         RSS = float(out.fun @ out.fun)
-        sigma2_hat = RSS / (out.fun.size - len(_init_params))
+        dof = out.fun.size - n_params
+        sigma2_hat = RSS / dof if dof > 0 else np.nan
         cov = np.linalg.inv(J.T @ J)
         se = np.sqrt(np.diag(cov))
 
@@ -655,6 +673,7 @@ def fit_with_ellipse(tod):
     -------
         efit_results : list
             the result of the ellipse fitting of the wires' signal in the Q/U plane.
+            Elements are None if the number of wire grid steps is fewer than 5.
     Notes
     -----
         With this process, tod will include the several parameters of the fittings as tod.wg.efit_result:
@@ -677,7 +696,23 @@ def fit_with_ellipse(tod):
     res_vars   = []
     is_success = []
 
+    # an ellipse has 5 parameters, so it is undetermined with fewer than 5 steps
+    n_params = 5
+    n_steps = _cal.wg_steps.count
+    if n_steps < n_params:
+        logger.warning(f"Only {n_steps} wire grid steps, fewer than the {n_params} "
+                       "ellipse parameters. Skip the ellipse fitting and fill NaN.")
+
     for i in range(tod.dets.count):
+        if n_steps < n_params:
+            fit_results.append(None)
+            params_val.append(np.full(n_params, np.nan))
+            params_err.append(np.full(n_params, np.nan))
+            covs.append(np.full((n_params, n_params), np.nan))
+            res_vars.append(np.nan)
+            is_success.append(False)
+            continue
+
         obs = np.array([_cal.Q[:, i], _cal.U[:, i]])
         err = np.array([_cal.Qerr[:, i], _cal.Uerr[:, i]])
 
@@ -718,7 +753,8 @@ def fit_with_ellipse(tod):
         params_val.append(x)
         params_err.append(np.sqrt(np.diag(cov)))
         covs.append(cov)
-        res_vars.append(np.sum(out.fun**2) / (len(out.fun) - len(_init_params)))
+        dof = len(out.fun) - n_params
+        res_vars.append(np.sum(out.fun**2) / dof if dof > 0 else np.nan)
         is_success.append(out.success)
 
     # wrap results into the axis manager
