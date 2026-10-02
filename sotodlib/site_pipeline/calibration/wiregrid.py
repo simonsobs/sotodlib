@@ -768,6 +768,8 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
         _det_angle.append(
             (0.5*(_atan_sig[:]) - _cd.theta_wire_rad[_i,np.newaxis]%(2*np.pi))
         )
+        # uniform error Qerr = Uerr, cx0_err = cy0_err is assumed
+        # error of theta_wire_rad is neglected
         _det_angle_err.append(
             np.sqrt(
                 (_cd.Uerr.T[:,_i]**2 + _cd.Qerr.T[:,_i]**2) * 0.5
