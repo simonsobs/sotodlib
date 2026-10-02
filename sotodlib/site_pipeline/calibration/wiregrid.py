@@ -657,7 +657,7 @@ def fit_with_ellipse(tod):
             the result of the ellipse fitting of the wires' signal in the Q/U plane.
     Notes
     -----
-        With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result:
+        With this process, tod will include the several parameters of the fittings as tod.wg.efit_result:
 
             - ex0(_err) : the estimated x-offset value(, and its fit err).
             - ey0(_err) : the estimated y-offset value(, and its fit err).
@@ -681,14 +681,22 @@ def fit_with_ellipse(tod):
         obs = np.array([_cal.Q[:, i], _cal.U[:, i]])
         err = np.array([_cal.Qerr[:, i], _cal.Uerr[:, i]])
 
-        # initial parameters
+        # initial parameters from the second moments around the center
         A0 = np.nanmean(obs[0])
         B0 = np.nanmean(obs[1])
-        a0 = max(np.sqrt(obs[0]**2 + obs[1]**2))
-        b0 = min(np.sqrt(obs[0]**2 + obs[1]**2))
-        theta0 = 0.0
+        dx = obs[0] - A0
+        dy = obs[1] - B0
+        sxx = np.nanmean(dx**2)
+        syy = np.nanmean(dy**2)
+        sxy = np.nanmean(dx*dy)
+        theta0 = 0.5 * np.arctan2(2*sxy, sxx - syy)
+        _hd = np.sqrt(0.25*(sxx - syy)**2 + sxy**2)
+        a0 = np.sqrt(2*(0.5*(sxx + syy) + _hd))
+        b0 = np.sqrt(2*max(0.5*(sxx + syy) - _hd, 0.))
+        r0 = np.nanmax(np.hypot(dx, dy))
         _init_params = np.array([A0, B0, a0, b0, theta0])
-        _bounds = ([-2*a0, -2*b0, 0, 0, -np.pi/2], [2*a0, 2*b0, 10*a0, 10*b0, np.pi/2])
+        _bounds = ([A0 - 2*r0, B0 - 2*r0, 0, 0, -np.pi/2],
+                   [A0 + 2*r0, B0 + 2*r0, 10*r0, 10*r0, np.pi/2])
 
         # fit the data
         out = least_squares(
@@ -700,7 +708,7 @@ def fit_with_ellipse(tod):
         J = out.jac
         cov = np.linalg.inv(J.T @ J)
         params_val.append(out.x)
-        params_err.append(np.sqrt(np.diag(cov)) * np.sqrt(out.fun.size - len(_init_params)))
+        params_err.append(np.sqrt(np.diag(cov)))
         covs.append(cov)
         res_vars.append(np.sum(out.fun**2) / (len(out.fun) - len(_init_params)))
         is_success.append(out.success)
