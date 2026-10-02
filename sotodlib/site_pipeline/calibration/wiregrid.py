@@ -663,7 +663,7 @@ def fit_with_ellipse(tod):
             - ey0(_err) : the estimated y-offset value(, and its fit err).
             - ea(_err) : Estimated major axis vaule(, and its fit err).
             - eb(_err) : Estimated minor axis vaule(, and its fit err).
-            - etheta(_err) : Estimated rotation angle vaule(, and its fit err).
+            - etheta(_err) : Estimated rotation angle of the major axis in [-pi/2, pi/2)(, and its fit err).
             - covariance : covariance matrix of the estimated parameters.
             - residual_var : Residual variance.
             - is_success : the status of how fits end. 
@@ -707,7 +707,15 @@ def fit_with_ellipse(tod):
 
         J = out.jac
         cov = np.linalg.inv(J.T @ J)
-        params_val.append(out.x)
+        x = out.x.copy()
+        # make (a, theta) refer to the major axis: swap a<->b and rotate by pi/2
+        if x[2] < x[3]:
+            perm = [0, 1, 3, 2, 4]
+            x = x[perm]
+            cov = cov[np.ix_(perm, perm)]
+            x[4] += np.pi/2
+        x[4] = (x[4] + np.pi/2) % np.pi - np.pi/2
+        params_val.append(x)
         params_err.append(np.sqrt(np.diag(cov)))
         covs.append(cov)
         res_vars.append(np.sum(out.fun**2) / (len(out.fun) - len(_init_params)))
