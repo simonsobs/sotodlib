@@ -35,7 +35,13 @@ def Site:
 
 def Satellite:
     """ Container for all traits needed to simulate TOD for one satellite
+
+    It is possible to inherit multiple specialized classes from it.
     """
+
+    # Project 1: Develop one or more satellite classes that implement
+    #            the compute_position() method
+    
     def __init__(self, name=None, polarized=False, temperature=None):
         self.name = name
         self.polarized = polarized
@@ -46,6 +52,8 @@ def Satellite:
         """Derive the spectral energy distribution for future
         convolution
         """
+        # Project 2 : Implement a black-body SED with sufficient frequency
+        #             sampling for SO bandpasses
         self.freq = None
         self.sed = None
         return
@@ -217,6 +225,9 @@ class SimSatellite(Operator):
     def _draw_satellites(self, obs):
         """Generate a population of satellites
         """
+        # Project 3: Draw a sample of satellites in the available
+        #            populations.  Make the sample properties
+        #            user-defined through SimSatellite traits.
         times = obs.shared[self.times].data
         satellites = []
         return satellites
