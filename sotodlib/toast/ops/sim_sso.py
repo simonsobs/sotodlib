@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2024 Simons Observatory.
+# Copyright (c) 2018-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -29,12 +29,6 @@ def to_JD(t):
     # Unix time stamp to Julian date
     # (days since -4712-01-01 12:00:00 UTC)
     return t / 86400.0 + 2440587.5
-
-
-def to_MJD(t):
-    # Convert Unix time stamp to modified Julian date
-    # (days since 1858-11-17 00:00:00 UTC)
-    return to_JD(t) - 2400000.5
 
 
 def to_DJD(t):
@@ -405,10 +399,6 @@ class SimSSO(Operator):
         # Get a view of the data which contains just this single
         # observation
         obs_data = data.select(obs_name=obs.name)
-
-        zaxis = np.array([0.0, 0.0, 1.0])
-        bore_quat = obs_data.obs[0].shared[defaults.boresight_azel][:]
-        bore_lon, bore_lat, _ = qa.to_lonlat_angles(bore_quat)
 
         beam = None
         for idet, det in enumerate(dets):
