@@ -17,6 +17,8 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from ..qa.metrics import _get_tag, _has_tag
+
 from sotodlib.preprocess import preprocess_util as pp_util
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
@@ -709,7 +711,10 @@ class Noise(_Preprocess):
 
     Saves the results into the "noise" field of proc_aman.
 
-    Can run data selection of a "max_noise" value.
+    Can select detectors on the minimum and maximum white noise (``min_noise``
+    and ``max_noise`` respectively) and with a maximum allowed fknee value
+    (``max_fknee``; only if fitting).  These may be passed as scalars or as a
+    dictionary where the keys are the bandpass names.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
     axis manager containing an array named ``white_noise``. If not specified,
@@ -729,12 +734,16 @@ class Noise(_Preprocess):
             wn_est: noise
             fixed_param: 'wn'
             binning: True
-            fit_method: log_curve_fit #or likelihood 
+            fit_method: log_curve_fit # or likelihood
             curve_fit_kwargs:
                 maxfev: 20000
           save: True
           select:
-            max_noise: 2000
+            min_noise:
+               f090: 18e-6
+               f150: 18e-6
+            max_noise: 80e-6
+            max_fknee: 7
             require_finite_fit: True
 
     Set ``select.require_finite_fit`` to ``True`` to drop detectors whose fit
@@ -756,7 +765,7 @@ class Noise(_Preprocess):
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
     :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
-    
+
     """
     name = "noise"
     _influx_field = "median_white_noise"
@@ -894,13 +903,61 @@ class Noise(_Preprocess):
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
             if fk is not None:
                 fk = np.nanmean(fk, axis=-1) # Mean over subscans
+
         keep = np.ones_like(wn, dtype=bool)
-        if "max_noise" in self.select_cfgs.keys():
-            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+
+        if _has_tag(meta.det_info, "wafer.bandpass"):
+            bandpasses = meta.det_info.wafer.bandpass
+        elif _has_tag(meta, "det_cal.bandpass"):
+            bandpasses = meta.det_cal.bandpass
+        else:
+            bandpasses = None
+
         if "min_noise" in self.select_cfgs.keys():
-            keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            if isinstance(self.select_cfgs["min_noise"], (int, float, str)):
+                keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            elif isinstance(self.select_cfgs["min_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for min_noise dict"
+                    )
+                for k, v in self.select_cfgs["min_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] >= np.float64(v))
+            else:
+                raise TypeError("invalid type for min_noise")
+
+        if "max_noise" in self.select_cfgs.keys():
+            if isinstance(self.select_cfgs["max_noise"], (int, float, str)):
+                keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+            elif isinstance(self.select_cfgs["max_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_noise dict"
+                    )
+                for k, v in self.select_cfgs["max_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] <= np.float64(v))
+            else:
+                raise TypeError("invalid type for max_noise")
+
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
-            keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            if isinstance(self.select_cfgs["max_fknee"], (int, float, str)):
+                keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            elif isinstance(self.select_cfgs["max_fknee"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_fknee dict"
+                    )
+                for k, v in self.select_cfgs["max_fknee"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (fk[mask] <= np.float64(v))
+            else:
+                raise TypeError("invalid type for max_fknee")
+
         if self.fit and self.select_cfgs.get("require_finite_fit", False):
             fit_vals = np.asarray(noise_aman.fit)
             fit_flat = fit_vals.reshape(fit_vals.shape[0], -1)
@@ -1052,7 +1109,6 @@ class EstimateHWPSS(_Preprocess):
         """
         # record one metric per wafer_slot per bandpass
         # add specified tags
-        from ..qa.metrics import _get_tag, _has_tag
         tag_keys = {
             "wafer_slot": "wafer_slot",
             "tel_tube": "tel_tube",
@@ -1524,6 +1580,9 @@ class FlagTurnarounds(_Preprocess):
 
     Saves results in proc_aman under the "turnaround_flags" field, with
     sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
+    To save multiple turnaround definitions, use a distinct ``save.wrap_name``
+    for each definition instead of renaming saved fields with a ``move`` step.
+    ``save: True`` retains the default name ``turnaround_flags``.
 
     The example block below includes optional arguments such as t_buffer, 
     az_throw_threshold, and a min_ta. The az_throw_threshold and min_ta (minimum number
@@ -1541,7 +1600,8 @@ class FlagTurnarounds(_Preprocess):
           method: "scanspeed"
           t_buffer: 4.
           az_throw_threshold: 1.
-        save: True
+        save:
+          wrap_name: turnaround_flags
         select:
           min_ta: 1.
 
@@ -1549,7 +1609,9 @@ class FlagTurnarounds(_Preprocess):
     """
     name = 'flag_turnarounds'
     def __init__(self, step_cfgs):
-        self.save_name = "turnaround_flags"
+        save_cfgs = step_cfgs.get('save')
+        self.save_name = (save_cfgs.get('wrap_name', 'turnaround_flags')
+                          if isinstance(save_cfgs, dict) else 'turnaround_flags')
 
         super().__init__(step_cfgs)
 
@@ -2443,6 +2505,162 @@ class PCAFilter(_Preprocess):
         model = tod_ops.pca.get_pca_model(aman, signal=model_signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
+
+
+class JointQUNmatModel(_Preprocess):
+    """Fit a joint demodulated Q/U Fourier Nmat operator.
+
+    The Q and U detector streams are whitened and analyzed together. Modes
+    inconsistent with independent noise according to a Marchenko--Pastur plus
+    Tracy--Widom threshold are identified, and the whitened noise model
+    ``N(f) = D(f) + V E(f) V.T`` is stored in ``proc_aman``.
+
+    This is calculated from real data only (``skip_on_sim: True``) so that
+    ``joint_qu_nmat_filter`` can reload it when running on simulations,
+    following the same pattern as ``noise`` and ``fourier_filter``.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_model"
+        skip_on_sim: True
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        calc:
+          fmin: 0.0015
+          fmax: 0.2
+          noise_band: [0.5, 1.75]
+          bin_width_hz: 0.2
+          mp_significance: 0.999
+          n_modes_max: 18
+          singleness_max: 0.55
+          profile_n_bins: 40
+          profile_min_nfreq: 20
+          profile_diagonal_floor: 0.05
+        save:
+          wrap_name: "nmat_qu"
+
+    See sotodlib.tod_ops.nmat_filter.fit_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_model"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = (step_cfgs.get("save") or {}).get("wrap_name", "nmat_qu")
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        calc_cfgs = dict(self.calc_cfgs or {})
+        # Check whitening band sits below the demodulation low-pass.
+        noise_band = calc_cfgs.get("noise_band")
+        if noise_band is not None and "frequency_cutoffs" in proc_aman:
+            fcs = proc_aman["frequency_cutoffs"]
+            cutoff = fcs[self.signal_Q] if self.signal_Q in fcs else None
+            if cutoff is not None and noise_band[1] > cutoff:
+                logger.warning(
+                    "joint_qu_nmat_model: noise_band upper edge %.3g Hz is above "
+                    "the demodulation low-pass cutoff %.3g Hz; the whitening "
+                    "scale will be biased low by the filtered-out band.",
+                    noise_band[1], cutoff,
+                )
+        operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+            aman,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            **calc_cfgs,
+        )
+        logger.info(
+            "Joint Q/U Nmat model: selected %s modes per bin "
+            "(above threshold %s, singleness-vetoed %s, capped %s)",
+            np.asarray(operator.n_selected).tolist(),
+            np.asarray(operator.n_above_threshold).tolist(),
+            np.asarray(operator.n_failed_singleness).tolist(),
+            np.asarray(operator.n_capped_by_max).tolist(),
+        )
+        self.save(proc_aman, operator)
+        return aman, proc_aman
+
+    def save(self, proc_aman, operator):
+        if self.save_cfgs is None:
+            return
+        proc_aman.wrap(self.save_name, operator)
+
+
+class JointQUNmatFilter(_Preprocess):
+    """Apply a stored joint demodulated Q/U Fourier Nmat operator.
+
+    Reads the operator fit by ``joint_qu_nmat_model`` from ``proc_aman`` and
+    applies it, so simulations reuse the operator derived from real data rather
+    than refitting it on signal-only timestreams.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_filter"
+        skip_on_sim: False
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        process:
+          nmat_model: "nmat_qu"
+          psd_scale: 1.0
+
+    Setting ``use_data_aman: True`` instead fits the operator directly from the
+    supplied real-data AxisManager rather than reloading a stored one, with the
+    fit parameters given under ``process.fit``.
+
+    See sotodlib.tod_ops.nmat_filter.apply_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_filter"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = None
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        cfgs = dict(self.process_cfgs or {})
+        model_name = cfgs.pop("nmat_model", "nmat_qu")
+        fit_cfgs = cfgs.pop("fit", None)
+
+        if cfgs.get("in_place") is not None:
+            if cfgs["in_place"] is not True:
+                logger.warning(
+                    "joint_qu_nmat_filter: ignoring process.in_place config; "
+                    "the operator is always applied in place"
+                )
+        cfgs.pop("in_place", None)
+
+        if self.use_data_aman:
+            model_aman = data_aman if data_aman is not None else aman
+            logger.info(
+                "Fitting the Nmat operator from the supplied AxisManager "
+                "(%d detectors)", model_aman.dets.count
+            )
+            operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+                model_aman,
+                signal_Q=self.signal_Q,
+                signal_U=self.signal_U,
+                **(fit_cfgs or {}),
+            )
+        else:
+            if model_name not in proc_aman:
+                raise KeyError(
+                    f"Nmat operator {model_name!r} not found in proc_aman; "
+                    "run joint_qu_nmat_model first, or point nmat_model at "
+                    "the name it was saved under"
+                )
+            operator = proc_aman[model_name]
+
+        tod_ops.nmat_filter.apply_joint_qu_nmat_operator(
+            aman,
+            operator,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            in_place=True,
+            **cfgs,
+        )
+        return aman, proc_aman
+
 
 class GetCommonMode(_Preprocess):
     """
@@ -3420,10 +3638,12 @@ class GetTauHWP(_Preprocess):
 class Move(_Preprocess):
     """Rename or remove a data field.
     To delete the field, pass new_name=None.
+    If proc_aman is True, move a data field of proc_aman.
 
     Example config block::
 
         - name: "move"
+          proc_aman: False
           process:
             name: "name"
             new_name: "new_name"
@@ -3434,13 +3654,17 @@ class Move(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.save_name = None
+        self.proc_aman = step_cfgs.get('proc_aman', False)
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:
             raise NotImplementedError("No support for using data AxisManager in process")
-        aman.move(**self.process_cfgs)
+        if self.proc_aman:
+            proc_aman.move(**self.process_cfgs)
+        else:
+            aman.move(**self.process_cfgs)
         return aman, proc_aman
 
 _Preprocess.register(SplitFlags)
@@ -3450,6 +3674,8 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(JointQUNmatModel)
+_Preprocess.register(JointQUNmatFilter)
 _Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)

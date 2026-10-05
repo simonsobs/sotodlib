@@ -69,6 +69,11 @@ class SimSSO(Operator):
         help="HDF5 file that stores the simulated beam",
     )
 
+    det_mask = Int(
+        defaults.det_mask_invalid,
+        help="Bit mask value for per-detector flagging",
+    )
+
     det_data = Unicode(
         defaults.det_data,
         help="Observation detdata key for simulated signal",
@@ -227,7 +232,7 @@ class SimSSO(Operator):
                 # Make sure detector data output exists.  If not, create it
                 # with units of Kelvin.
 
-                dets = obs.select_local_detectors(detectors)
+                dets = obs.select_local_detectors(detectors, flagmask=self.det_mask)
 
                 exists = obs.detdata.ensure(
                     self.det_data, detectors=dets, create_units=u.K

@@ -491,7 +491,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             # if we don't have flag fields, assume it's good
             bs_flag = so3g.RangesInt32(aman.samps.count)
             for k, flg in _a._fields.items():
-                if "flag" in k:
+                if "flag" in k and ("az" in k or "el" in k):
                     bs_flag += flg 
             aman.flags.wrap("acu_drops", bs_flag, [(0, 'samps')])
 

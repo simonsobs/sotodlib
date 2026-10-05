@@ -589,10 +589,10 @@ class DataPackaging:
         Steps for checking:
 
         1. Walk the file system and build up a list of all files there
-        2. Go book by book within timecode and build up the list of level 2 
-        files that went into it using the databases. Add any files in suprsync 
-        folders into this list since they aren't book bound but we'd like them 
-        to be deleted 
+        2. Go book by book within timecode and build up the list of level 2
+           files that went into it using the databases. Add any files in
+           suprsync folders into this list since they aren't book bound but
+           we'd like them to be deleted
         3. Compare the two lists and make sure they're the same.
 
         If raise_extra_db_files is False, don't raise an error if we find files in

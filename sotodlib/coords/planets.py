@@ -125,7 +125,7 @@ class SlowSource:
         return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 
-def get_scan_q(tod, planet, boresight_offset=None, refq=None):
+def get_scan_q(tod, planet, boresight_offset=None, refq=None, unroll=False):
     """Identify the point (in time and azimuth space) at which the
     specified planet crosses the boresight elevation for the
     observation in tod.  The rotation taking boresight coordinates to
@@ -142,6 +142,10 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     and elevation parallel to eta; this is a useful system for
     measuring beam and pointing parameters.
 
+    Note that if unroll is False (the default) then the scans direction
+    in the output coordinates will be rotated by the roll angle.
+    If unroll is True then this rotation is removed, leaving the scans
+    going left right for all observations.
     """
     if boresight_offset is None:
         boresight_offset = (0, 0)
@@ -181,18 +185,20 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     q, qnet = scan_q_model(t+p[0], az+p[1], el, roll, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
     ra, dec = planet.pos(t+p[0])
-    rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
+    rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi - roll*float(unroll))
     return {'rot': rot,
             'timestamp': t+p[0],
             'az': az+p[1],
             'el': el,
+            'roll' : roll,
             'ra': ra,
             'dec': dec,
             'psi': psi,
-            'planet': planet}
+            'planet': planet,
+            'unroll': unroll}
 
 
-def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, **kw):
+def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, unroll=False, **kw):
     """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
@@ -203,7 +209,7 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
 
     if res is None:
         res = 0.01 * coords.DEG
-    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq)
+    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq, unroll=unroll)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
     wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
 
@@ -556,7 +562,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
 
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
-                         center_on=None, res=None, max_pix=4e6):
+                         center_on=None, res=None, max_pix=4e6, unroll=False):
     """Process masking instructions and create RangesMatrix that flags
     samples in the TOD that are within the masked region.  This
     masking makes use of a map with the footprint encoded in P, so
@@ -578,6 +584,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         of pixels for the mask map.  This is to catch cases where an
         incorrect source has been passed in, for example, leading to a
         weird map footprint
+      unroll: If True then when constructing P rotate the coordinates such that
+        scans go left-right even when roll != 0.
 
     Returns:
       RangesMatrix marking the samples inside the masked region.
@@ -608,7 +616,7 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         if shape**2 > max_pix:
             raise ValueError(f'Mask map too large: {shape}')
         logger.info('Getting Projection Matrix ...')
-        P, X = get_scan_P(tod, center_on, res=res, comps='T')
+        P, X = get_scan_P(tod, center_on, res=res, comps='T', unroll=unroll)
 
         geom = enmap.geometry(np.array((0, 0)), shape=(shape, shape),
                               proj='tan', res=(res, -res))
@@ -773,7 +781,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              filename=None, source_flags=None, cuts=None,
              data_splits=None,
              low_pass=None, n_modes=10,
-             eigentol=1e-3, info={}):
+             eigentol=1e-3, info={}, unroll=False):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
@@ -805,7 +813,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         if scan_coords:
             P, X = coords.planets.get_scan_P(tod, center_on, res=res, size=size,
                                              comps=comps, cuts=cuts,
-                                             threads=thread_algo)
+                                             threads=thread_algo, unroll=unroll)
         else:
             planet = coords.planets.SlowSource.for_named_source(
                 center_on, tod.timestamps[0])
@@ -815,6 +823,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                                  cuts=cuts,
                                  threads=thread_algo,
                                  wcs_kernel=wcsk)
+            X = None
     with MmTimer('get_proj_threads'):
         P._get_proj_threads()
 
@@ -831,6 +840,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         base_cuts, P.cuts = P.cuts, None
         output = {
             'P': P,
+            'X': X,
             'det_weights': det_weights,
             'splits': {}
         }
@@ -880,5 +890,6 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             'weights': wmap1,
             'solved': map1b,
             'P': P,
+            'X': X,
             'det_weights': det_weights,
             }
