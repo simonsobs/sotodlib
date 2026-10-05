@@ -327,7 +327,7 @@ def _main(
 
     platforms = ["satp1", "satp2", "satp3", "lat"]
 
-    if cfg.overwrite_html and not cfg.skip_html:
+    if not cfg.skip_html or cfg.overwrite_html:
         template = env.get_template("platform_index.html")
         with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
             output_file.write(
