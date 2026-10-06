@@ -10,7 +10,7 @@ from .act_sign import ActSign
 from .bias_cut import DetBiasCuts
 from .corotator import CoRotator
 from .sim_sso import SimSSO
-from .sim_satellite import SimSatellite
+from .sim_satellites import SimSatellites
 from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
 from .sim_source import SimSource

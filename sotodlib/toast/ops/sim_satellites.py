@@ -25,8 +25,8 @@ from toast.coordinates import azel_to_radec
 from . import utils
 
 
-def Site:
-    """ The Site class shall have all traits needed to translate
+def ObservingSite:
+    """ The ObservingSite class shall have all traits needed to translate
     satellite position into horizontal frame
     """
     def __init__(self):
@@ -75,7 +75,7 @@ def Satellite:
 
 
 @trait_docs
-class SimSatellite(Operator):
+class SimSatellites(Operator):
     """Operator that generates satellite timestreams."""
 
     # Class traits
@@ -186,7 +186,7 @@ class SimSatellite(Operator):
             if value is None:
                 raise RuntimeError(f"You must set `{trait}` before running SimSatellite")
 
-        site = Site()
+        site = ObservingSite()
 
         for obs in data.obs:
             satellites = self._draw_satellites(obs)

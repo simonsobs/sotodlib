@@ -31,9 +31,9 @@ from sotodlib.toast.ops import pos_to_chi
 # Project 4: Implement a unit test for SimSatellite
 
 
-class SimSatelliteTest(unittest.TestCase):
+class SimSatellitesTest(unittest.TestCase):
 
-    def test_sim_satellite(self):
+    def test_sim_satellites(self):
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
@@ -65,8 +65,8 @@ class SimSatelliteTest(unittest.TestCase):
 
         # Simple test just confirms that the operator functions
 
-        so_ops.SimSatellite(
-            name="sim_satellite", stokes_weights=weights
+        so_ops.SimSatellites(
+            name="sim_satellites", stokes_weights=weights
         ).apply(data)
 
         # Make sure the magnitude of the effect is not crazy
