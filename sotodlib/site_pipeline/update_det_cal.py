@@ -85,6 +85,8 @@ class DetCalCfg:
         for Rtes, Si, Pj, and loopgain when successful. Defaults to True.
     hwpss_subtraction: bool
         If True, reanalyze biasstep with hwpss subtraction. Defaults to False.
+    undo_R0cut: bool
+        If True, reanalyze biasstep with no R0 cut. Defaults to False.
     metadata_list: str or List of str
         List of metadata labels to load. Defaults to 'all'.
     index_path: str
@@ -133,6 +135,7 @@ class DetCalCfg:
         fit_tau: bool = False,
         apply_cal_correction: bool = True,
         hwpss_subtraction: bool = False,
+        undo_R0cut: bool = False,
         metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
@@ -520,7 +523,7 @@ def fill_zeros_biases(am):
                 bias[i] = last
 
 
-def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, hwpss=False):
+def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=False):
     """
     Load raw data of biassteps and reanalyze it with hwpss subtraction
 
@@ -529,8 +532,11 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, hwpss=False):
         ctx: Context object
         obs_id: observation id of bias steps
     """
-    am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
+    if (not hwpss) and (not undo_R0cut):
+        raise ValueError('either hwpss or undo_R0cut should be true')
+
     if hwpss:
+        am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
         bsa.am = am
         bsa._find_bias_edges()
         am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
@@ -548,16 +554,17 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, hwpss=False):
         get_hwpss(am, flags=flags, merge_stats=True)
         subtract_hwpss(am, subtract_name='signal')
         bsa._get_step_response()
-        bsa._compute_dc_params()
-        bsa._fit_tau_effs()
         del bsa.am
-    else:  # reload bgmap and remove R0_ thresh
+    if undo_R0cut:  # reload bgmap and remove R0_ thresh
         bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
         bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
         R0, I0, Pj = bsa._compute_R0_I0_Pj()
         Si = -1./(I0 * (R0 - bsa.meta['R_sh']))
         bsa.R0, bsa.I0, bsa.Pj, bsa.Si = R0, I0, Pj, Si
-        bsa._fit_tau_effs()
+    else:
+        bsa._compute_dc_params()
+
+    bsa._fit_tau_effs()
 
 
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
@@ -610,7 +617,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             for dset, bsa in bsas.items():
                 bsa._fit_tau_effs()
 
-        if cfg.hwpss_subtraction:
+        if cfg.hwpss_subtraction or cfg.undo_R0cut:
             # Reanalyze biasstep with hwpss subtraction
             ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
             bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
@@ -619,7 +626,11 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             for dset, bsa in bsas.items():
                 oid = bias_step_obsids[dset]
                 bgmap_id = bgmap_obsids[dset]
-                load_and_reanalyze_bs(bsa, ctx, oid, bgmap_id)
+                load_and_reanalyze_bs(
+                    bsa, ctx, oid, bgmap_id,
+                    hwpss=cfg.hwpss_subtraction,
+                    undo_R0cut=cfg.undo_R0cut,
+                )
 
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
