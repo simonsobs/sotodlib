@@ -158,6 +158,7 @@ class DetCalCfg:
         self.fit_tau = fit_tau
         self.apply_cal_correction = apply_cal_correction
         self.hwpss_subtraction = hwpss_subtraction
+        self.undo_R0cut = undo_R0cut
         self.cache_failed_obsids = cache_failed_obsids
         self.show_pb = show_pb
         self.run_method = run_method
@@ -554,7 +555,6 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
         get_hwpss(am, flags=flags, merge_stats=True)
         subtract_hwpss(am, subtract_name='signal')
         bsa._get_step_response()
-        del bsa.am
     if undo_R0cut:  # reload bgmap and remove R0_ thresh
         bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
         bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
@@ -565,6 +565,8 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
         bsa._compute_dc_params()
 
     bsa._fit_tau_effs()
+    if hasattr(bsa, 'am'):
+        del bsa.am
 
 
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
