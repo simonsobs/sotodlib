@@ -536,6 +536,9 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
     if (not hwpss) and (not undo_R0cut):
         raise ValueError('either hwpss or undo_R0cut should be true')
 
+    if undo_R0cut:  # reload bgmap and remove R0_ thresh
+        bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
+        bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
     if hwpss:
         am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
         bsa.am = am
@@ -555,9 +558,7 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
         get_hwpss(am, flags=flags, merge_stats=True)
         subtract_hwpss(am, subtract_name='signal')
         bsa._get_step_response()
-    if undo_R0cut:  # reload bgmap and remove R0_ thresh
-        bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
-        bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
+    if undo_R0cut:
         R0, I0, Pj = bsa._compute_R0_I0_Pj()
         Si = -1./(I0 * (R0 - bsa.meta['R_sh']))
         bsa.R0, bsa.I0, bsa.Pj, bsa.Si = R0, I0, Pj, Si
