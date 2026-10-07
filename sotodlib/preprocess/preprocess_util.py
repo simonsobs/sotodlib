@@ -52,6 +52,52 @@ class PreprocessErrors:
         return errmsg, tb
 
 
+def get_step_err_from_log(errlog):
+    """
+    Get obs_id and the group from pipeline_step_error entries.
+
+    Returns
+    -------
+    entries : list
+        List of tuples of the form:
+        (obs_id, [value1, value2, ...])
+    """
+
+    pattern = re.compile(
+        r"""
+        ^\s*
+        [\d.eE+-]+,\s+
+        ([^,\s]+),\s+
+        \[(.*?)\],\s+
+        pipeline_step_error
+        """,
+        re.VERBOSE,
+    )
+
+    string_pattern = re.compile(
+        r"np\.str_\(['\"]([^'\"]+)['\"]\)"
+    )
+
+    entries = []
+
+    with open(errlog, "r") as f:
+        for line in f:
+            match = pattern.match(line)
+
+            if match is None:
+                continue
+
+            obs_id, contents = match.groups()
+
+            values = string_pattern.findall(contents)
+
+            entries.append(
+                (obs_id, values)
+            )
+
+    return entries
+
+
 def _get_aman_encodings(encodings, field):
     """Encodings for flacarray compression."""
     if (
