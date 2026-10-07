@@ -174,7 +174,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     os.makedirs(os.path.dirname(configs['archive']['policy']['filename']),
                 exist_ok=True)
 
-    jobdb_path = configs.get("jobdb", None)
+    jobdb_path, jdb_batch_size = pp_util.get_jobdb_config(configs)
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
     elif run_from_jobdb:
@@ -321,6 +321,18 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     # batch updates to ManifestDb
     batch_size = configs['archive'].get('batch_size', 1)
 
+    if jobdb_path is not None:
+        # batch updates to JobDb
+        batched_job_count = 0
+        batched_job_fields = []
+
+        # get jobs up front since it is faster
+        jobs = jdb.get_jobs(jclass="init", jstate=JState.open)
+        tags_to_job = {
+            frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
+            for j in jobs
+        }
+
     pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
         with DbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
@@ -345,22 +357,34 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
                                     logger, overwrite, db_manager=db_manager)
 
-                # update jobdb
+
                 if jobdb_path is not None:
                     tags = {}
                     tags["obs:obs_id"] = obs_id
                     for gb, g in zip(group_by, group):
                         tags['dets:' + gb] = g
-                    job = jdb.get_jobs(jclass="init", jstate=JState.open, tags=tags)
-                    with jdb.locked(job) as j:
-                        j.mark_visited()
-                        if errors[0] is not None:
-                            j.jstate = JState.failed
-                            for _t in j._tags:
-                                if _t.key == "error":
-                                    _t.value = errors[0]
-                        else:
-                            j.jstate = JState.done
+
+                    if errors[0] is not None:
+                        jstate = JState.failed
+                        jerror = errors[0]
+                    else:
+                        jstate = JState.done
+                        jerror = None
+
+                    batched_job_fields.append(
+                        {
+                            "job": tags_to_job[frozenset(tags.items())],
+                            "error": jerror,
+                            "jstate": jstate,
+                        }
+                    )
+
+                    batched_job_count += 1
+
+                    if (batched_job_count >= jdb_batch_size) or (len(futures) == 0):
+                        pp_util.update_jobdb(jdb, batched_job_fields)
+                        batched_job_count = 0
+                        batched_job_fields = []
 
     if raise_error:
         n_obs_fail = 0
