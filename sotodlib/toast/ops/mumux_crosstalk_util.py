@@ -16,12 +16,34 @@ except ImportError:
     detmap_available = False
 
 
+def check_det_props(pos, freq, is_north):
+    """Check detector properties for NaNs or unphysical values.
+
+    Args:
+        pos (tuple):  The X, Y positions
+        freq (float):  The resonator frequency
+        is_north (char):  The 'N' or 'S' values
+
+    Returns:
+        (bool):  True if det properties are good.
+
+    """
+    if np.isnan(pos[0]) or np.isnan(pos[1]):
+        return False
+    if is_north != "N" and is_north != "S":
+        return False
+    if freq == 0 or np.isnan(freq):
+        return False
+    return True
+
+
 def wafer_chis(dets, pos, freq, is_north, mux_band, bond_pad, alpha, collision):
     """Given detector properties on one wafer, compute the crosstalk.
 
     Args:
         dets (list):  The list of detector names
         pos (list):  The list of tuple x, y postitions
+        freq (list):  The resonator frequency values
         is_north (array):  Array of 'N' / 'S' values
         mux_band (array):  The mux band for each det
         bond_pad (array):  The bond pad for each det
@@ -37,23 +59,20 @@ def wafer_chis(dets, pos, freq, is_north, mux_band, bond_pad, alpha, collision):
     for idet1, det1 in enumerate(dets):
         x1, y1 = pos[idet1]
         freq1 = freq[idet1]
-        if freq1 == 0:
-            # Detector was not found in the mapping and
-            # there is no resonator frequency
-            continue
         is_north1 = is_north[idet1]
         mux_band1 = mux_band[idet1]
         bond_pad1 = bond_pad[idet1]
+        if not check_det_props((x1, y1), freq1, is_north1):
+            continue
         for idet2 in range(idet1 + 1, ndet):
+            x2, y2 = pos[idet2]
             freq2 = freq[idet2]
-            if freq2 == 0:
-                # Detector was not found in the mapping and
-                # there is no resonator frequency
-                continue
             det2 = dets[idet2]
             is_north2 = is_north[idet2]
             mux_band2 = mux_band[idet2]
             bond_pad2 = bond_pad[idet2]
+            if not check_det_props((x2, y2), freq2, is_north2):
+                continue
             # Short-circuit chi-calculation if the detectors
             # cannot cross-talk
             if is_north1 != is_north2:
@@ -71,7 +90,6 @@ def wafer_chis(dets, pos, freq, is_north, mux_band, bond_pad, alpha, collision):
                 # freq_neighbors[0] is idet1
                 # frequency neighbors on either side
                 continue
-            x2, y2 = pos[idet2]
             # Translate frequencies to chi
             df = freq1 - freq2
             avg_f = (freq1 + freq2) / 2
