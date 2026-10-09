@@ -142,11 +142,7 @@ def make_map(tod,
              'weight': wTQU}
     return output
 
-<<<<<<< HEAD
 def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, site=None, weather=None):
-=======
-def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, interpol=None, sight=None):
->>>>>>> origin
     """
     Generate simulated TOD with HWP from a given signal map.
 
@@ -166,16 +162,9 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         `modulate==True` : The modulated TOD (np.array)
 
     """
-    Tmap, Qmap, Umap = signal_map
-<<<<<<< HEAD
-    
+    Tmap, Qmap, Umap = signal_map    
     P = coords.P.for_tod(tod=tod, geom=signal_map.geometry, cuts=cuts, 
                          comps='QU', hwp=flip_gamma, site=site, weather=weather)
-=======
-
-    P = coords.P.for_tod(tod=tod, sight=sight, geom=signal_map.geometry, cuts=cuts,
-                         comps='QU', hwp=flip_gamma, interpol=interpol)
->>>>>>> origin
     dsT_sim = P.from_map(Tmap, comps='T')
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
