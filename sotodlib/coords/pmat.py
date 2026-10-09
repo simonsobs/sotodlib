@@ -100,10 +100,12 @@ class P:
 
       Default: None
 
-    - det_left (optional): If True, the detector quaternions in fp
-      multiply the sight quaternions from the left (q_det * q_sight)
-      instead of from the right.  This is used for
-      instrument-centered coordinates (see for_tod).  Default: False
+    - multiply_det_left (optional): If True, the detector quaternions
+      in fp multiply the sight quaternions from the left
+      (q_det * q_sight) instead of from the right.  This is used for
+      instrument-centered coordinates (see for_tod), and is passed to
+      the so3g Projectionist, which then uses the "_DetLeft" engines
+      (CAR and HEALPix only, comps='T' only).  Default: False
 
     These things can be updated freely, with the following caveats:
 
@@ -131,10 +133,10 @@ class P:
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
                  cuts=None, threads=None, det_weights=None, interpol=None,
-                 det_left=False):
+                 multiply_det_left=False):
         self.sight = sight
         self.fp = fp
-        self.det_left = det_left
+        self.multiply_det_left = multiply_det_left
         self.geom = wrap_geom(geom)
         self.comps = comps
         self.cuts = cuts
@@ -226,7 +228,7 @@ class P:
                 sight, fp, roll, instrument_centered, timestamps, site=site)
             return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                        cuts=cuts, threads=threads, det_weights=det_weights,
-                       interpol=interpol, det_left=True)
+                       interpol=interpol, multiply_det_left=True)
 
         if sight is None:
             if boresight_equ is None:
@@ -511,6 +513,9 @@ class P:
     def _get_proj(self):
         # Backwards compatibility for old so3g
         interpol_kw = _get_interpol_args(self.interpol)
+        # Only pass this when set, for compatibility with older so3g.
+        if self.multiply_det_left:
+            interpol_kw['multiply_det_left'] = True
         if self.geom is None:
             raise ValueError("Can't project without a geometry!")
         if self.pix_scheme == "healpix":
@@ -603,7 +608,7 @@ class P:
     def _get_asm(self):
         """Bundles self.fp and self.sight into an "Assembly" for calling
         so3g.proj routines."""
-        return so3g.proj.Assembly.attach(self.sight, self.fp, det_left=self.det_left)
+        return so3g.proj.Assembly.attach(self.sight, self.fp)
 
     def _prepare_map(self, map):
         """Gently reformat a map in order to send it to so3g."""
@@ -738,7 +743,7 @@ def get_instrument_centered(sight, fp, roll, source, timestamps, site='so',
     than max_roll_spread).
 
     Because the detector rotation is applied on the left, the
-    returned focal plane must be used with det_left=True.
+    returned focal plane must be used with multiply_det_left=True.
 
     Args:
       sight (CelestialSightLine): boresight pointing, in celestial

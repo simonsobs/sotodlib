@@ -63,7 +63,7 @@ class PmatTest(unittest.TestCase):
 
         pmat = coords.pmat.P.for_tod(obs, geom=geom, comps='T', weather='vacuum',
                                      instrument_centered=source)
-        assert pmat.det_left
+        assert pmat.multiply_det_left
         ic = np.array(pmat._get_proj().get_coords(pmat._get_asm()))
         lon, lat = ic[..., 0], ic[..., 1]
 
