@@ -543,6 +543,7 @@ def fit_with_circle(tod):
     -------
         fit_results : list
             the result of the circle fitting of the wires' signal in the Q/U plane.
+            Elements are None if the number of wire grid steps is fewer than 3.
 
     Notes
     -----
@@ -557,14 +558,28 @@ def fit_with_circle(tod):
 
     """
     _cal = tod.wg.cal_data
-    fit_results = []
-    params_val = []
-    params_err = []
-    covs = []
-    res_vars = []
-    is_success = []
+    n_params = 3
+    n_steps = _cal.wg_steps.count
+    ndet = tod.dets.count
 
-    for _i in range(tod.dets.count):
+    # results of failed fits are left as NaN (and is_success = False)
+    fit_results = [None] * ndet
+    pvals = np.full((ndet, n_params), np.nan)
+    perrs = np.full((ndet, n_params), np.nan)
+    covs = np.full((ndet, n_params, n_params), np.nan)
+    res_vars = np.full(ndet, np.nan)
+    is_success = np.zeros(ndet, dtype=bool)
+    singular = []
+
+    # a circle has 3 parameters, so it is undetermined with fewer than 3 steps
+    if n_steps < n_params:
+        logger.warning(f"Only {n_steps} wire grid steps, fewer than the {n_params} "
+                       "circle parameters. Skip the circle fitting and fill NaN.")
+
+    for _i in range(ndet):
+        if n_steps < n_params:
+            continue
+
         _obs_data = np.array([_cal.Q[:, _i], _cal.U[:, _i]])
         _obs_std = np.array([_cal.Qerr[:, _i], _cal.Uerr[:, _i]])
 
@@ -580,33 +595,38 @@ def fit_with_circle(tod):
             _circle_model, _init_params, bounds=_bounds,
             args=(_obs_data[0], _obs_data[1], _obs_std[0], _obs_std[1])
         )
-        fit_results.append(out)
+        fit_results[_i] = out
 
         # Jacobian matrix and covariance matrix
         J = out.jac
         RSS = float(out.fun @ out.fun)
-        sigma2_hat = RSS / (out.fun.size - len(_init_params))
-        cov = np.linalg.inv(J.T @ J)
-        se = np.sqrt(np.diag(cov))
+        dof = out.fun.size - n_params
+        res_vars[_i] = RSS / dof if dof > 0 else np.nan
+        try:
+            cov = np.linalg.inv(J.T @ J)
+        except np.linalg.LinAlgError:
+            singular.append(_i)
+            continue
 
-        params_val.append(out.x)
-        params_err.append(se)
-        covs.append(cov)
-        res_vars.append(sigma2_hat)
-        is_success.append(out.success)
+        pvals[_i] = out.x
+        perrs[_i] = np.sqrt(np.diag(cov))
+        covs[_i] = cov
+        is_success[_i] = out.success
+
+    if len(singular) > 0:
+        logger.warning(f"Singular covariance in the circle fitting for {len(singular)} "
+                       f"detectors (indices {singular}). Fill NaN.")
 
     ax = core.AxisManager(tod.dets)
-    pvals = np.array(params_val)  # shape (ndet, 3)
-    perrs = np.array(params_err)  # shape (ndet, 3)
     ax.wrap('cx0',                 pvals[:,0],          [(0, 'dets')])
     ax.wrap('cy0',                 pvals[:,1],          [(0, 'dets')])
     ax.wrap('cr',                  pvals[:,2],          [(0, 'dets')])
     ax.wrap('cx0_err',             perrs[:,0],          [(0, 'dets')])
     ax.wrap('cy0_err',             perrs[:,1],          [(0, 'dets')])
     ax.wrap('cr_err',              perrs[:,2],          [(0, 'dets')])
-    ax.wrap('covariance',          np.array(covs),      [(0, 'dets')])
-    ax.wrap('residual_var',        np.array(res_vars),  [(0, 'dets')])
-    ax.wrap('is_success',          np.array(is_success),[(0, 'dets')])
+    ax.wrap('covariance',          covs,                [(0, 'dets')])
+    ax.wrap('residual_var',        res_vars,            [(0, 'dets')])
+    ax.wrap('is_success',          is_success,          [(0, 'dets')])
     tod.wg.wrap('cfit_result', ax)
     return fit_results
 ### Circle fitting functions to here ###
@@ -655,60 +675,98 @@ def fit_with_ellipse(tod):
     -------
         efit_results : list
             the result of the ellipse fitting of the wires' signal in the Q/U plane.
+            Elements are None if the number of wire grid steps is fewer than 5.
     Notes
     -----
-        With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result:
+        With this process, tod will include the several parameters of the fittings as tod.wg.efit_result:
 
             - ex0(_err) : the estimated x-offset value(, and its fit err).
             - ey0(_err) : the estimated y-offset value(, and its fit err).
             - ea(_err) : Estimated major axis vaule(, and its fit err).
             - eb(_err) : Estimated minor axis vaule(, and its fit err).
-            - etheta(_err) : Estimated rotation angle vaule(, and its fit err).
+            - etheta(_err) : Estimated rotation angle of the major axis in [-pi/2, pi/2)(, and its fit err).
             - covariance : covariance matrix of the estimated parameters.
             - residual_var : Residual variance.
             - is_success : the status of how fits end. 
     """
 
     _cal = tod.wg.cal_data
-    fit_results = []
-    params_val = []
-    params_err = []
-    covs       = []
-    res_vars   = []
-    is_success = []
+    n_params = 5
+    n_steps = _cal.wg_steps.count
+    ndet = tod.dets.count
 
-    for i in range(tod.dets.count):
+    # results of failed fits are left as NaN (and is_success = False)
+    fit_results = [None] * ndet
+    vals       = np.full((ndet, n_params), np.nan)
+    errs       = np.full((ndet, n_params), np.nan)
+    covs       = np.full((ndet, n_params, n_params), np.nan)
+    res_vars   = np.full(ndet, np.nan)
+    is_success = np.zeros(ndet, dtype=bool)
+    singular   = []
+
+    # an ellipse has 5 parameters, so it is undetermined with fewer than 5 steps
+    if n_steps < n_params:
+        logger.warning(f"Only {n_steps} wire grid steps, fewer than the {n_params} "
+                       "ellipse parameters. Skip the ellipse fitting and fill NaN.")
+
+    for i in range(ndet):
+        if n_steps < n_params:
+            continue
+
         obs = np.array([_cal.Q[:, i], _cal.U[:, i]])
         err = np.array([_cal.Qerr[:, i], _cal.Uerr[:, i]])
 
-        # initial parameters
+        # initial parameters from the second moments around the center
         A0 = np.nanmean(obs[0])
         B0 = np.nanmean(obs[1])
-        a0 = max(np.sqrt(obs[0]**2 + obs[1]**2))
-        b0 = min(np.sqrt(obs[0]**2 + obs[1]**2))
-        theta0 = 0.0
+        dx = obs[0] - A0
+        dy = obs[1] - B0
+        sxx = np.nanmean(dx**2)
+        syy = np.nanmean(dy**2)
+        sxy = np.nanmean(dx*dy)
+        theta0 = 0.5 * np.arctan2(2*sxy, sxx - syy)
+        _hd = np.sqrt(0.25*(sxx - syy)**2 + sxy**2)
+        a0 = np.sqrt(2*(0.5*(sxx + syy) + _hd))
+        b0 = np.sqrt(2*max(0.5*(sxx + syy) - _hd, 0.))
+        r0 = np.nanmax(np.hypot(dx, dy))
         _init_params = np.array([A0, B0, a0, b0, theta0])
-        _bounds = ([-2*a0, -2*b0, 0, 0, -np.pi/2], [2*a0, 2*b0, 10*a0, 10*b0, np.pi/2])
+        _bounds = ([A0 - 2*r0, B0 - 2*r0, 0, 0, -np.pi/2],
+                   [A0 + 2*r0, B0 + 2*r0, 10*r0, 10*r0, np.pi/2])
 
         # fit the data
         out = least_squares(
             _ellipse_model, _init_params, bounds=_bounds,
             args=(obs[0], obs[1], err[0], err[1])
         )
-        fit_results.append(out)
+        fit_results[i] = out
 
         J = out.jac
-        cov = np.linalg.inv(J.T @ J)
-        params_val.append(out.x)
-        params_err.append(np.sqrt(np.diag(cov)) * np.sqrt(out.fun.size - len(_init_params)))
-        covs.append(cov)
-        res_vars.append(np.sum(out.fun**2) / (len(out.fun) - len(_init_params)))
-        is_success.append(out.success)
+        dof = len(out.fun) - n_params
+        res_vars[i] = np.sum(out.fun**2) / dof if dof > 0 else np.nan
+        try:
+            cov = np.linalg.inv(J.T @ J)
+        except np.linalg.LinAlgError:
+            singular.append(i)
+            continue
+        x = out.x.copy()
+        # make (a, theta) refer to the major axis: swap a<->b and rotate by pi/2
+        if x[2] < x[3]:
+            perm = [0, 1, 3, 2, 4]
+            x = x[perm]
+            cov = cov[np.ix_(perm, perm)]
+            x[4] += np.pi/2
+        x[4] = (x[4] + np.pi/2) % np.pi - np.pi/2
+        vals[i] = x
+        errs[i] = np.sqrt(np.diag(cov))
+        covs[i] = cov
+        is_success[i] = out.success
+
+    if len(singular) > 0:
+        logger.warning(f"Singular covariance in the ellipse fitting for {len(singular)} "
+                       f"detectors (indices {singular}). Fill NaN.")
 
     # wrap results into the axis manager
     ax = core.AxisManager(tod.dets)
-    vals = np.array(params_val)  # shape (ndet, 5)
-    errs = np.array(params_err)  # shape (ndet, 5)
     ax.wrap('ex0',      vals[:,0], [(0, 'dets')])
     ax.wrap('ey0',      vals[:,1], [(0, 'dets')])
     ax.wrap('ea',       vals[:,2], [(0, 'dets')])
@@ -719,9 +777,9 @@ def fit_with_ellipse(tod):
     ax.wrap('ea_err',   errs[:,2], [(0, 'dets')])
     ax.wrap('eb_err',   errs[:,3], [(0, 'dets')])
     ax.wrap('etheta_err',errs[:,4], [(0, 'dets')])
-    ax.wrap('covariance', np.array(covs),       [(0, 'dets')])
-    ax.wrap('residual_var', np.array(res_vars), [(0, 'dets')])
-    ax.wrap('is_success',   np.array(is_success),  [(0, 'dets')])
+    ax.wrap('covariance',   covs,       [(0, 'dets')])
+    ax.wrap('residual_var', res_vars,   [(0, 'dets')])
+    ax.wrap('is_success',   is_success, [(0, 'dets')])
     tod.wg.wrap('efit_result', ax)
     return fit_results
 ### Elliptical fitting functions to here ###
