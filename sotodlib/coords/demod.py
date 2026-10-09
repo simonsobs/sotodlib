@@ -142,7 +142,11 @@ def make_map(tod,
              'weight': wTQU}
     return output
 
+<<<<<<< HEAD
 def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, site=None, weather=None):
+=======
+def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, interpol=None, sight=None):
+>>>>>>> origin
     """
     Generate simulated TOD with HWP from a given signal map.
 
@@ -154,6 +158,8 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         wrap (bool, optional): Whether to wrap the simulated data. Default is False.
         modulated (bool, optional): If True, return modulated signal. If False, return the demodulated signal
         (`dsT`, `demodQ`, and `demodU`). Default is False.
+        interpol : Sub-pixel interpolation method. If None it will be nearest. Can be bilinear.
+        sight : A CelestialSightLine, representing the boresight pointing. Default is None.
 
     Returns:
         `modulate==False`: A tuple containing the TOD (np.array) of dsT, demodQ and demodU.
@@ -161,9 +167,15 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
 
     """
     Tmap, Qmap, Umap = signal_map
+<<<<<<< HEAD
     
     P = coords.P.for_tod(tod=tod, geom=signal_map.geometry, cuts=cuts, 
                          comps='QU', hwp=flip_gamma, site=site, weather=weather)
+=======
+
+    P = coords.P.for_tod(tod=tod, sight=sight, geom=signal_map.geometry, cuts=cuts,
+                         comps='QU', hwp=flip_gamma, interpol=interpol)
+>>>>>>> origin
     dsT_sim = P.from_map(Tmap, comps='T')
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
@@ -177,6 +189,8 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
     else:
         assert 'hwp_angle' in tod._fields
         signal_sim = dsT_sim + demodQ_sim*np.cos(4*tod.hwp_angle) + demodU_sim*np.sin(4*tod.hwp_angle)
+        # signal is promoted to float64 because hwp_angle is float64, cast back to float32
+        signal_sim = signal_sim.astype('float32')
         if wrap:
             tod.wrap('signal', signal_sim, [(0, 'dets'), (1, 'samps')])
         return signal_sim

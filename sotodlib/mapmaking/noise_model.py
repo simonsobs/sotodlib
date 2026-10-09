@@ -226,6 +226,45 @@ class NmatUncorr(Nmat):
         )
         return built
 
+class NmatDebug(Nmat):
+    def __init__(self, ivar=None, alpha=-3, fknee=2.5, profile=None, bsize=256, downweight=1):
+        self.bsize = bsize
+        self.ivar  = ivar
+        self.alpha = alpha
+        self.fknee = fknee
+        self.profile = profile
+        self.downweight = downweight
+        self.nwin  = 0
+        self.ready = ivar is not None
+    def build(self, tod, srate, **kwargs):
+        nsamp  = tod.shape[1]
+        nblock = nsamp//self.bsize
+        var    = np.median(np.var(tod[:,:nblock*self.bsize].reshape(-1,nblock,self.bsize),-1),-1)
+        with utils.nowarn():
+            ivar = utils.without_nan(1/var)*self.downweight
+        f = np.fft.rfftfreq(nsamp, 1/srate)
+        with utils.nowarn():
+            profile = 1/(1+(f/self.fknee)**self.alpha)
+        profile /= nsamp # fft normalization
+        return NmatDebug(ivar=ivar, alpha=self.alpha, fknee=self.fknee, bsize=self.bsize, profile=profile, downweight=self.downweight)
+    def apply(self, tod, inplace=True):
+        tod = self.white(tod, inplace=inplace)
+        ft  = np.empty((tod.shape[0],tod.shape[1]//2+1),utils.complex_dtype(tod.dtype))
+        fft.rfft(tod, ft)
+        ft *= self.profile
+        fft.irfft(ft, tod)
+        return tod
+    def white(self, tod, inplace=True, nwin=None):
+        if not inplace: tod = tod.copy()
+        tod *= self.ivar[:,None]
+        return tod
+    def write(self, fname):
+        self.check_ready()
+        data = bunch.Bunch(type="NmatDebug")
+        for field in ["ivar", "alpha", "fknee", "profile", "bsize", "downweight"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
+
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
                 window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000,
@@ -366,7 +405,7 @@ class NmatDetvecs(Nmat):
             ft_bin = ftod[:, b[0]:b[1]]
             E[bi], D[bi], Nd[bi] = measure_detvecs(ft_bin, vecs, pinv_vecs)
         # Optionally downweight the lowest frequency bins
-        if self.downweight != None and len(self.downweight) > 0:
+        if self.downweight is not None and len(self.downweight) > 0:
             D[:len(self.downweight)] /= np.array(self.downweight)[:,None]
         # Instead of VEV' we can have just VV' if we bake sqrt(E) into V
         V = vecs[None]*E[:,None]**0.5
@@ -379,11 +418,10 @@ class NmatDetvecs(Nmat):
         # Also compute a representative white noise level
         bsize = bins[:,1]-bins[:,0]
         ivar  = np.sum(iD*bsize[:,None],0)/np.sum(bsize)
-        # What about units? I haven't applied any fourier unit factors so far,
-        # so we're in plain power units. From the uncorrelated model I found
-        # that factor of tod.shape[1] is needed
-        iD   *= nsamp
-        iV   *= nsamp**0.5
+        # I originally normalized iD and iV here, but then undid that normalization
+        # when actually applying the model. Let's just skip that
+        #iD   *= nsamp
+        #iV   *= nsamp**0.5
         ivar *= nsamp
         # Fix dtype
         bins = np.ascontiguousarray(bins.astype(np.int32))
@@ -446,11 +484,12 @@ class NmatDetvecs(Nmat):
             for bi, b in enumerate(self.bins):
                 # Want to multiply by iD + siViV'
                 ft    = ftod[:,b[0]:b[1]]
-                iD    = self.iD[bi]/nsamp
-                iV    = self.iV[bi]/nsamp**0.5
+                iD    = self.iD[bi] #/nsamp
+                iV    = self.iV[bi] #/nsamp**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
-            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(nsamp))
+            # using normalization 1 instead of nsamp, since I didn't multiply by nsamp earlier
+            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(1))
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
 
@@ -746,7 +785,7 @@ class NmatDetvecsDCT(Nmat):
             b = np.maximum(1,b)
             E[bi], D[bi], Nd[bi] = measure_detvecs(ftod[:,b[0]:b[1]], vecs)
         # Optionally downweight the lowest frequency bins
-        if self.downweight != None and len(self.downweight) > 0:
+        if self.downweight is not None and len(self.downweight) > 0:
             D[:len(self.downweight)] /= np.array(self.downweight)[:,None]
         # Instead of VEV' we can have just VV' if we bake sqrt(E) into V
         V = vecs[None]*E[:,None]**0.5
@@ -759,11 +798,10 @@ class NmatDetvecsDCT(Nmat):
         # Also compute a representative white noise level
         bsize = bins[:,1]-bins[:,0]
         ivar  = np.sum(iD*bsize[:,None],0)/np.sum(bsize)
-        # What about units? I haven't applied any fourier unit factors so far,
-        # so we're in plain power units. From the uncorrelated model I found
-        # that factor of tod.shape[1] is needed
-        iD   *= nsamp
-        iV   *= nsamp**0.5
+        # I originally normalized iD and iV here, but then undid that normalization
+        # when actually applying the model. Let's just skip that
+        #iD   *= nsamp
+        #iV   *= nsamp**0.5
         ivar *= nsamp
         # Fix dtype
         bins = np.ascontiguousarray(bins.astype(np.int32))
@@ -791,11 +829,12 @@ class NmatDetvecsDCT(Nmat):
             for bi, b in enumerate(self.bins):
                 # Want to multiply by iD + siViV'
                 ft    = ftod[:,b[0]:b[1]]
-                iD    = self.iD[bi]/nsamp
-                iV    = self.iV[bi]/nsamp**0.5
+                iD    = self.iD[bi] #/nsamp
+                iV    = self.iV[bi] #/nsamp**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
-            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(nsamp), dct_binning=True)
+            # using normalization 1 instead of nsamp, since I didn't multiply by nsamp earlier
+            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(1), dct_binning=True)
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
 

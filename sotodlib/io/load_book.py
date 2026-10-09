@@ -491,7 +491,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             # if we don't have flag fields, assume it's good
             bs_flag = so3g.RangesInt32(aman.samps.count)
             for k, flg in _a._fields.items():
-                if "flag" in k:
+                if "flag" in k and ("az" in k or "el" in k):
                     bs_flag += flg 
             aman.flags.wrap("acu_drops", bs_flag, [(0, 'samps')])
 
@@ -972,7 +972,7 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
                 # Alternately, use frame['sample_range']
 
 
-def get_cal_obsids(ctx, obs_id, cal_type):
+def get_cal_obsids(ctx, obs_id, cal_type, max_days_before=7):
     """
     Returns set of obs-ids corresponding to the most recent calibration
     operations for a given obsid.
@@ -986,7 +986,8 @@ def get_cal_obsids(ctx, obs_id, cal_type):
     cal_type: str
         Calibration subtype to use in the obsdb query. For example: 'iv' or
         'bias_steps'.
-
+    max_days_before: int
+        Maximum days to find cal before the obs. (Default: 7)
     Returns
     ----------
         obs_ids: dict
@@ -994,7 +995,7 @@ def get_cal_obsids(ctx, obs_id, cal_type):
     """
     obs = ctx.obsdb.query(f"obs_id == '{obs_id}'")[0]
     detsets = ctx.obsfiledb.get_detsets(obs_id)
-    min_ct = obs['start_time'] - 3600*24*7
+    min_ct = obs['start_time'] - 3600*24*max_days_before
     cal_all = ctx.obsdb.query(
         f"""
         start_time <= {obs['start_time']} and subtype=='{cal_type}'

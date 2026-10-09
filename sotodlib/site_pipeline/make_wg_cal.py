@@ -186,7 +186,7 @@ def _main(
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
             ))
-        for future in futures:
+        for future in as_completed_callable(futures):
             obs_id, result = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == obs_id:

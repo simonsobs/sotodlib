@@ -38,13 +38,17 @@ class QuietOthers(Filter):
         if self.rank == 0 or record.levelno not in self.which:
             return record
 
+def default_colfun(verbosity):
+   cols = [colors.lpurple, colors.lred, colors.lbrown, colors.lgreen, colors.reset]
+   return cols[max(0, min(len(cols)-1, verbosity+3))]
+
 class ColoredFormatter(Formatter):
-    def __init__(self, msg, colors={'DEBUG':colors.reset,'INFO':colors.lgreen,'WARNING':colors.lbrown,'ERROR':colors.lred, 'CRITICAL':colors.lpurple}):
+    def __init__(self, msg, colors=default_colfun):
         Formatter.__init__(self, msg)
         self.colors = colors
     def format(self, record):
         try:
-            col = self.colors[record.levelname]
+            col = self.colors(level2verbosity(record.levelno))
         except KeyError:
             col = colors.reset
         return col + Formatter.format(self, record) + colors.reset
@@ -63,14 +67,14 @@ def init(level=INFO, rank=mpi.COMM_WORLD.rank, file=None, fmt=default_format, co
     python logging module level. The threshold does not apply to file output, where
     everything is output."""
     logger  = getLogger("enlib")
-    logger.setLevel(DEBUG)
+    logger.setLevel(1)
     if file:
         try:
             oname = file % rank
         except:
             oname = file
         fh = FileHandler(oname,mode="w")
-        fh.setLevel(DEBUG)
+        fh.setLevel(1)
         fh.addFilter(EnFilter(rank))
         formatter = Formatter(fmt)
         fh.setFormatter(formatter)
@@ -86,6 +90,10 @@ def init(level=INFO, rank=mpi.COMM_WORLD.rank, file=None, fmt=default_format, co
     return logger
 
 def verbosity2level(verbosity):
-    if verbosity <= 0: return ERROR
-    if verbosity <= 1: return INFO
-    return DEBUG
+    # -3: 50 (CRITICAL), -2: 40 (ERROR), -1: 30 (WARNING), 0: 20 (INFO), 1: 10 (DEBUG), 2: 9, 3: 8, 4:7, 5:6, ...
+    if verbosity < 1: return INFO-verbosity*10
+    else: return DEBUG-(verbosity-1)
+
+def level2verbosity(level):
+    if level < 10: return DEBUG-level+1
+    else: return (INFO-level)//10

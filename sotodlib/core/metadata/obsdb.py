@@ -57,9 +57,13 @@ class ObsDb(object):
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
+            connect_args = {}
+            timeout_env = os.getenv('SOTODLIB_SQLITE_TIMEOUT')
+            if timeout_env not in (None, ''):
+                connect_args['timeout'] = float(timeout_env)
             if map_file is None:
                 map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
+            self.conn = sqlite3.connect(map_file, **connect_args)
 
         self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
@@ -412,7 +416,7 @@ class ObsDb(object):
           results must satisfy all the criteria (i.e. the individual
           constraints are AND-ed). If your tag name contains special 
           characters (e.g. '-'), you will need to enclose it in 
-          backticks when using it in a query string, e.g.:
+          backticks when using it in a query string, e.g.::
  
             obsdb.query('`bad-tag`=1', tags=['bad-tag'])
 
