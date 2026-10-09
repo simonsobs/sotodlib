@@ -298,6 +298,12 @@ Local coordinate systems
 .. automodule:: sotodlib.coords.local
    :members:
 
+Pointing model
+--------------
+
+.. automodule:: sotodlib.coords.pointing_model
+   :members:
+
 Focal Plane from Physical Optics
 --------------------------------
 
