@@ -608,6 +608,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
                 for line in open(mask)]
 
     if P is None:
+        if res is None:
+            res = 0.01 * coords.DEG
         x, y, r = mask['xyr']
         shape = 3 * np.ceil(r * coords.DEG / res).astype(int)
         # ensure odd dimensions

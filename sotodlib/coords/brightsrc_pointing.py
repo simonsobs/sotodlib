@@ -103,7 +103,7 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
         tuple: A tuple containing the calculated xi and eta coordinates for the specified wafer slot.
     """
     
-    optics_config = optics.load_ufm_to_fp_config(optics_config_fn)['SAT']
+    optics_config = optics.load_config(optics_config_fn)['SAT']
     wafer_x, wafer_y = optics_config[wafer_slot]['dx'], optics_config[wafer_slot]['dy']
     wafer_r = np.sqrt(wafer_x**2 + wafer_y**2)
     wafer_theta = np.arctan2(wafer_y, wafer_x)
@@ -514,4 +514,3 @@ def _add_xieta(xieta1, xieta2):
     q_add = q2*q1
     xi_add, eta_add, _ = quat.decompose_xieta(q_add)
     return xi_add, eta_add
-
