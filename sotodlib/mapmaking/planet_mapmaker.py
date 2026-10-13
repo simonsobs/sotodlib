@@ -1528,12 +1528,8 @@ def make_planet_map_db(aman, source):
         telescope=aman.obs_info.telescope,
         freq_channel=aman.det_info.wafer.bandpass[0],
         wafer=aman.det_info.wafer_slot[0],
-        start_time=datetime.datetime.fromtimestamp(
-                    aman.obs_info.start_time,
-                    datetime.UTC
-                    ),
-        stop_time=datetime.datetime.fromtimestamp(
-                    aman.obs_info.stop_time,
+        ctime=datetime.datetime.fromtimestamp(
+                    aman.obs_info.timestamp,
                     datetime.UTC
                     ),
         source=source,
