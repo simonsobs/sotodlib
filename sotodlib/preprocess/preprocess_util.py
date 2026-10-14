@@ -1001,12 +1001,13 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
     if context is None:
         context = core.Context(configs["context_file"])
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
+    # cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
+    cur_groups = [str(val) for val in dets.values() if np.isscalar(val)]
     dbexist = True
     if os.path.exists(configs['archive']['index']):
         db = core.metadata.ManifestDb(configs['archive']['index'])
         dbix = {'obs:obs_id':obs_id}
-        for gb, g in zip(group_by, cur_groups[0]):
+        for gb, g in zip(group_by, cur_groups):
             dbix[f'dets:{gb}'] = g
         if len(db.inspect(dbix)) == 0:
             dbexist = False
@@ -1097,15 +1098,16 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
     if context is None:
         context = core.Context(configs["context_file"])
 
-    cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
+    # cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
+    cur_groups = [str(val) for val in dets.values() if np.isscalar(val)]
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     newpath = f'{subdir}/{obs_id}'
-    for cg in cur_groups[0]:
+    for cg in cur_groups:
         newpath += f'_{cg}'
     temp_config = swap_archive(configs, newpath+'.h5')
     policy = ArchivePolicy.from_params(temp_config['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
-    for gb, g in zip(group_by, cur_groups[0]):
+    for gb, g in zip(group_by, cur_groups):
         if gb == 'detset':
             dest_dataset += "_" + g
         else:
@@ -1118,7 +1120,7 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
     # Collect index info.
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
-    for gb, g in zip(group_by, cur_groups[0]):
+    for gb, g in zip(group_by, cur_groups):
         db_data['dets:'+gb] = g
     outputs['db_data'] = db_data
 
@@ -1333,7 +1335,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     if logger is None:
         logger = init_logger("preprocess")
 
-    group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
+    # group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
+    group = [str(val) for val in dets.values() if np.isscalar(val)]
 
     # Do a try except around config and meta reading to catch metadata failures
     try:
