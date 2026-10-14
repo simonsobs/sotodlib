@@ -11,9 +11,6 @@ import yaml
 import traceback
 import ephem
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-
 import numpy as np
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
@@ -21,10 +18,14 @@ from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.site_pipeline.utils.mapcat import get_atomic_matches
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
 from pixell import utils as putils
 from pixell.mpiutils import FakeCommunicator
+from mapcat.helper import Settings
+from mapcat.database import AtomicMapTable
+from sqlmodel import select
 
 
 @dataclass
@@ -110,6 +111,12 @@ class Cfg:
         Data type for timestreams
     dtype_map: str
         Data type for maps
+    mapcat_database_name : str
+        Path to mapcat database.
+    mapcat_database_type : str
+        Choices: ["sqlite", "postgresql"]
+    mapcat_atomic_parent : str
+        Path to base directory of atomic maps
     """
     def __init__(
         self,
@@ -151,6 +158,9 @@ class Cfg:
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True,
         compress: bool = True,
+        mapcat_database_name: str = None,
+        mapcat_database_type: str = None,
+        mapcat_atomic_parent: str = None,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -190,6 +200,16 @@ class Cfg:
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
         self.compress = compress
+        
+        self.mapcat_settings = Settings(
+            **{
+                k: v for k, v in {
+                    "database_name": mapcat_database_name,
+                    "database_type": mapcat_database_type,
+                    "atomic_parent": mapcat_atomic_parent,
+                }.items() if v is not None
+            }
+        )
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -359,23 +379,13 @@ def main(
     # if we do we will not run them again.
     if isinstance(args.atomic_db, str):
         if os.path.isfile(args.atomic_db) and not args.only_hits:
-            engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
-            Session = sessionmaker(bind=engine)
-            session = Session()
-
             keys_to_remove = []
             # Now we have obslists and splits ready, we look through the database
             # to remove the maps we already have from it
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    query_ = select(mapmaking.AtomicInfo).filter_by(
-                        obs_id=value[0][0],
-                        telescope=obs_infos[value[0][3]].telescope,
-                        freq_channel=key[2],
-                        wafer=key[1],
-                        split_label=split_label)
-                    matches = session.execute(query_).scalars().all()
+                    matches = get_atomic_matches(key=key,value=value,obs_infos=obs_infos,split_label=split_label,mapcat_settings=args.mapcat_settings)
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -388,7 +398,6 @@ def main(
             for key in keys_to_remove:
                 obskeys.remove(key)
                 del obslists[key]
-            engine.dispose()
 
     obslists_arr = [item for key, item in obslists.items()]
 
@@ -438,6 +447,9 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
+        
+        prefix_relative = "%s/atomic_%010d_%s_%s" % (
+            t5, t, detset, band)
 
         if not args.only_hits:
             info_list = []
@@ -452,7 +464,7 @@ def main(
                 info['ctime']=int(t)
                 info['split_label']=split_label
                 info['split_detail'] = ''
-                info['prefix_path'] = str(prefix + '_%s' % split_label)
+                info['prefix_path'] = str(prefix_relative + '_%s' % split_label)
                 info['elevation'] = obs_infos[obslist[0][3]].el_center
                 info['azimuth'] = obs_infos[obslist[0][3]].az_center
                 info['sun_distance'] = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
@@ -497,8 +509,10 @@ def main(
             if d_ is not None:
                 list_infos = []
                 for n_split in range(len(split_labels)):
-                    list_infos.append(mapmaking.AtomicInfo.from_dict(d_[n_split]))
-                mapmaking.atomic_db_aux(args.atomic_db, list_infos)
+                    list_infos.append(AtomicMapTable(**d_[n_split]))
+                with args.mapcat_settings.session() as session:
+                    session.add_all(list_infos)
+                    session.commit()
         except Exception as e:
             future_write_to_log(e, errlog[-1])
             continue
