@@ -98,6 +98,12 @@ def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
                 log.warning(f"EOF at {fname}, waiting for {wait_time} seconds")
                 sleep(wait_time)
                 continue
+        except pickle.UnpicklingError as e:
+            log.warning(f"Failed to load {fname}: {e}")
+            return None
+        except Exception as e:
+            log.warning(f"Failed to load {fname}: {e}")
+            return None
         break  # success
 
     return payload
