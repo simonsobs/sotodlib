@@ -31,7 +31,11 @@ def sqlite_connect(filename=None, mode="w"):
     # might be blocked for a while until they get their turn.  This prevents
     # them from giving up too soon if other processes have a write lock.
     # https://www.sqlite.org/pragma.html#pragma_busy_timeout
-    busy_time = 1000
+    timeout_env = os.getenv('SOTODLIB_SQLITE_TIMEOUT')
+    if timeout_env not in (None, ""):
+        busy_time = float(timeout_env)
+    else:
+        busy_time = 300
 
     # Journaling options
 
