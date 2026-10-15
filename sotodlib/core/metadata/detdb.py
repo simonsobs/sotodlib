@@ -71,18 +71,32 @@ class DetDb(object):
         "`time1` integer",
     ]
 
-    def __init__(self, map_file=None, init_db=True):
-        """Instantiate a DetDb.  If map_file is provided, the database will
+    def __init__(self, map_file=":memory:", init_db=True, readonly=False):
+        """Instantiate a DetDb.
+
+        If map_file is provided, the database will
         be connected to the indicated sqlite file on disk, and any
         changes made to this object be written back to the file.
 
+        Args:
+            map_file (string): sqlite database file to map.  Defaults to
+                ':memory:'.
+            init_db (bool): If True, attempt to create the database
+                tables.
+            readonly (bool): If True, the database file will be mapped
+                in read-only mode.  Not valid on dbs held in :memory:.
+
         """
+        if init_db and readonly:
+            raise ValueError("Cannot initialize a read-only DB")
+        self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
+            self.conn = common.sqlite_connect(
+                filename=map_file,
+                mode=("r" if readonly else "w"),
+            )
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
         if init_db:
@@ -170,6 +184,8 @@ class DetDb(object):
           ]
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot use create_table() on a read-only DB")
         c = self.conn.cursor()
         pre_cols = self.TABLE_TEMPLATE
         if raw:
@@ -189,13 +205,17 @@ class DetDb(object):
         of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
-        if map_file is not None and os.path.exists(map_file):
+        if (
+            map_file is not None and 
+            map_file != ":memory:" and
+            os.path.exists(map_file)
+        ):
             if overwrite:
                 os.remove(map_file)
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = DetDb(map_file=map_file, init_db=False)
+        new_db = DetDb(map_file=map_file, init_db=False, readonly=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         return new_db
@@ -220,7 +240,7 @@ class DetDb(object):
             raise RuntimeError(f'File {filename} exists; remove or pass '
                                'overwrite=True.')
         if fmt == 'sqlite':
-            self.copy(map_file=filename, overwrite=overwrite)
+            _ = self.copy(map_file=filename, overwrite=overwrite)
         elif fmt == 'dump':
             with open(filename, 'w') as fout:
                 for line in self.conn.iterdump():
@@ -237,10 +257,10 @@ class DetDb(object):
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt, 
+        conn = common.sqlite_from_file(filename, fmt=fmt,
                                        force_new_db=force_new_db)
         return cls(conn, init_db=False)
-        
+
 
     def reduce(self, dets=None, time0=None, time1=None,
                inplace=False):
@@ -262,7 +282,12 @@ class DetDb(object):
         Returns the reduced data (which is self, if inplace is True).
 
         """
-        if not inplace:
+        if inplace:
+            if self._readonly:
+                raise RuntimeError(
+                    "Cannot do inplace reduce of a read-only DB."
+                )
+        else:
             return self.copy().reduce(dets, time0, time1, inplace=True)
 
         time_clause = '0'
@@ -339,6 +364,8 @@ class DetDb(object):
         into the property table.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_props() on a read-only DB")
         if time_range is None:
             time_range = self.ALWAYS
         row_id = self.get_id(name_, create=True, commit=False)
