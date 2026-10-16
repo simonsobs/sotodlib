@@ -16,6 +16,7 @@ from sotodlib.io import hk_utils
 from sotodlib.site_pipeline.utils.logging import init_logger
 logger = init_logger('wiregrid', 'wiregrid: ')
 
+
 def circular_mean(angle, error=1.0, axis=None, period=np.pi * 2):
     """
     Circular mean of angle
@@ -46,6 +47,115 @@ def circular_mean(angle, error=1.0, axis=None, period=np.pi * 2):
     ave = e / np.hypot(c, s)
     av = np.arctan2(s, c) / spin
     return av, ave
+
+
+def circular_std(angle, error=1.0, axis=None, period=np.pi * 2):
+    """
+    Circular standard deviation of angle
+
+    Parameters
+    ----------
+    angle : np.ndarray
+        Angle in radian
+    error : float or np.ndarray
+        Angle error in radian used for weight. (Default: 1.0)
+    axis : int or None
+        Axis of array to take standard deviation (Default: None)
+    period : float
+        Period of angle in radian. (Default: 2pi)
+
+    Returns
+    -------
+    std : np.ndarray
+        Circular standard deviation of angle, sqrt(-2 ln R) / spin,
+        where R is the weighted mean resultant length.
+    """
+    spin = np.pi * 2 / period
+    w = np.broadcast_to((1 / error) ** 2, np.shape(angle))
+    w = np.where(np.isfinite(angle), w, 0)
+    c = np.nansum(np.cos(angle * spin) * w, axis=axis)
+    s = np.nansum(np.sin(angle * spin) * w, axis=axis)
+    r = np.hypot(c, s) / np.sum(w, axis=axis)
+    return np.sqrt(-2 * np.log(r)) / spin
+
+
+def circular_median(angle, error=1.0, period=np.pi * 2, chunk=1000):
+    """
+    Circular median of angle
+
+    The circular median is the data point that minimizes the weighted sum of
+    absolute wrapped deviations to all other data points (Fisher 1993).
+
+    Parameters
+    ----------
+    angle : np.ndarray
+        Angle in radian
+    error : float or np.ndarray
+        Angle error in radian used for weight. (Default: 1.0)
+    period : float
+        Period of angle in radian. (Default: 2pi)
+    chunk : int
+        Number of candidate points evaluated at once, to limit memory usage.
+        (Default: 1000)
+
+    Returns
+    -------
+    med : float
+        Circular median of angle
+    """
+    angle = np.ravel(angle)
+    w = np.ravel(np.broadcast_to((1 / error) ** 2, np.shape(angle)))
+    finite = np.isfinite(angle)
+    angle, w = angle[finite], w[finite]
+    if angle.size == 0:
+        return np.nan
+
+    cost = np.empty(angle.size)
+    for i in range(0, angle.size, chunk):
+        cand = angle[i : i + chunk, None]
+        cost[i : i + chunk] = np.sum(w * np.abs(wrap(angle - cand, period)), axis=1)
+    return wrap(angle[np.argmin(cost)], period)
+
+
+def wrap(angle, period=np.pi * 2):
+    """Wrap angle into [-period/2, period/2)."""
+    return (angle + period / 2) % period - period / 2
+
+
+def circular_sigma_clip(angle, error=1.0, nsigma=3.0, maxiter=5, period=np.pi * 2):
+    """
+    Iterative sigma clipping of circular data
+
+    Parameters
+    ----------
+    angle : np.ndarray
+        Angle in radian
+    error : float or np.ndarray
+        Angle error in radian used for weight. (Default: 1.0)
+    nsigma : float
+        Clipping threshold in units of robust standard deviation. (Default: 3.0)
+    maxiter : int
+        Maximum number of iterations. (Default: 5)
+    period : float
+        Period of angle in radian. (Default: pi)
+
+    Returns
+    -------
+    mask : np.ndarray of bool
+        True for data kept, False for clipped outliers and NaN.
+    """
+    angle = np.asarray(angle, dtype=float)
+    mask = np.isfinite(angle)
+    for _ in range(maxiter):
+        av, _ = circular_mean(np.where(mask, angle, np.nan), error, period=period)
+        resid = wrap(angle - av, period)
+        sigma = 1.4826 * np.nanmedian(np.abs(resid[mask]))
+        new_mask = np.isfinite(angle) & (np.abs(resid) < nsigma * sigma)
+        if np.array_equal(new_mask, mask):
+            break
+        mask = new_mask
+    return mask
+
 
 @dataclass
 class wg_config:
