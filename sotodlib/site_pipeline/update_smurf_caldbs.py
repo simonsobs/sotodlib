@@ -298,7 +298,7 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
         ridx = np.where(
             (iva['bands'] == band) & (iva['channels'] == chan)
         )[0]
-        if not ridx: # Channel doesn't exist in IV analysis
+        if ridx.size == 0: # Channel doesn't exist in IV analysis
             continue
 
         ridx = ridx[0]
@@ -346,7 +346,7 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
         ridx = np.where(
             (bsa['bands'] == band) & (bsa['channels'] == chan)
         )[0]
-        if not ridx: # Channel doesn't exist in bias step analysis
+        if ridx.size == 0: # Channel doesn't exist in bias step analysis
             continue
 
         ridx = ridx[0]

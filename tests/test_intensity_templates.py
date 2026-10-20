@@ -26,17 +26,17 @@ from ._helpers import create_outdir, close_data_and_comm, simulation_test_data
 
 
 class IntensityTemplateTest(unittest.TestCase):
+
+    def setUp(self):
+        fixture_name = os.path.splitext(os.path.basename(__file__))[0]
+        self.outdir = create_outdir(fixture_name)
+
     def test_intensity_templates(self):
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
         comm, procs, rank = toast.get_world()
-
-        outdir = create_outdir(
-            subdir=os.path.splitext(os.path.basename(__file__))[0],
-            mpicomm=comm,
-        )
 
         data = simulation_test_data(
             comm,
@@ -111,7 +111,7 @@ class IntensityTemplateTest(unittest.TestCase):
 
         filterbin = toast.ops.FilterBin(
             binning=binning,
-            output_dir=outdir,
+            output_dir=self.outdir,
             precomputed_templates="intensity_templates",
             precomputed_template_view="scanning",
             write_binmap=True,
@@ -124,8 +124,8 @@ class IntensityTemplateTest(unittest.TestCase):
 
         # Confirm that the filtered map is consistent with zero
 
-        fname_binned = os.path.join(outdir, "FilterBin_unfiltered_map.fits")
-        fname_filtered = os.path.join(outdir, "FilterBin_filtered_map.fits")
+        fname_binned = os.path.join(self.outdir, "FilterBin_unfiltered_map.fits")
+        fname_filtered = os.path.join(self.outdir, "FilterBin_filtered_map.fits")
         binned = hp.read_map(fname_binned, None)
         filtered = hp.read_map(fname_filtered, None)
         good = binned[0] != 0
@@ -153,10 +153,11 @@ class IntensityTemplateTest(unittest.TestCase):
 
         comm, procs, rank = toast.get_world()
 
-        outdir = create_outdir(
-            subdir=os.path.splitext(os.path.basename(__file__))[0],
-            mpicomm=comm,
-        )
+        testdir = os.path.join(self.outdir, "caching")
+        if rank == 0:
+            os.makedirs(testdir, exist_ok=True)
+        if comm is not None:
+            comm.barrier()
 
         data = simulation_test_data(
             comm,
@@ -192,7 +193,7 @@ class IntensityTemplateTest(unittest.TestCase):
 
         # Generate and cache templates
 
-        cache_dir = os.path.join(outdir, "template_cache")
+        cache_dir = testdir
         so_ops.IntensityTemplates(
             name="intensity_templates",
             fpkeys="wafer_slot,bandcenter",

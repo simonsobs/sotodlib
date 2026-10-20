@@ -232,3 +232,62 @@ And make a plot::
 Again, the actual PDF output has "infinite" resolution.  Zooming in to the above plot we can actually see the pixel labels and A/B labels on the arrows that were enabled by the `--labels` option:
 
 .. image:: _static/hardware_example_mydets2.png
+
+Data Export
+--------------------
+
+When debugging code on a small number of observations, it can be useful to copy
+that data to a local system. The `so_data_export` tool can be used to copy a set
+of observation IDs and associated metadata from a context file to a local
+system. You should first decide where to keep the "root" of your S.O. data on
+the local system. Under this directory you should make "data" and "metadata"
+directories.
+
+You should run the export script from the local system (destination) where you
+want a copy of the data. You should set up your local ssh configuration (usually
+in `~/.ssh/config`) so that you can ssh to the source machine with just "ssh
+user@machine" and not have to specify other commandline options like which key
+to use, ports, etc. If the source machine uses 2FA, that is fine and you should
+be prompted for that once. This script establishes a persistent connection and
+then re-uses that to rsync each observation or metadata product.
+
+**Be VERY careful if you choose to copy many observations**. Try to do that over
+an institutional network connection or someplace that is not metered for data
+usage.
+
+All of the databases used (the obsdb, obsfiledb, manifest dbs, etc) are fully
+copied, even though most of the data / obs referenced in those will not be
+present locally. This is a useful feature:
+
+1.  You can query the DBs locally to look for observations you might want to
+    sync.
+
+2.  You can later sync some additional data and the DBs will automatically
+    still have references to past / older data from previous sync operations.
+
+However, the downside is that you have to pay attention to what data you have
+locally. If you attempt to load data that does not exist, then Context.get_obs()
+will of course fail.
+
+.. include:: _static/so_data_export.inc
+
+Example
+~~~~~~~~~~~~~~
+
+This example copies data from NERSC, and assumes you have already run `sshproxy` to get
+an ssh key that is valid for 24 hours.  This also assumes you want to put the data in a
+directory called `so` in your home directory.  Replace `USER` with your actual
+username.  This also assumes you have created the input `obs_ids.txt` file with one
+obs_id per line.::
+
+    %>  so_data_export \
+        --local_data ~/so/data \
+        --local_metadata ~/so/metadata \
+        --local_context ~/so/metadata/satp1/contexts/use_this_local.yaml \
+        --remote_data /global/cfs/cdirs/sobs/data \
+        --remote_metadata /global/cfs/cdirs/sobs/metadata \
+        --remote_host tk5820@tiger \
+        --remote_context /global/cfs/cdirs/sobs/metadata/satp1/contexts/use_this_local.yaml \
+        --localize \
+        --obs_file ./obs_ids.txt
+

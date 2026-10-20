@@ -56,7 +56,8 @@ def create_manifest(base_dir: str, output_file: str):
 
     for cadence in ["weekly", "monthly"]:
         parent = os.path.join(base_dir, cadence)
-        if not os.path.exists(parent):
+
+        if not os.path.isdir(parent):
             continue
 
         entries = []
@@ -64,35 +65,44 @@ def create_manifest(base_dir: str, output_file: str):
 
         for folder_name in sorted(os.listdir(parent)):
             folder_path = os.path.join(parent, folder_name)
+
             if not os.path.isdir(folder_path):
                 continue
 
-            index_path = os.path.join(folder_path, "report.html")
-            if not os.path.exists(index_path):
+            report_path = os.path.join(folder_path, "report.html")
+
+            if not os.path.isfile(report_path):
                 continue
 
-            rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
-            rel_path = f"../../{rel_path}"
+            rel_path = os.path.relpath(
+                report_path,
+                start=base_dir,
+            ).replace(os.sep, "/")
+
 
             entries.append({
                 "label": f"{cadence} / {folder_name}",
-                "rel_path": rel_path
+                "rel_path": rel_path,
             })
 
             start, end = parse_range(folder_name)
+
             if end is not None:
-                candidates.append((end, start, rel_path))
+                candidates.append(
+                    (end, start, rel_path)
+                )
 
         if candidates:
             _, _, latest_path = max(candidates)
+
             entries.insert(0, {
                 "label": f"{cadence} / latest",
-                "rel_path": latest_path
+                "rel_path": latest_path,
             })
 
         manifest.extend(entries)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
 
@@ -102,21 +112,22 @@ class GenerateReportConfig:
         platform: Literal["satp1", "satp2", "satp3", "lat"],
         site_url: str,
         report_interval: Literal["range", "daily", "weekly", "monthly"],
-        start_time: Union[dt.datetime, float, str],
+        start_time: Union[dt.datetime, int, float, str],
         output_root: str,
         data_config: Dict[str, Any],
-        stop_time: Union[dt.datetime, float, str, None] = None,
+        stop_time: Union[dt.datetime, int, float, str, None] = None,
         overwrite_html: bool = False,
         overwrite_data: bool = False,
         skip_html: bool = False,
         template_dir: Optional[str] = None,
+        make_html_index: bool = False
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.site_url: str = site_url
         self.report_interval = report_interval
 
         def convert_to_datetime(
-            time: Union[dt.datetime, float, str, None],
+            time: Union[dt.datetime, int, float, str, None],
         ) -> dt.datetime:
             if isinstance(time, type(None)):
                 return dt.datetime.now(tz=dt.timezone.utc)
@@ -137,6 +148,7 @@ class GenerateReportConfig:
         self.template_dir = template_dir
         self.data_config = data_config
         self.skip_html = skip_html
+        self.make_html_index = make_html_index
 
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         if self.report_interval == "range":
@@ -311,6 +323,25 @@ def _main(
 
     create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
 
+    env = Environment(loader=FileSystemLoader(cfg.template_dir))
+
+    platforms = ["satp1", "satp2", "satp3", "lat"]
+
+    if not cfg.skip_html or cfg.overwrite_html:
+        template = env.get_template("platform_index.html")
+        with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
+            output_file.write(
+                template.render(
+                    platform=cfg.platform,
+                    platforms=platforms,
+                    reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
+                )
+            )
+        if cfg.make_html_index:
+            template = env.get_template("index.html")
+            with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
+                output_file.write(template.render(platforms=platforms))
+
     if n_failed > 0:
         raise RuntimeError(f"{n_failed} reports failed to generate")
 
@@ -329,28 +360,47 @@ def render_report(
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template("report.html")
 
+    time_plots = {
+        "el_vs_time": ("el_center", "Elevation [deg]", "Elevation", lambda x: np.round(x, 2)),
+        "temp_vs_time": ("temp", "Ambient Temperature [°C]", "Ambient Temperature", lambda x: np.round(x, 2)),
+        "uv_vs_time": ("uv", "UV Index", "UV Index", None),
+        "wind_speed_vs_time": ("wind_speed", "Wind Speed [m/s]", "Wind Speed", None),
+        "wind_dir_vs_time": ("wind_dir", "Wind Direction [deg]", "Wind Direction", None),
+    }
+
+    time_figs = {
+        name: plots.plot_obs_timeseries(
+            data,
+            field=field,
+            ylabel=ylabel,
+            title=title,
+            transform=transform,
+        )
+        for name, (field, ylabel, title, transform) in time_plots.items()
+    }
+
     obs_efficiency_plots = plots.wafer_obs_efficiency(data)
     source_footprint_plots = plots.source_footprints(data)
     figures: Dict[str, go.Figure] = {
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
+        "obs_efficiency_pie_pwv": obs_efficiency_plots.pie_good_pwv,
         "boresight_vs_time": plots.boresight_vs_time(data),
-        "el_vs_time": plots.el_vs_time(data),
-        "temp_vs_time": plots.temp_vs_time(data),
-        "uv_vs_time": plots.uv_vs_time(data),
-        "wind_speed_vs_time": plots.wind_speed_vs_time(data),
-        "wind_dir_vs_time": plots.wind_dir_vs_time(data),
         "scan_type_vs_time": plots.scan_type_vs_time(data),
         "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
+        "yield_hist": plots.yield_hist(data),
         "pwv_and_array_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="array"),
         "array_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="array"),
+        "array_nep_hist": plots.nep_hist(data, field_name="array"),
         "pwv_and_det_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="det"),
         "det_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="det"),
+        "det_nep_hist": plots.nep_hist(data, field_name="det"),
         "source_focalplane": source_footprint_plots.focalplane,
         "source_table": source_footprint_plots.table,
         "map_png": plots.cov_map_plot(map_png_file),
+        **time_figs,
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
@@ -372,12 +422,63 @@ def render_report(
             # keep only observations and not operations
             if o.obs_type != "obs":
                 continue
-            is_close = any(abs(o.start_time - start_time) <= 20 for start_time in start_times)
+            is_close = any(abs(o.start_time - start_time) <= 60 for start_time in start_times)
             if not is_close:
                 unique_obs.append(o)
                 start_times.append(o.start_time)
     else:
         unique_obs = [o for o in data.obs_list if o.obs_type == "obs"]
+
+    start = dt.datetime.fromisoformat(start_time_str)
+    stop = dt.datetime.fromisoformat(stop_time_str)
+
+    total_time_hrs = (stop - start).total_seconds() / 3600
+    # 10 minute time chunks
+    NSEG = int(np.ceil(total_time_hrs * 6))
+
+    if data.pwv is not None:
+
+        t = np.asarray(data.pwv[0])
+        pwv = np.asarray(data.pwv[1])
+
+        t0 = start.timestamp()
+        t1 = stop.timestamp()
+
+        edges = np.linspace(t0, t1, NSEG + 1)
+
+        good = 0
+
+        for i in range(NSEG):
+            m = (t >= edges[i]) & (t < edges[i + 1])
+            if not np.any(m):
+                continue
+
+            mean_pwv = np.mean(pwv[m])
+
+            if mean_pwv < 3:
+                good += 1
+
+        good_pwv_time_hrs = total_time_hrs * (good / NSEG)
+
+    else:
+        good_pwv_time_hrs = 0
+
+    cmb_good_pwv_time_hrs = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv < 3])) / 3600
+    cmb_all_pwv_time_hrs = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv])) / 3600
+    idle_good_pwv_time_hrs = good_pwv_time_hrs - cmb_good_pwv_time_hrs
+    idle_all_pwv_time_hrs = total_time_hrs - cmb_all_pwv_time_hrs
+
+    # get number of 20 min gaps (det setup time) and longest gap between obs_ids with obs type
+    gaps = []
+    longest_gap = 0
+    unique_obs_sorted = sorted(unique_obs, key=lambda o: o.start_time)
+    unique_obs_sorted = [o for o in unique_obs_sorted if o.obs_type == "obs"]
+    for prev, curr in zip(unique_obs_sorted[:-1], unique_obs_sorted[1:]):
+        gap = curr.start_time - prev.stop_time
+        if gap > 1200:
+            gaps.append(gap)
+        if gap > longest_gap:
+            longest_gap = gap
 
     jinja_data = {
         "data": data,
@@ -393,11 +494,19 @@ def render_report(
             "Number of Observations": len([o for o in unique_obs]),
             "Number of CMB Observations": len([o for o in unique_obs if o.obs_subtype == "cmb"]),
             "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
+            "Number of > 20 min Gaps Between Obs": len(gaps),
+            "Longest Gap Between Obs (hrs)": np.round(longest_gap / 3600, 2),
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
+            "Percentage of Time on CMB Observations (Any slot | PWV < 3):": np.round(100 * cmb_good_pwv_time_hrs / good_pwv_time_hrs, 2),
+            "Percentage of Time on CMB Observations (Any slot):": np.round(100 * cmb_all_pwv_time_hrs / total_time_hrs, 2),
+            "Percentage of Time spent not observing CMB (Any slot | PWV < 3):": np.round(100 * idle_good_pwv_time_hrs / good_pwv_time_hrs, 2),
+            "Percentage of Time spent not observing CMB (Any slot):": np.round(100 * idle_all_pwv_time_hrs / total_time_hrs, 2),
             "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
+            "Median Obs PWV (mm)": np.round(np.nanmedian([o.pwv for o in unique_obs]), 3),
+            "Stddev Obs PWV (mm)": np.round(np.nanstd([o.pwv for o in unique_obs]), 3),
         }
     }
 
@@ -405,7 +514,6 @@ def render_report(
         jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "wiregrid" in o.obs_tags])) / 3600, 1)
     elif cfg.platform == "lat":
         jinja_data["general_stats"]["Time Spent on Stimulator Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "stimulator" in o.obs_tags])) / 3600, 1)
-
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
@@ -426,8 +534,8 @@ def get_parser(
 
 def main(
     cfg: str,
-    start_time: Optional[Union[dt.datetime, float, str]] = None,
-    stop_time: Optional[Union[dt.datetime, float, str]] = None,
+    start_time: Optional[Union[dt.datetime, int, float, str]] = None,
+    stop_time: Optional[Union[dt.datetime, int, float, str]] = None,
     report_interval: Optional[str] = None,
     overwrite_html: Optional[bool] = None,
     overwrite_data: Optional[bool] = None,

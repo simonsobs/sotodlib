@@ -313,14 +313,6 @@ def calc_psd(
     if signal is None:
         signal = aman.signal
 
-    if ("noverlap" not in kwargs) or \
-            ("noverlap" in kwargs and kwargs["noverlap"] != 0):
-        warnings.warn('calc_wn will be biased. noverlap argument of welch '
-                      'needs to be 0 to get unbiased median white noise estimate.')
-    if not full_output:
-        warnings.warn('calc_wn will be biased. full_output argument of calc_psd '
-                      'needs to be True to get unbiased median white noise estimate.')
-
     if subscan:
         if full_output:
             freqs, Pxx, nseg = _calc_psd_subscan(aman, signal=signal,
@@ -361,10 +353,10 @@ def calc_psd(
                 nperseg = int(2 ** (np.around(np.log2((stop - start) / 50.0))))
             kwargs["nperseg"] = nperseg
 
-        if kwargs["nperseg"] > max_samples:
+        if kwargs["nperseg"] > stop - start:
             nseg = 1
         else:
-            nseg = int(max_samples / kwargs["nperseg"])
+            nseg = int((stop - start) / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
         axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
@@ -488,10 +480,11 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, method='m
         nseg = aman.get('nseg')
 
     if nseg is None:
-        warnings.warn('white noise level estimated by median PSD is biased. '
-                      'nseg is necessary to debias. Need to use following '
-                      'arguments in calc_psd to get correct nseg. '
-                      '`noverlap=0, full_output=True`')
+        if method == 'median':
+            warnings.warn('white noise level estimated by median PSD is biased. '
+                          'nseg is necessary to debias. Need to use following '
+                          'arguments in calc_psd to get correct nseg. '
+                          '`noverlap=0, full_output=True`')
         debias = None
     else:
         if method == 'median':
@@ -668,7 +661,8 @@ def get_psd_mask(aman, psd_mask=None, f=None,
         psd_mask = psd_mask.mask()
 
     if mask_hwpss:
-        hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
+        if hwp_freq is None:
+            hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
         psd_mask = psd_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
     if mask_peak:
         psd_mask = psd_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
@@ -997,7 +991,7 @@ def fit_noise_model(
                             lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
                             full_output=True,
                         )
-                        hessian_ndt, _ = Hfun(res["x"])
+                        hessian_ndt = Hfun(res["x"])[0]
                         covout_i = np.linalg.inv(hessian_ndt)
                     except np.linalg.LinAlgError:
                         errout[i] = 'LinalgError'
@@ -1098,6 +1092,7 @@ def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0
         mask: Boolean array to mask frequency and power of the given PSD. 
             True in this array stands for the index of hwpss to mask.
     """
+    hwp_freq = np.abs(hwp_freq)
     if isinstance(width, (float, int)):
         width_minus = -width/2
         width_plus = width/2

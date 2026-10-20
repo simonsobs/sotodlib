@@ -1,131 +1,72 @@
+"""
+The deletion stage of data packaging: verify that a timecode has been
+completely packaged into Books, then delete the staged copy of those Books and
+the level 2 originals.
+
+This is the only data packaging element addressed by *platform* rather than by
+config path. It uses the ``DATAPKG_ENV`` environment file to resolve
+``<configs>/<platform>/imprinter.yaml``.
+
+It walks timecodes (5-digit ctimes, ``ctime // 1e5``, about 27.8 hours each)
+in order and runs up to three operations per timecode, all built on
+``sotodlib.io.datapkg_completion.DataPackaging``:
+
+1. **Completion check** -- always runs. ``make_timecode_complete`` is an
+   aggressive self-repair pass: re-index files on disk that are missing from
+   G3tSmurf, force-complete dangling level 2 observations, register level 2
+   observations that never made it into a Book (falling back to single-wafer
+   registration), bind anything still UNBOUND, autofix anything FAILED, force
+   the timecode final if a server was off, and register the hk/smurf/stray
+   Books. Then ``verify_timecode_deletable`` reconciles the files on disk
+   against the files the Book database claims to have archived and fails if
+   anything on disk is unaccounted for.
+2. **Staged deletion** (``--delete-staged``) -- remove the bound copy from the
+   imprinter's ``output_root``; the Book now lives only in the Librarian.
+   Books move to status DONE.
+3. **Level 2 deletion** (``--delete-lvl2``) -- remove the raw level 2 files,
+   after asking the Librarian to confirm two independent copies exist. Books
+   get ``lvl2_deleted`` set.
+
+Each range is set either by a lag in days before now (``--completion-lag``,
+``--staged-deletion-lag``, ``--lvl2-deletion-lag``) or by explicit
+``--min-*``/``--max-*`` timecode overrides. The completion-check range must
+fully contain both deletion ranges; this is validated at startup, so it is not
+possible to delete a timecode that was never checked.
+
+``--dry-run`` logs the plan without touching anything, and should always be
+used first when setting the timecode ranges by hand. ``--max-runtime``
+(minutes) stops cleanly at the next timecode boundary, which matters because a
+from-scratch completion pass over years of timecodes can run for a very long
+time; failures accumulated up to that point are still raised.
+
+.. warning::
+
+    This script deletes raw data.
+
+See the Data Packaging page of the sotodlib documentation for the full
+pipeline description.
+"""
+
 import numpy as np
 import datetime as dt
 from typing import Optional
 import argparse
 
-from sotodlib.io.imprinter import Imprinter
 from sotodlib.io.datapkg_completion import DataPackaging
 from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "cleanup_level2: ")
 
-def level2_completion(
-    dpk: DataPackaging, 
-    lag: Optional[float] = 14,
-    min_timecode: Optional[int] = None, 
-    max_timecode: Optional[int] = None, 
-    raise_incomplete: Optional[bool] = True,
-):
-
-    ## build time range where we require timecodes to be complete
-    if min_timecode is None:
-        min_timecode = dpk.get_first_timecode_on_disk()
-    if max_timecode is None:
-        x = dt.datetime.now() - dt.timedelta(days=lag)
-        max_timecode = int( x.timestamp() // 1e5)
-
-    logger.info(
-        f"Checking Timecode completion from {min_timecode} to "
-        f"{max_timecode}."
-    )
-
-    check_list = []
-    for timecode in range(min_timecode, max_timecode):
-        check = dpk.make_timecode_complete(timecode)
-        if not check[0]:
-            check_list.append( (timecode, check[1]) )
-            continue
-        check = dpk.verify_timecode_deletable(
-            timecode, include_hk=True, 
-            verify_with_librarian=False,
-        ) 
-        if not check[0]:
-            check_list.append( (timecode, check[1]) )
-
-    if len( check_list ) > 0 and raise_incomplete:
-        raise ValueError(
-            f"Data Packaging cannot be completed for {check_list}"
-        )
-
-def do_delete_level2(
-    dpk: DataPackaging, 
-    lag: Optional[float] = 28,
-    min_timecode: Optional[int] = None, 
-    max_timecode: Optional[int] = None, 
-    raise_incomplete: Optional[bool] =True,
-):
-    ## build time range where we should be deleting
-    if min_timecode is None:
-        min_timecode = dpk.get_first_timecode_on_disk()
-
-    if max_timecode is None:
-        x = dt.datetime.now() - dt.timedelta(days=lag)
-        max_timecode = int( x.timestamp() // 1e5)
-    
-    logger.info(
-        f"Removing Level 2 data from {min_timecode} to "
-        f"{max_timecode}."
-    )
-    delete_list = []
-    for timecode in range(min_timecode, max_timecode):
-        check = dpk.check_and_delete_timecode(timecode)
-        if not check[0]:
-            logger.error(f"Failed to remove level 2 for {timecode}")
-            delete_list.append( (timecode, check[1]))
-            continue
-    if len( delete_list ) > 0 and raise_incomplete:
-        raise ValueError(
-            f"Level 2 Deletion not finished for {delete_list}"
-        )
-
-def do_delete_staged(
-    dpk: DataPackaging, 
-    lag: Optional[float] = 14,
-    min_timecode: Optional[int] = None, 
-    max_timecode: Optional[int] = None, 
-    raise_incomplete: Optional[bool] =True,
-):
-    ## build time range where we should be deleting
-    if min_timecode is None:
-        min_timecode = dpk.get_first_timecode_in_staged()
-
-    if max_timecode is None:
-        x = dt.datetime.now() - dt.timedelta(days=lag)
-        max_timecode = int( x.timestamp() // 1e5)
-        
-    logger.info(
-        f"Removing staged from {min_timecode} to "
-        f"{max_timecode}."
-    )
-    delete_list = []
-    for timecode in range(min_timecode, max_timecode):
-        check = dpk.make_timecode_complete(timecode)
-        if not check[0]:
-            delete_list.append( (timecode, check[1]) )
-            continue
-        check = dpk.verify_timecode_deletable(
-            timecode, include_hk=True, 
-            verify_with_librarian=False,
-        ) 
-        if not check[0]:
-            delete_list.append( (timecode, check[1]) )
-            continue
-        check = dpk.delete_timecode_staged(timecode)
-        if not check[0]:
-            logger.error(f"Failed to remove staged for {timecode}")
-            delete_list.append( (timecode, check[1]))
-            continue
-    if len( delete_list ) > 0 and raise_incomplete:
-        raise ValueError(
-            f"Staged Deletion not finished for {delete_list}"
-        )
-
+def log_response(resp):
+    if resp[0]:
+        logger.info(resp[1])
+    else:
+        logger.error(resp[1])
 
 def main(
     platform: str,
-    check_complete: Optional[bool]= False,
     delete_staged: Optional[bool] = False,
-    delete_lvl2: Optional[bool]= False,
+    delete_lvl2: Optional[bool] = False,
     completion_lag: Optional[float] = 14,
     min_complete_timecode: Optional[int] = None,
     max_complete_timecode: Optional[int] = None,
@@ -135,61 +76,244 @@ def main(
     lvl2_deletion_lag: Optional[float] = 28,
     min_lvl2_delete_timecode: Optional[int] = None,
     max_lvl2_delete_timecode: Optional[int] = None,
-    ):
+    dry_run: Optional[bool] = False,
+    max_runtime: Optional[float] = None,
+):
     """
-    Use the imprinter database to clean up already bound level 2 files. 
+    Use the imprinter database to clean up already bound level 2 files.
+
+    Always runs make_timecode_complete and verify_timecode_deletable for every
+    timecode in the completion-check range. The completion-check range must
+    fully contain any deletion ranges — an error is raised at startup if not.
+    Each of those checks is called at most once per timecode.
 
     Parameters
     ----------
     platform : str
-        platform we're running for
+        Platform we're running for.
+    delete_staged : bool, optional
+        If True, delete staged data for each timecode.
+    delete_lvl2 : bool, optional
+        If True, delete level 2 raw data for each timecode.
     completion_lag : float, optional
-        The number of days in the past where we expect data packaging to be
-        fully complete.
-    min_complete_timecode : Optional[datetime], optional
-        The lowest timecode to run completion checking. over-rides the "start
-        from beginning" behavior.
-    max_complete_timecode : Optional[datetime], optional
-        The highest timecode to run completion checking. over-rides the
-        completion_lag calculated value.
-    dry_run : Optional[bool], 
-        If true, only prints deletion to logger
+        Days in the past before which we require data packaging to be
+        complete. Used to set the max of the completion-check range.
+    min_complete_timecode : int, optional
+        Override the lowest timecode for completion checking.
+    max_complete_timecode : int, optional
+        Override the highest timecode for completion checking.
+    staged_deletion_lag : float, optional
+        Days in the past before which we delete staged data.
+    min_staged_delete_timecode : int, optional
+        Override the lowest timecode for staged deletion.
+    max_staged_delete_timecode : int, optional
+        Override the highest timecode for staged deletion.
+    lvl2_deletion_lag : float, optional
+        Days in the past before which we delete level 2 raw data.
+    min_lvl2_delete_timecode : int, optional
+        Override the lowest timecode for level 2 deletion.
+    max_lvl2_delete_timecode : int, optional
+        Override the highest timecode for level 2 deletion.
+    dry_run : bool, optional
+        If True, log what would be done without making any changes.
+    max_runtime : float, optional
+        Maximum number of minutes to run before stopping the loop early.
+        The loop stops cleanly at the next timecode boundary; any failures
+        accumulated up to that point are still raised.
     """
+    if dry_run:
+        logger.info("DRY RUN: no changes will be made.")
+
     dpk = DataPackaging(platform)
 
-    if check_complete:
-        level2_completion(
-            dpk, completion_lag,  
-            min_complete_timecode, max_complete_timecode,
-        )
+    def lag_to_max_timecode(lag: float) -> int:
+        x = dt.datetime.now() - dt.timedelta(days=lag)
+        return int(x.timestamp() // 1e5)
+
+    # Build Time Ranges where we're running completion checks, deleting staged
+    # and deleting level 2.
     
+    tc_check_min = ( 
+        min_complete_timecode
+        if min_complete_timecode is not None
+        else dpk.get_first_timecode_on_disk()
+    )
+    tc_check_max = (
+        max_complete_timecode
+        if max_complete_timecode is not None
+        else lag_to_max_timecode(completion_lag)
+    )
+    logger.info(
+        f"Completion check range: {tc_check_min} to {tc_check_max}."
+    )
+
     if delete_staged:
-        do_delete_staged(
-            dpk, staged_deletion_lag, 
-            min_staged_delete_timecode, max_staged_delete_timecode
+        tc_staged_min = (
+            min_staged_delete_timecode
+            if min_staged_delete_timecode is not None
+            else dpk.get_first_timecode_in_staged()
         )
-    
+        tc_staged_max = (
+            max_staged_delete_timecode
+            if max_staged_delete_timecode is not None
+            else lag_to_max_timecode(staged_deletion_lag)
+        )
+        logger.info(
+            f"Staged deletion range: {tc_staged_min} to {tc_staged_max}."
+        )
+    else:
+        tc_staged_min = tc_staged_max = None
+
     if delete_lvl2:
-        do_delete_level2(
-            dpk, lvl2_deletion_lag,  
-            min_lvl2_delete_timecode, max_lvl2_delete_timecode,
+        tc_lvl2_min = (
+            min_lvl2_delete_timecode
+            if min_lvl2_delete_timecode is not None
+            else dpk.get_first_timecode_on_disk()
+        )
+        tc_lvl2_max = (
+            max_lvl2_delete_timecode
+            if max_lvl2_delete_timecode is not None
+            else lag_to_max_timecode(lvl2_deletion_lag)
+        )
+        logger.info(
+            f"Level 2 deletion range: {tc_lvl2_min} to {tc_lvl2_max}."
+        )
+    else:
+        tc_lvl2_min = tc_lvl2_max = None
+
+    # --- Validate that the completion-check range covers all deletions ----
+    if delete_staged and (
+        tc_check_min > tc_staged_min or tc_check_max < tc_staged_max
+    ):
+        raise ValueError(
+            f"Completion check range [{tc_check_min}, {tc_check_max}) "
+            f"does not cover staged deletion range "
+            f"[{tc_staged_min}, {tc_staged_max}). "
+            f"Increase --completion-lag or adjust the completion timecode bounds."
+        )
+    if delete_lvl2 and (
+        tc_check_min > tc_lvl2_min or tc_check_max < tc_lvl2_max
+    ):
+        raise ValueError(
+            f"Completion check range [{tc_check_min}, {tc_check_max}) "
+            f"does not cover level 2 deletion range "
+            f"[{tc_lvl2_min}, {tc_lvl2_max}). "
+            f"Increase --completion-lag or adjust the completion timecode bounds."
         )
 
+    # --- Runtime deadline -------------------------------------------------
+    start_time = dt.datetime.now()
+    deadline = (
+        start_time + dt.timedelta(minutes=max_runtime)
+        if max_runtime is not None
+        else None
+    )
+
+    # --- Accumulate failures per operation --------------------------------
+    complete_failures = []
+    staged_failures = []
+    lvl2_failures = []
+
+    # --- Unified per-timecode loop ----------------------------------------
+    for timecode in range(tc_check_min, tc_check_max):
+
+        if deadline is not None and dt.datetime.now() >= deadline:
+            logger.info(
+                f"Max runtime of {max_runtime} minutes reached at timecode "
+                f"{timecode}; stopping early."
+            )
+            break
+
+        # 1. Completion check — always runs for every timecode in the range.
+        #    make_timecode_complete and verify_timecode_deletable are called
+        #    exactly once per timecode; deletion steps below reuse the result.
+        if dry_run:
+            logger.info(
+                f"DRY RUN: would run make_timecode_complete and "
+                f"verify_timecode_deletable for {timecode}."
+            )
+        else:
+            check = dpk.make_timecode_complete(timecode)
+            log_response(check)
+            if not check[0]:
+                complete_failures.append((timecode, check[1]))
+                continue
+            check = dpk.verify_timecode_deletable(
+                timecode, include_hk=True,
+                verify_with_librarian=False,
+            )
+            log_response(check)
+            if not check[0]:
+                complete_failures.append((timecode, check[1]))
+                continue
+
+        # 2. Staged deletion.
+        if delete_staged and tc_staged_min <= timecode < tc_staged_max:
+            if dry_run:
+                logger.info(
+                    f"DRY RUN: would delete staged data for {timecode}."
+                )
+            else:
+                check = dpk.delete_timecode_staged(timecode, verify_with_librarian=False)
+                log_response(check)
+                if not check[0]:
+                    logger.error(f"Failed to remove staged for {timecode}")
+                    staged_failures.append((timecode, check[1]))
+                    continue
+
+        # 3. Level 2 deletion.
+        if delete_lvl2 and tc_lvl2_min <= timecode < tc_lvl2_max:
+            if dry_run:
+                logger.info(
+                    f"DRY RUN: would delete level 2 data for {timecode}."
+                )
+            else:
+                check = dpk.delete_timecode_level2(timecode, dry_run=False, 
+                    verify_with_librarian=True
+                )
+                log_response(check)
+                dpk.cleanup_level2_folders(timecode)
+                if not check[0]:
+                    logger.error(f"Failed to remove level 2 for {timecode}")
+                    lvl2_failures.append((timecode, check[1]))
+                    continue
+
+    # --- Raise on any failures --------------------------------------------
+    errors = []
+    if complete_failures:
+        errors.append(
+            f"Data Packaging cannot be completed for {complete_failures}"
+        )
+    if staged_failures:
+        errors.append(
+            f"Staged Deletion not finished for {staged_failures}"
+        )
+    if lvl2_failures:
+        errors.append(
+            f"Level 2 Deletion not finished for {lvl2_failures}"
+        )
+    if errors:
+        raise ValueError("\n".join(errors))
 
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Verify that each timecode has been completely "
+            "packaged into Books, then optionally delete the staged Books and "
+            "the level 2 originals. Requires DATAPKG_ENV to be set. Run with "
+            "--dry-run first."
+        )
 
-    parser.add_argument('platform', type=str, help="Platform for Imprinter")
-    parser.add_argument('--check-complete', action="store_true", 
-        help="If passed, run completion check")
-    parser.add_argument('--delete-lvl2', action="store_true", 
-        help="If passed, delete lvl2 raw data")
-    parser.add_argument('--delete-staged', action="store_true", 
-        help="If passed, delete lvl2 staged data")
+    parser.add_argument('platform', type=str,
+        help="Platform for Imprinter (lat, satp1, satp2, satp3). Resolved to "
+        "<configs>/<platform>/imprinter.yaml via DATAPKG_ENV.")
+    parser.add_argument('--delete-lvl2', action="store_true",
+        help="If passed, delete lvl2 raw data. Requires two Librarian copies.")
+    parser.add_argument('--delete-staged', action="store_true",
+        help="If passed, delete the bound Books from the staging area")
 
-    parser.add_argument('--completion-lag', type=float, default=14, 
+    parser.add_argument('--completion-lag', type=float, default=14,
         help="Buffer days before we start failing completion")
     parser.add_argument('--min-complete-timecode', type=int,
         help="Minimum timecode to start completion check. Overrides starting "
@@ -197,8 +321,8 @@ def get_parser(parser=None):
     parser.add_argument('--max-complete-timecode', type=int,
         help="Maximum timecode to stop completion check. Overrides the "
         "completion-lag setting")
-    
-    parser.add_argument('--lvl2-deletion-lag', type=float, default=28, 
+
+    parser.add_argument('--lvl2-deletion-lag', type=float, default=28,
         help="Buffer days before we start deleting level 2 raw data")
     parser.add_argument('--min-lvl2-delete-timecode', type=int,
         help="Minimum timecode to start level 2 raw data deletion. Overrides "
@@ -206,8 +330,8 @@ def get_parser(parser=None):
     parser.add_argument('--max-lvl2-delete-timecode', type=int,
         help="Maximum timecode to stop level 2 raw data deletion. Overrides the"
         " lvl2-deletion-lag setting")
-    
-    parser.add_argument('--staged-deletion-lag', type=float, default=28, 
+
+    parser.add_argument('--staged-deletion-lag', type=float, default=28,
         help="Buffer days before we start deleting level 2 staged data")
     parser.add_argument('--min-staged-delete-timecode', type=int,
         help="Minimum timecode to start level 2 staged data deletion. Overrides"
@@ -215,6 +339,11 @@ def get_parser(parser=None):
     parser.add_argument('--max-staged-delete-timecode', type=int,
         help="Maximum timecode to stop level 2 staged data deletion. Overrides"
         " the lvl2-deletion-lag setting")
+
+    parser.add_argument('--dry-run', action="store_true",
+        help="If passed, log what would be done without making any changes")
+    parser.add_argument('--max-runtime', type=float, default=None,
+        help="Maximum number of minutes to run before stopping the loop early")
 
     return parser
 

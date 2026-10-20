@@ -14,13 +14,14 @@ from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
 from .sim_source import SimSource
 from .h_n import Hn
+from .hwp_wobble import HWPWobbleCorrect
 from .mlmapmaker import MLMapmaker
 from .sim_wiregrid import SimWireGrid
 from .sim_stimulator import SimStimulator
 from .save_books import SaveBooks
 from .load_books import LoadBooks
 from .sim_readout import SimReadout
-from .sim_mumux_crosstalk import SimMuMUXCrosstalk
+from .sim_mumux_crosstalk import SimMuMUXCrosstalk, jbolo_available
 from .splits import Splits
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext

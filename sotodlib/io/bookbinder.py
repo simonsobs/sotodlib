@@ -266,8 +266,8 @@ def validate_mount_field(hk_field: HkDataField, times):
             ## don't change error message without changing imprinter CLI
             err= DroppedMountData(
                 f"{hk_field.addr} dropped "
-                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
-                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                f"{arr[m][np.where(arr[m]>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[m][np.where(arr[m]>MAX_DROPPED_HK)[0]]} "
                 "seconds. Interpolation may be questionable."
             )
         return arr > 2, err
@@ -999,6 +999,13 @@ class BookBinder:
         self.file_idxs = None
         self.meta_files = None
 
+    def close(self):
+        """Completely closes the log file
+        """
+        for handler in self.log.handlers[:]:
+            handler.close()
+            self.log.removeHandler(handler)
+            
     def set_min_max_ctime(self):
         """Function to be run after stream.preprocess is finished to set the ctimes.
         Splitting this out because it is useful for debugging purposes as well
@@ -1343,6 +1350,9 @@ class TimeCodeBinder:
         else:
             self.compress_output = False    
 
+    def close(self):
+        pass 
+        
     def get_metadata(self, telescope=None, tube_config={}):
         return {
             "book_id": self.book.bid,
@@ -1506,7 +1516,7 @@ def get_frame_times(frame, allow_bad_timing=False):
     
     # Look for evidence of counters de-syncing. 
     stat = c2-(c0/480000) - np.round(c2-(c0/480000))
-    counters = ((np.ptp(stat)<0.001)+(np.abs(np.mean(stat))<0.0025))
+    counters = ((np.ptp(stat)<0.001) and (np.abs(np.mean(stat))<0.0025))
 
     ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
 
@@ -1576,7 +1586,10 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
             continue
 
         subpath = os.path.join(hkdir, subdir)
-        files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+        files.extend([
+            os.path.join(subpath, f) for f in os.listdir(subpath)
+            if 'suprsync' not in f
+        ])
 
     files = np.array(sorted(files))
     file_times = np.array(

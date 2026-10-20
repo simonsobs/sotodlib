@@ -11,7 +11,7 @@ maintainers = [
   {name = "Simons Observatory Collaboration"},
   {email = "so_software@simonsobservatory.org"},
 ]
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.10, <3.15"
 dependencies = [
   "numpy",
   "scipy",
@@ -29,8 +29,8 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3.4",
-  "numpy-quaternion", # Required quietly by pixell.coordsys
   "h5py",
+  "mapcat",
 ]
 dynamic=["version"]
 classifiers = [
@@ -42,6 +42,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 
 [project.urls]
@@ -58,11 +59,12 @@ site_pipeline = [
   "pandas",
   "alphashape",
   "slack-sdk",
-  "mapcat",
   "requests",
   "tilemaker",
   "GitPython",
-  "sqlmodel"
+  "sqlmodel",
+  "pyinstrument",
+  "ruptures",
 ]
 tests = [
   "socs",
@@ -74,6 +76,7 @@ so_hardware_plot = "sotodlib.scripts.hardware_plot:main"
 so_hardware_trim = "sotodlib.scripts.hardware_trim:main"
 so_hardware_info = "sotodlib.scripts.hardware_info:main"
 so_batch_control = "sotodlib.scripts.so_batch_control:main"
+so_data_export = "sotodlib.scripts.so_data_export:main"
 so-metadata = "sotodlib.core.metadata.cli:main"
 so-site-pipeline = "sotodlib.site_pipeline.cli:main"
 so-data-package = "sotodlib.io.imprinter_cli:main"
