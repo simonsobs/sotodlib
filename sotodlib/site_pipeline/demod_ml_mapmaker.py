@@ -17,6 +17,7 @@ import so3g
 from pixell import utils, enmap, mpi, fft, bunch, wcsutils
 from sotodlib.core import Context, LabelAxis, AxisManager # type: ignore
 from sotodlib.core.metadata.loader import LoaderError # type: ignore
+from sotodlib.preprocess.pcore import Pipeline
 from sotodlib import mapmaking, preprocess # type: ignore
 
 from scipy.signal import welch
@@ -71,6 +72,9 @@ parser.add_argument("--extra_cuts", action="store_true",  default=False, help="A
     "2) Cutting detectors with unreasonable sensitivity values, "
     "3) Cutting detectors with extreme signal values, "
     "4) Cutting observations with less than 10 detectors after these cuts.")
+parser.add_argument('--sim_signal', action='store_true', default=False, help='Generate simulated signal data from a CMB map. To use, sim_signal_map must also be provided')
+parser.add_argument('--sim_signal_map', type=str, default=None, help='Simulate TOD from this input map path. Should be a pixell enmap with TQU components. Required if --sim_signal is True')
+parser.add_argument('--sim_signal_only', action='store_true', default=False, help='If true, will inject a signal only simulation. Default is False (adds signal to the real noise data). Only applicableif --sim_signal is True')
 args = parser.parse_args()
 
 ####### Multi-pass setup
@@ -118,6 +122,11 @@ def cutdup(cuts, nmul):
     for i in range(nmul-1):
         res = res+cuts
     return res
+
+def drop_fields_if_present(axman, field_paths):
+    for field_path in field_paths:
+        if field_path in axman:
+            axman.move(field_path, None)
 
 def resample_rfft(ftod, n):
     """Given the last-axis fourier transform ftod of some array tod,
@@ -418,6 +427,33 @@ for ipass, passinfo in enumerate(passes):
                     obs,_ = preprocess.load_and_preprocess(obs_id, configs=preproc_init, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
                 else:
                     obs = preprocess.multilayer_load_and_preprocess(obs_id, configs_init=preproc_init, configs_proc=preproc_proc, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
+                if args.sim_signal:
+                    if len(preprocess_config)==1:
+                        sim_pipe = Pipeline(preproc_init["sim_pipe"])
+                        sim_pipe_demod = Pipeline(preproc_init["sim_pipe_demod"])
+                    else:
+                        sim_pipe = Pipeline(preproc_proc["sim_pipe"])
+                        sim_pipe_demod = Pipeline(preproc_proc["sim_pipe_demod"])
+
+                    #generate simulated signal and process it
+                    L.info("Generating simulated signal from map %s" % args.sim_signal_map)
+                    map_to_inject = enmap.read_map(args.sim_signal_map)
+                    mapmaking.tod_from_pixell_map(obs, map_to_inject, site=SITE, weather='toco', modulated=True, wrap=True, apply_wobble=True, add_to_tod=False)
+                    #sim preprocessing
+                    sim_pipe.run(obs)
+                    if args.add_to_tod:
+                        L.info("Adding simulated signal to existing TOD signal")
+                        obs['signal'] += obs['signal_sim']
+                    else:
+                        L.info("Replacing existing TOD signal with pure simulated signal")
+                        obs.move('signal', None)
+                        obs.wrap('signal', obs['signal_sim'], [(0,'dets'),(1,'samps')])
+
+                    #demodulate the simulated or simulated+real signal TODs
+                    for fld in ['signal_sim','dsT','demodQ','demodU']: #remove previously demodulated data
+                        if fld in obs._assignments:
+                            obs.move(fld, None)
+                    sim_pipe_demod.run(obs)      
             
             # Optionally restrict to maximum number of detectors. This is mainly
             # useful for doing fast debug runs. Before doing this we make sure to
