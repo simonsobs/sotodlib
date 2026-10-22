@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--query", type=str)
 parser.add_argument("--area", type=str)
 parser.add_argument("--odir", type=str)
-parser.add_argument("prefix", nargs="?")
+parser.add_argument("--prefix", nargs="?")
 parser.add_argument(      "--comps",   type=str, default="QU")
 parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. Can include list separated\
                     by commas, e.g. 'ws0,ws1,ws3'")
@@ -441,7 +441,7 @@ for ipass, passinfo in enumerate(passes):
                     mapmaking.tod_from_pixell_map(obs, map_to_inject, site=SITE, weather='toco', modulated=True, wrap=True, apply_wobble=True, add_to_tod=False)
                     #sim preprocessing
                     sim_pipe.run(obs)
-                    if args.add_to_tod:
+                    if not args.sim_signal_only:
                         L.info("Adding simulated signal to existing TOD signal")
                         obs['signal'] += obs['signal_sim']
                     else:

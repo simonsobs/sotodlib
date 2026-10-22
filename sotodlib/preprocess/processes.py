@@ -1094,6 +1094,7 @@ class SubtractHWPSS(_Preprocess):
       - name: "subtract_hwpss"
         hwpss_stats: "hwpss_stats"
         process:
+          signal: "signal"
           subtract_name: "hwpss_remove"
 
     .. autofunction:: sotodlib.hwp.hwp.subtract_hwpss
@@ -1123,6 +1124,7 @@ class SubtractHWPSS(_Preprocess):
             aman.wrap('hwpss_model', template, [(0, 'dets'), (1, 'samps')])
             hwp.subtract_hwpss(
                 aman,
+                signal = self.process_cfgs["signal"],
                 subtract_name = self.process_cfgs["subtract_name"]
                 )
 
