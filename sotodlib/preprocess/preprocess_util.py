@@ -1641,7 +1641,7 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
 
         if db_manager is not None:
             # Use the batch manager
-            db_manager.add_entry(out_dict['db_data'], h5_path, relpace=overwrite)
+            db_manager.add_entry(out_dict['db_data'], h5_path, replace=overwrite)
         else:
             # Use the original approach for backward compatibility
             db = get_preprocess_db(configs, group_by, logger)
