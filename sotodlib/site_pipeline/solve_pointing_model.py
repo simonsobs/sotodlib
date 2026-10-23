@@ -359,8 +359,13 @@ def _init_fit_params(config, epochs):
     pm_version = config.get("pm_version")
     initial_params = config.get("initial_params", {})
     bounds_config = config.get("param_bounds", {})
-    fixed_params = config.get("fixed_params",[])
+    fixed_params = config.get("fixed_params",None)
+    free_params = config.get("free_params",None)
     float_ots = config.get("float_ots", False)
+
+    if fixed_params is not None and free_params is not None:
+        raise ValueError("Cannot specify both 'fixed_params' and 'free_params' in the configuration.")
+
     init_params = pm.param_defaults[pm_version]
     init_params.update(initial_params)
 
@@ -404,11 +409,16 @@ def _init_fit_params(config, epochs):
             raise ValueError(f"Epoch {epoch['name']} somehow has the wrong number of parameters!")
         par_count[pmsk] += 1
         epoch["params"] = par_list[pmsk]
-    fixed_params += par_list[par_count == 0].tolist()
+    #fixed_params += par_list[par_count == 0].tolist()
+    unused_params = par_list[par_count == 0].tolist()
 
     # Initialize lmfit Parameter object
     fit_params = Parameters()
-    for p in init_params.keys():
+
+    use_free_params = free_params is not None
+    default_vary = False if use_free_params else True
+    
+    for p, val in init_params.items():
         if p not in param_expr.keys():
             p_min, p_max = -np.inf, np.inf #Default limits
             for bound_key in sorted(bounds_config.keys(), key=len, reverse=True):
@@ -417,13 +427,15 @@ def _init_fit_params(config, epochs):
                     p_min = float(p_min) if isinstance(p_min, str) else p_min
                     p_max = float(p_max) if isinstance(p_max, str) else p_max
                     break
-            fit_params.add(p, value=init_params[p], vary=True, min=p_min, max=p_max)
-        elif p in param_expr.keys():
+            should_vary = (p in free_params) if use_free_params else default_vary
+            fit_params.add(p, value=val, vary=should_vary, min=p_min, max=p_max)
+        else:
             fit_params.add(p, expr = param_expr[p])
-    # Turn off various parameters depending on platform
-    for fix in fixed_params:
+
+    fixed_list = (fixed_params if fixed_params is not None else []) + unused_params
+    for fix in fixed_list:
         if fix in fit_params:
-            fit_params[fix].set(vary=False)
+            fit_params[fix].set(vary=False)     
 
     return fit_params, epochs
 
@@ -478,7 +490,7 @@ def objective_model_func_lmfit_joint(
     params, pm_version, epochs, xieta_model, fit_method, weights=True
 ):
     params = params.valuesdict()
-    if fit_method == "leastsq" or fit_method == "least_squares":
+    if fit_method == "leastsq" or fit_method == "least_squares" or fit_method == "nelder":
         all_residuals=[]
         for epoch in epochs:
             epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
@@ -869,6 +881,7 @@ def main(config_path: str):
         args=(pm_version, epochs, xieta_model, fit_method, use_weights),
         **config.get("fit_options", {}),
     )
+    #params, pm_version, epochs, xieta_model, fit_method, weights=True
     logger.info("Ran 1st Minimization")
 
     test_params = _round_params(model_solved_params.params.valuesdict(), 8)
@@ -1023,7 +1036,7 @@ def main(config_path: str):
             model_solved_params.params, #Output from first fit as starting parameters
             method=second_fit_method,
             nan_policy="omit",
-            args=(pm_version, epochs, xieta_model, fit_method, use_weights),
+            args=(pm_version, epochs, xieta_model, second_fit_method, use_weights),
             **config.get("fit_options", {})
         )
 
