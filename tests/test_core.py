@@ -3,6 +3,7 @@ import tempfile
 import os
 
 import numpy as np
+import h5py
 import astropy.units as u
 from sotodlib import core
 import sotodlib.core.axisman_util as amutil
@@ -663,6 +664,21 @@ class TestAxisManager(unittest.TestCase):
             if subkeys:
                 self.assertCountEqual(target['subaman']._fields.keys(),
                                       subkeys)
+
+
+    def test_501_io_open_file_group(self):
+        # Test io with open h5py.File / Group.
+        root = core.AxisManager(core.LabelAxis('dets', ['det0', 'det1']))
+        sub = core.AxisManager(core.LabelAxis('dets', ['det2']))
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            with h5py.File(filename, 'w') as fout:
+                root.save(fout)
+                sub.save(fout, 'sub')
+            with h5py.File(filename, 'r') as fin:
+                self.assertEqual(core.AxisManager.load(fin).dets, root.dets)
+                self.assertEqual(core.AxisManager.load(fin, 'sub').dets, sub.dets)
+
 
     def test_900_everything(self):
         tod = core.AxisManager(
