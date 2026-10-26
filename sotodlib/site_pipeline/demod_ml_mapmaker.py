@@ -52,7 +52,6 @@ parser.add_argument("-v", "--verbose", action="count", default=1)
 parser.add_argument("-q", "--quiet",   action="count", default=0)
 parser.add_argument("-@", "--center-at", type=str, default=None)
 parser.add_argument("-w", "--window",  type=float, default=0.0)
-parser.add_argument("-i", "--inject",  type=str,   default=None)
 parser.add_argument(      "--soft-pass1",  action="store_true",  default=False, help="When enabled, the first pass will use the uncorrelated noise model regardless of the nmat argument, to preserve the sky signal.")
 parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats", help="Directory to save/load noise models")
 parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to build the noise matrix. Options:\
@@ -248,23 +247,44 @@ def cut_overly_cut_dets(obs, excess_cut_threshold=0.2, glitch_flags: str = "flag
     valid_dets = excess_cut < excess_cut_threshold
     return obs.dets.vals[valid_dets]
 
-def estimate_dsens(obs, wband=[0.5, 1.8]):
+def estimate_dsens(obs, wband=[0.5, 1.8],frel=1.9):
     """Estimate detector sensitivty in uK.rt(s) from PSD. Assuming input signal units is K.
     This is expensive in general, but for downsampled SAT data not so much."""
-    nperseg = obs.samps.count // 16
-    dt = np.median(np.diff(obs.timestamps))
+
+    #first downsample demodQ, then take the PSD to estimate the wn level in uK/rt(Hz)
+    insamp  = obs.samps.count
+    duration= obs.timestamps[-1]-obs.timestamps[0]
+    srate   = insamp/duration
+    ifmax   = srate/2
+    fhwp    = obs.obs_info.hwp_freq_mean
+    ofmax   = frel*fhwp
+    down    = utils.nint(ifmax/ofmax)
+    obs_down= mapmaking.downsample_obs(obs, down, skip_signal=True, sparse_handling="skip")
+    onsamp = obs_down.samps.count
+
+    ftod    = fft.rfft(obs.demodQ)
+    ftod    = resample_rfft(ftod, onsamp)
+    # Fix fourier units to account for the resampling.
+    ftod   *= 1/insamp
+    tod_down = fft.irfft(ftod)
+
+    nperseg = onsamp // 16
+    dt = np.median(np.diff(obs_down.timestamps))
     fs = 1/dt
-    signal_muK = obs.signal * 1e6 # convert from K to uK
+    signal_muK = tod_down * 1e6 # convert from K to uK
     freqs, psd = welch(signal_muK, fs=fs, nperseg=nperseg, axis=-1)
     # Select white noise band
     valid_bins = (freqs > wband[0]) & (freqs < wband[1])   
     # White noise level in uK * sqrt(s)
     dsens = np.sqrt(np.median(psd[:, valid_bins], axis=-1))
+    del obs_down
+    del tod_down
+    del signal_muK
     return dsens
 
-def cut_bad_dsens(obs, wband = [0.5, 1.8], dsens_low=150, dsens_high=4000):
+def cut_bad_dsens(obs, wband = [0.5, 1.8], frel=1.9, dsens_low=150, dsens_high=4000):
     """Cut detectors with unreasonable sensitivity values."""
-    dsens = estimate_dsens(obs, wband=wband)
+    dsens = estimate_dsens(obs, wband=wband, frel=frel)
     valid_dets = (dsens > dsens_low) & (dsens < dsens_high)
     return obs.dets.vals[valid_dets]
 
@@ -333,9 +353,6 @@ if len(sub_ids) == 0:
     mpi.Finalize()
     sys.exit(1)
 L.info("Reading %d tods" % (len(sub_ids)))
-
-if args.inject:
-    map_to_inject = enmap.read_map(args.inject).astype(dtype_map)
 
 # Initializing multipass configuration
 passes = setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
@@ -421,12 +438,32 @@ for ipass, passinfo in enumerate(passes):
             #     continue
             # Read and preprocess the data
             with mapmaking.mark("read_and_preprocess_obs %s" % name):
-                if len(preprocess_config)==1:
-                    # NOTE: Passing with meta fails for now, so we are unable to do direct restrictions on meta hence the commented code above
-                    # We instead restrict the obs after loading and preprocessing.
-                    obs,_ = preprocess.load_and_preprocess(obs_id, configs=preproc_init, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
-                else:
-                    obs = preprocess.multilayer_load_and_preprocess(obs_id, configs_init=preproc_init, configs_proc=preproc_proc, dets={"dets:wafer_slot":wafer, "wafer.bandpass": band})
+                obs, _ = preprocess.load_and_preprocess(obs_id, configs=preproc_init, context=context, dets={'wafer_slot': wafer, 'wafer.bandpass': band})
+                # obs = context.get_obs(obs_id, dets={'wafer.type': 'OPTC', 'wafer_slot': wafer, 'wafer.bandpass': band, })
+                # pipe_init = Pipeline(preproc_init["process_pipe"])
+                # proc_obs, _ = pipe_init.run(obs)
+                # obs.wrap('preprocess', proc_obs)
+
+                # Extra quality cuts to catch any anomalies that survived the preprocessing.
+                if args.extra_cuts:
+                    # - Get rid of overly cut dets
+                    good_dets = cut_overly_cut_dets(obs, excess_cut_threshold=0.2)
+                    obs.restrict("dets", good_dets)
+                    # - Get rid of unreasonable sensitivity dets
+                    good_dets = cut_bad_dsens(obs, wband=[0.5, 1.8], dsens_low=150, frel=1.9, dsens_high=4000)
+                    obs.restrict("dets", good_dets)
+                    if obs.dets.count == 0:
+                        raise ValueError("Unrealistic sensitivity.")
+                    # - Get rid of dets with extreme signal values (assuming signal units are K)
+                    sig_max = np.max(np.abs(np.diff(obs.demodQ,axis=1)),1)
+                    good_dets = sig_max < 100
+                    obs.restrict("dets", obs.dets.vals[good_dets])
+                    if obs.dets.count == 0:
+                        raise ValueError("Extreme signal values.")
+                    # - Get rid of observations with ndets<100 after these extra cuts
+                    if obs.dets.count < 100 * ncomp:
+                        raise ValueError("ndet < 100 after cuts.")
+                    
                 if args.sim_signal:
                     if len(preprocess_config)==1:
                         sim_pipe = Pipeline(preproc_init["sim_pipe"])
@@ -441,6 +478,7 @@ for ipass, passinfo in enumerate(passes):
                     mapmaking.tod_from_pixell_map(obs, map_to_inject, site=SITE, weather='toco', modulated=True, wrap=True, apply_wobble=True, add_to_tod=False)
                     #sim preprocessing
                     sim_pipe.run(obs)
+
                     if not args.sim_signal_only:
                         L.info("Adding simulated signal to existing TOD signal")
                         obs['signal'] += obs['signal_sim']
@@ -483,26 +521,6 @@ for ipass, passinfo in enumerate(passes):
             obs.wrap("site",    np.full(1, SITE))
             
             obs = prepare_demod_data(obs, comps=comps, frel=1.9)
-            
-            # Extra quality cuts to catch any anomalies that survived the preprocessing.
-            if args.extra_cuts:
-                # - Get rid of overly cut dets
-                good_dets = cut_overly_cut_dets(obs, excess_cut_threshold=0.2)
-                obs.restrict("dets", good_dets)
-                # - Get rid of unreasonable sensitivity dets
-                good_dets = cut_bad_dsens(obs, wband=[0.5, 1.8], dsens_low=150, dsens_high=4000)
-                obs.restrict("dets", good_dets)
-                if obs.dets.count == 0:
-                    raise ValueError("Unrealistic sensitivity.")
-                # - Get rid of dets with extreme signal values (assuming signal units are K)
-                sig_max = np.max(np.abs(np.diff(obs.signal,axis=1)),1)
-                good_dets = sig_max < 100
-                obs.restrict("dets", obs.dets.vals[good_dets])
-                if obs.dets.count == 0:
-                    raise ValueError("Extreme signal values.")
-                # - Get rid of observations with ndets<100 after these extra cuts
-                if obs.dets.count < 100 * ncomp:
-                    raise ValueError("ndet < 100 after cuts.")
 
             # Maybe load precomputed noise model.
             nmat_file = nmat_dir + "/nmat_%s.hdf" % name
@@ -534,7 +552,7 @@ for ipass, passinfo in enumerate(passes):
                 print("Writing noise model %s" % nmat_file)
                 utils.mkdir(nmat_dir)
                 mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-        except (LoaderError,IndexError,ValueError) as e:
+        except (LoaderError,IndexError,ValueError,RuntimeError) as e:
             L.debug("Skipped %s (%s)" % (name, str(e)))
             continue
 
