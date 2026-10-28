@@ -787,10 +787,15 @@ def main(config_path: str):
             fpt_timestamp = epoch["fp_template_timestamp"]
             test_params, epochs = _init_fit_params(config, epochs)
             logger.info("Using these parameters to test pointing: ")
+            param_aman = core.AxisManager()
             for p in test_params:
+                param_aman.wrap(p, test_params[p].value)
                 logger.info(f"{p}: {test_params[p].value}")
-            #logger.info(test_params)
+            param_aman.wrap("version", pm_version)
+        
             full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
+            epoch["solver_aman"] = full_aman
+            epoch["solver_aman"].wrap("pointing_model", param_aman)
             logger.info(f"for epoch {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
@@ -806,7 +811,34 @@ def main(config_path: str):
             plotter.plot_full_deltas_across_focalplane()
             plotter.plot_full_histogram()
             plotter.plot_full_unmodeled_residuals()
-        logger.info("done")
+        
+        if config.get("save_output"):
+            # Save .h5 and ManifestDb
+            h5_rel = "pointing_model_data.h5"
+            h5_filename = os.path.join(save_dir, h5_rel)
+            dbfile = "db.sqlite"
+            db = _create_db(dbfile, save_dir)
+            for epoch in epochs:
+                solver_aman = epoch["solver_aman"]
+                # Remove OT float parameters
+                if config.get("float_ots", False):
+                    ot_float_aman = core.AxisManager()
+                    for ot in np.unique(solver_aman.ot_list):
+                        for par in [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]:
+                            if par not in solver_aman.pointing_model._assignments:
+                                continue
+                            ot_float_aman.wrap(par, solver_aman.pointing_model[par])
+                            solver_aman.pointing_model.move(par, None)
+                    solver_aman.wrap("ot_float_aman", ot_float_aman)
+                epoch["solver_aman"] = solver_aman
+                epoch["solver_aman"].save(h5_filename, group=epoch["name"], overwrite=True)
+                db.add_entry(
+                    {"obs:timestamp": (epoch["begin_timerange"], epoch["end_timerange"]), "dataset": f"{epoch['name']}/pointing_model"},
+                    filename=h5_rel,
+                    replace=True,
+                )
+                logger.info("saved output")
+        logger.info("done with testing parameters")
         return
         
     logger.info(
@@ -918,7 +950,6 @@ def main(config_path: str):
                             str(model_solved_params.message))
         model_fit_stats_aman.wrap('fit_report', fitreport_aman)
 
-        #if config.get("fit_method", "leastsq") == "leastsq":
         mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
         corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
         corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
@@ -1099,6 +1130,7 @@ def main(config_path: str):
             modelfit_aman = core.AxisManager()
             modelfit_aman.wrap("xi", modeled_fits[0], overwrite=True)
             modelfit_aman.wrap("eta", modeled_fits[1], overwrite=True)
+            epoch["solver_aman"].move("modeled_fits", "modeled_fits_i1")
             epoch["solver_aman"].wrap("modeled_fits", modelfit_aman, overwrite=True)
             epoch["solver_aman"].move("fit_residuals", "fit_residuals_i1") 
             epoch["solver_aman"].wrap("fit_residuals", fit_residuals_i2, overwrite=True)
