@@ -15,11 +15,10 @@ Pipeline (see the ``__main__`` block / :func:`main`):
 
 import sys
 import os
-import glob
+import argparse
 import traceback
 import datetime as dtime
-
-date = dtime.datetime.now()
+from typing import Optional
 
 import yaml
 import numpy as np
@@ -31,13 +30,9 @@ from tqdm import tqdm
 
 from sotodlib import core, tod_ops
 from sotodlib.io import hkdb
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
-sys.path.append("/so/home/jblloyd/so_analysis/so_analysis/stylesheets/")
-import general_stylesheet
-
-general_stylesheet.apply_style()
-colors = general_stylesheet.COLORS
-
+date = dtime.datetime.now()
 
 def exe_p2p_ana_load(ctx, iobs):
     ws = "ws0"
@@ -78,7 +73,7 @@ def load_az_temp(aman, platform="satp1", hpc="tiger"):
             f"/so/home/jblloyd/so_analysis/so_analysis/configs/{platform}_hk_site.yaml"
         )
     else:
-        raise ValueError("Invalid HPC argument, selecte either 'tiger' or 'site'.")
+        raise ValueError("Invalid HPC argument, select either 'tiger' or 'site'.")
 
     cfg = hkdb.HkConfig.from_yaml(hkcfg_file)
     if platform == "satp1":
@@ -1424,7 +1419,7 @@ def ensure_dir(path):
     return path
 
 
-def parse_args(argv=None):
+def get_parser(parser=None):
     """Parse command-line arguments for the FPA metrics pipeline.
 
     Args:
@@ -1434,24 +1429,16 @@ def parse_args(argv=None):
     Returns:
         argparse.Namespace: Parsed arguments.
     """
-    import argparse
-
-    ys = date.year
-    ms = date.month
-    ds = 1
-    ye = date.year
-    me = date.month
-    de = date.day
-
-    parser = argparse.ArgumentParser(
-        description="Compute and flag FPA temperature stability metrics over a date range."
-    )
-    parser.add_argument("--ys", type=int, default=ys, help="Start year.")
-    parser.add_argument("--ms", type=int, default=ms, help="Start month.")
-    parser.add_argument("--ds", type=int, default=ds, help="Start day.")
-    parser.add_argument("--ye", type=int, default=ye, help="End year.")
-    parser.add_argument("--me", type=int, default=me, help="End month.")
-    parser.add_argument("--de", type=int, default=de, help="End day.")
+    if parser is None:
+        parser = argparse.ArgumentParser()
+        
+    parser.add_argument("config", help="Configuration yaml file.")
+    parser.add_argument("--ys", type=int, default=date.year, help="Start year.")
+    parser.add_argument("--ms", type=int, default=date.month, help="Start month.")
+    parser.add_argument("--ds", type=int, default=1, help="Start day.")
+    parser.add_argument("--ye", type=int, default=date.year, help="End year.")
+    parser.add_argument("--me", type=int, default=date.month, help="End month.")
+    parser.add_argument("--de", type=int, default=date.day, help="End day.")
     parser.add_argument(
         "-t", "--tag", type=str, default=None, help="Observation tag filter."
     )
@@ -1469,46 +1456,54 @@ def parse_args(argv=None):
         choices=sorted(PLATFORM_SETTINGS),
         help="Telescope platform.",
     )
-    return parser.parse_args(argv)
+    return parser
 
 
-def main(argv=None):
+def main(
+    config: str, 
+    ys: Optional[int] = date.year,
+    ms: Optional[int] = date.month,
+    ds: Optional[int] = 1,
+    ye: Optional[int] = date.year,
+    me: Optional[int] = date.month,
+    de: Optional[int] = date.day,
+    tag: Optional[str] = None,
+    scan_type: Optional[str] = "cmb",
+    platform: Optional[str] = "satp1",
+):
     """Run the full FPA metrics pipeline: bin, compute metrics, flag, and plot.
 
     Args:
         argv (list[str], optional): Argument list to parse instead of
             ``sys.argv`` (useful for testing). Defaults to None.
     """
-    args = parse_args(argv)
-    config = "/so/home/jblloyd/so_analysis/so_analysis/configs/site_config_general.yaml"
     configs = yaml.safe_load(open(config, "r"))
 
-    platform = args.platform
     settings = PLATFORM_SETTINGS[platform]
     ctx = core.Context(configs["contexts"][settings["ctx_key"]])
     setpoint = settings["setpoint"]
 
     pkl_parent_dir = f"/so/home/jblloyd/output/fpa_metrics/{platform}/az_pkls"
     metric_parent_dir = f"/so/home/jblloyd/output/fpa_metrics/{platform}/metric_pkls"
-    date_subdir = f"{args.ys}/{args.ms}/{args.ds}-{args.de}/{args.scan_type}"
+    date_subdir = f"{ys}/{ms}/{ds}-{de}/{scan_type}"
 
     pkl_save_p = ensure_dir(os.path.join(pkl_parent_dir, date_subdir))
     metric_save_dir = ensure_dir(os.path.join(metric_parent_dir, date_subdir))
-    metric_save_p = os.path.join(metric_save_dir, f"{args.ye}_{args.me}_{args.de}.pkl")
+    metric_save_p = os.path.join(metric_save_dir, f"{ye}_{me}_{de}.pkl")
 
     print("trying to save pkls")
     # Save pkl files
     dfm, df = dataframe_maker(
         ctx,
-        ys=args.ys,
-        ms=args.ms,
-        ds=args.ds,
-        ye=args.ye,
-        me=args.me,
-        de=args.de,
+        ys=ys,
+        ms=ms,
+        ds=ds,
+        ye=ye,
+        me=me,
+        de=de,
         platform=platform,
-        tag=args.tag,
-        scan_type=args.scan_type,
+        tag=tag,
+        scan_type=scan_type,
     )
     print("Made dataframes")
 
@@ -1517,7 +1512,7 @@ def main(argv=None):
     if not df_ids:
         print(
             f"No observations found for {platform} between "
-            f"{args.ys}/{args.ms}/{args.ds} and {args.ye}/{args.me}/{args.de}."
+            f"{ys}/{ms}/{ds} and {ye}/{me}/{de}."
         )
     print("trying to compute metrics")
     metric_dict = get_fpa_metrics(df=df, setpoint=setpoint)
@@ -1527,23 +1522,23 @@ def main(argv=None):
     cnt_ret = metric_analyzer(metric_dict, save_path=None, platform=platform)
 
     ret_save_p = os.path.join(
-        metric_save_dir, f"{args.ye}_{args.me}_{args.de}_cnts.pkl"
+        metric_save_dir, f"{ye}_{me}_{de}_cnts.pkl"
     )
     save_pkl(cnt_ret, ret_save_p)
 
     if df_ids:
         print("trying to save cirlce plot")
         circle_plt_save_p = os.path.join(
-            metric_save_dir, f"{args.ye}_{args.me}_{args.de}_circle_plot.png"
+            metric_save_dir, f"{ye}_{me}_{de}_circle_plot.png"
         )
         az_circle_plotter(
             cnt_dict=cnt_ret,
             dfm=dfm,
             df=df,
-            ms=args.ms,
-            ds=args.ds,
-            me=args.me,
-            de=args.de,
+            ms=ms,
+            ds=ds,
+            me=me,
+            de=de,
             platform=platform,
             save_path=circle_plt_save_p,
             show=False,
@@ -1554,4 +1549,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    main_launcher(main, get_parser)
