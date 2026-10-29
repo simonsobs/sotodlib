@@ -461,6 +461,79 @@ class TestAxisManager(unittest.TestCase):
         rman.test += 5
         self.assertNotEqual( aman.test[0,0], rman.test[0,0])
 
+    def test_403b_restrict_index_copies(self):
+        # Not-in-place restriction by labels or a mask must return correct,
+        # independent copies of top-level arrays.
+        dets = ['det0', 'det1', 'det2']
+        orig = np.arange(30.).reshape(3, 10)
+        for sel, idx in [(['det2', 'det0'], [2, 0]),
+                         (np.array([True, False, True]), [0, 2])]:
+            aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                    core.OffsetAxis('samps', 10))
+            aman.wrap('x', orig.copy(), [(0, 'dets'), (1, 'samps')])
+            rman = aman.restrict('dets', sel, in_place=False)
+            np.testing.assert_array_equal(rman.x, orig[idx])
+            self.assertFalse(np.shares_memory(rman.x, aman.x))
+            rman.x[...] = -1.
+            np.testing.assert_array_equal(aman.x, orig)
+
+    def test_404_restrict_children_independent(self):
+        # Restricting a parent must leave the original child AxisManagers
+        # untouched, and the restricted children must not share data with
+        # them, for both index (dets) and slice (samps) restrictions.
+        dets = ['det0', 'det1', 'det2']
+        n = 100
+        for axis, sel in [('dets', ['det2', 'det0']), ('samps', (10, 60))]:
+            for in_place in [True, False]:
+                aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                        core.OffsetAxis('samps', n))
+                child = core.AxisManager(aman.dets, aman.samps)
+                child.wrap_new('ds', ('dets', 'samps'))[:] = 1.
+                child.wrap_new('d', ('dets',))[:] = 1.
+                child.wrap_new('s', ('samps',))[:] = 1.
+                child.wrap('flags', core.FlagManager.for_tod(child))
+                child.flags.wrap_dets('f', np.array([True, False, True]))
+                aman.wrap('child', child)
+                out = aman.restrict(axis, sel, in_place=in_place)
+                self.assertIsNot(out.child, child)
+                self.assertIsInstance(out.child.flags, core.FlagManager)
+                self.assertEqual(child.ds.shape, (3, n))
+                for k in ['ds', 'd', 's']:
+                    out.child[k][...] = 7.
+                    self.assertTrue(np.all(child[k] == 1.))
+                if axis == 'dets':
+                    np.testing.assert_array_equal(
+                        out.child.flags.f.mask()[:, 0], [True, True])
+
+    def test_405_restrict_identity(self):
+        # An in-place restriction that keeps every item in order is a no-op.
+        dets = ['det0', 'det1', 'det2']
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', 100))
+        aman.wrap_new('x', ('dets', 'samps'))
+        aman.wrap('child', core.AxisManager(aman.dets))
+        x, child = aman.x, aman.child
+        self.assertIs(aman.restrict('dets', dets), aman)
+        self.assertIs(aman.x, x)
+        self.assertIs(aman.child, child)
+        # A reordering is not an identity.
+        aman.restrict('dets', dets[::-1])
+        self.assertEqual(list(aman.dets.vals), dets[::-1])
+        # Not in place always returns an independent copy.
+        rman = aman.restrict('dets', aman.dets.vals, in_place=False)
+        self.assertIsNot(rman.x, aman.x)
+        self.assertFalse(np.shares_memory(rman.x, aman.x))
+
+    def test_406_restrict_copy_assignments(self):
+        # A not-in-place restriction must not share assignment lists with
+        # the source, so that axis removal on one does not affect the other.
+        aman = core.AxisManager(core.LabelAxis('dets', ['a', 'b']),
+                                core.OffsetAxis('samps', 10))
+        aman.wrap_new('x', ('dets', 'samps'))
+        rman = aman.restrict('dets', ['a'], in_place=False)
+        del rman['samps']
+        self.assertEqual(aman._assignments['x'], ['dets', 'samps'])
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
