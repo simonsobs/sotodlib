@@ -236,31 +236,29 @@ Module containing functions for FFTs and related operations.
 tod_ops.glitch_ml
 =================
 
-ML-based glitch classification pipeline: snippet extraction, summary
-statistics, and random-forest classification of glitch events into
-physical categories (point sources, cosmic rays, electronic glitches,
-etc.).
+Machine-learning classification of glitches, based on Nerval et al. (2025;
+arXiv:2503.10798).  Glitches are grouped into *snippets* (ranges of
+samples in which several detectors are flagged simultaneously, together
+with the detectors flagged), whose summary statistics are used to classify
+them with a random forest into physical categories (point sources, cosmic
+rays, electronic glitches, etc.).
 
-The typical workflow is:
+The typical workflow is to assemble the snippets and classify them with a
+trained random forest, via
+:func:`~sotodlib.tod_ops.glitch_ml.get_snippets_and_classify`.
 
-1. Detect glitches and extract snippets with
-   :func:`~sotodlib.tod_ops.glitch_ml.get_snippets`.
-2. Compute summary statistics with
-   :func:`~sotodlib.tod_ops.glitch_ml.compute_summary_stats`.
-3. Classify the snippets using a trained forest via
-   :func:`~sotodlib.tod_ops.glitch_ml.classify_snippets`
-   (or train your own with :func:`~sotodlib.tod_ops.glitch_ml.train_forest`).
+To train your own forest, compute the statistics of labelled snippets
+with :func:`~sotodlib.tod_ops.glitch_ml.compute_summary_stats` and pass
+them to :func:`~sotodlib.tod_ops.glitch_ml.train_forest`.
 
 The module can also be used through the preprocessing pipeline via the
 ``classify_glitches`` step
 (see :class:`sotodlib.preprocess.processes.GlitchClassification`).
 
-New summary statistics can be added by subclassing
-:class:`~sotodlib.tod_ops.glitch_ml.GlitchStat` and decorating with
-:func:`~sotodlib.tod_ops.glitch_ml.register_stat`.  The
-:attr:`~sotodlib.tod_ops.glitch_ml.GlitchStat.requires` attribute declares
-which inputs each statistic needs; callers pass only the relevant data
-automatically.
+New summary statistics can be added by decorating a function with
+:func:`~sotodlib.tod_ops.glitch_ml.register_stat`.  The names of the
+function's parameters declare which inputs the statistic needs; it is
+passed only those.
 
 .. automodule:: sotodlib.tod_ops.glitch_ml
    :members:

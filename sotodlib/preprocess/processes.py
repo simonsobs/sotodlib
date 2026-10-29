@@ -3169,26 +3169,43 @@ class Move(_Preprocess):
 
 
 class GlitchClassification(_Preprocess):
-    """Classify glitches using a random forest.
+    """Classify glitches with a trained random forest.
 
-    Returns the probability of being each type of glitch:
+    Groups the glitch flags into snippets, i.e., ranges of samples in which
+    at least ``n_thres`` detectors are flagged simultaneously, together
+    with the detectors flagged in each, and classifies each snippet from
+    its summary statistics as one of:
 
     - ``0``: Point Sources
     - ``1``: Point Sources + Other
     - ``2``: Cosmic Rays
     - ``3``: Electronic Glitches
 
-    Saves results in ``proc_aman`` under the ``glitch_snippets`` field.
+    The glitch flags are read from ``proc_aman`` at the path given by the
+    ``flags`` option (default ``"glitches.glitch_flags"``).
 
     Takes the following ``calc`` config options:
 
     n_thres : int
-        Minimum number of detectors flagged as glitch simultaneously to
-        be considered for classification. Default is 2.
+        Minimum number of detectors flagged simultaneously to form a
+        snippet.  Default is 2.
     n_buffer : int
-        Number of samples to buffer around the glitch. Default is 5.
+        Number of samples by which to pad each snippet on either side.
+        Default is 5.
     trained_forest_name : str
-        Name of the trained random forest to use for classification.
+        Path to the pickled trained random forest (the ``.pkl`` extension
+        is optional).  Default is ``"trained_forest"``.
+    detrend_method : str
+        Method used to detrend each snippet before computing its summary
+        statistics: ``"linear"``, ``"mean"`` or ``"median"``.  Should match
+        the method used for the forest's training data.  Default is
+        ``"median"``.
+    n_jobs : int
+        Number of threads the forest uses for prediction.  Default is 1.
+
+    If ``save`` is True, saves the snippets with their statistics and
+    predictions in ``proc_aman.glitch_snippets`` (see
+    :func:`~sotodlib.tod_ops.glitch_ml.get_snippets_and_classify`).
 
     Example config block::
 
@@ -3198,6 +3215,8 @@ class GlitchClassification(_Preprocess):
             n_thres: 2
             n_buffer: 5
             trained_forest_name: "trained_forest"
+            detrend_method: "median"
+            n_jobs: 1
           save: True
 
     .. autofunction:: sotodlib.tod_ops.glitch_ml.classify_snippets
@@ -3212,33 +3231,22 @@ class GlitchClassification(_Preprocess):
         n_thres = self.calc_cfgs.get("n_thres", 2)
         n_buffer = self.calc_cfgs.get("n_buffer", 5)
         trained_forest_name = self.calc_cfgs.get("trained_forest_name", "trained_forest")
+        detrend_method = self.calc_cfgs.get("detrend_method", "median")
+        n_jobs = self.calc_cfgs.get("n_jobs", 1)
 
-        # get the number of detectors flagged as glitch (at each sample)
         glitch_flags = proc_aman.get(self.flags)  # size: (ndets, nsamps)
-        n_flagged = np.sum(glitch_flags.mask(), axis=0)
+        snippets_aman = gml.get_snippets_and_classify(aman, glitch_flags, trained_forest_name,
+                                                      n_thres=n_thres, buffer=n_buffer,
+                                                      detrend_method=detrend_method, n_jobs=n_jobs)
 
-        # get the ranges when >= `n_thres` detectors are flagged simultaneously
-        snippet_ranges = gml.ranges_from_n_flagged(n_flagged, n_thres=n_thres, buffer=n_buffer)
-
-        # compile list of dets in each range
-        det_mask = gml.get_det_mask(glitch_flags, snippet_ranges)
-
-        # get the glitch snippets
-        snippets = gml.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
-
-        # classify the glitches
-        preds, stats, col_names = gml.classify_snippets(snippets, trained_forest_name)
-
-        # wrap the ranges and dets in an axis manager
-        snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
-                                        core.LabelAxis("stat_names", col_names['stats']),
-                                        core.LabelAxis("pred_cols", col_names['preds']))
-        snippet_aman.wrap("snippet_ranges", snippet_ranges, [(0, 'samps')])
-        snippet_aman.wrap("det_mask", np.array(det_mask), [(0, 'snippets'), (1, 'dets')])
-        snippet_aman.wrap("stats", stats, [(0, 'snippets'), (1, 'stat_names')])
-        snippet_aman.wrap("predictions", preds, [(0, 'snippets'), (1, 'pred_cols')])
-        snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
-        self.save(proc_aman, snippet_aman)
+        # Log and save
+        preds = snippets_aman.predictions[:, 0]  # first col is predicted class
+        n_classes = snippets_aman.predictions.shape[1] - 1  # cols 1:end are class probabilities
+        n_per_class = "/".join(str(np.sum(preds == c)) for c in range(n_classes))
+        logger.info(f"{self.name}: {len(preds)} glitch snippets; "
+                    f"per class {'/'.join(str(c) for c in range(n_classes))}: {n_per_class}; "
+                    f"unclassified (non-finite stats): {np.sum(np.isnan(preds))}")
+        self.save(proc_aman, snippets_aman)
 
         return aman, proc_aman
 

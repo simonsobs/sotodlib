@@ -1,648 +1,558 @@
-"""ML-based glitch classification pipeline.
+"""Machine-learning classification of glitches.
 
-This module provides tools for extracting glitch "snippets" from
-time-ordered data, computing summary statistics for each snippet, and
-classifying them into physical categories (point sources, cosmic rays,
-electronic glitches, etc.) using a random-forest classifier.
+Glitches are grouped into *snippets*: ranges of samples in which several
+detectors are flagged simultaneously, together with the detectors flagged
+in each.  Summary statistics of each snippet are then used to classify it
+with a random forest as one of:
 
-The typical workflow is:
+- ``0``: Point Sources
+- ``1``: Point Sources + Other
+- ``2``: Cosmic Rays
+- ``3``: Electronic Glitches
 
-1. Detect glitches and extract snippets with :func:`get_snippets`.
-2. Compute summary statistics with :func:`compute_summary_stats`.
-3. Classify the snippets using a trained forest via
-   :func:`classify_snippets` (or train your own with
-   :func:`train_forest`).
+The typical workflow is::
 
-New summary statistics can be added by subclassing :class:`GlitchStat`
-and decorating with :func:`register_stat`::
+    snippets = get_snippets_and_classify(aman, glitch_flags, "trained_forest.pkl")
 
-    @register_stat
-    class StatName(GlitchStat):
-        name = "Name of Statistic"
-        requires = ("signal", "x_pos")
+which runs :func:`get_snippets` followed by :func:`classify_snippets`.
+The output ``snippets`` holds the sample ranges and detectors affected
+along with the summary statistics and predictions for each snippet.
 
-        def calc(self, *, signal, x_pos):
-            # ... your implementation ...
-            return stat
+To train a new forest, compute the statistics of labelled snippets with
+:func:`compute_summary_stats` and pass them to :func:`train_forest`.
+
+New summary statistics can be added with the :func:`register_stat`
+decorator::
+
+    @register_stat("Name of Statistic")
+    def name_of_statistic(signal, x_pos):
+        # ... your implementation ...
+        return stat
+
+where the names of the function's parameters determine the inputs it
+receives (see :func:`register_stat`).
 """
 
-import pickle as pk
-from abc import ABC, abstractmethod
-from functools import partial
+import inspect
+import logging
+import pickle
+import warnings
 
 import numpy as np
 import scipy.signal
 from sklearn.ensemble import RandomForestClassifier
 from so3g.proj import Ranges
 
-from ..core import AxisManager
-from sotodlib.tod_ops import detrend_tod
+from ..core import AxisManager, IndexAxis, LabelAxis
+from .detrend import detrend_tod
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Snippet extraction
+# Snippet operations
 # ---------------------------------------------------------------------------
 
-def ranges_from_n_flagged(n_flagged, n_thres=2, buffer=5):
-    """Build a Ranges object from the number of simultaneously flagged detectors.
+def get_snippets_and_classify(aman, glitch_flags, trained_forest_name,
+                              n_thres=2, buffer=5, detrend_method="median", n_jobs=1):
+    """Find the glitch snippets and classify them with a trained random forest.
 
-    Selects samples where the number of flagged detectors meets or exceeds
-    *n_thres*, then buffers each range by *buffer* samples on each side.
-
-    Parameters
-    ----------
-    n_flagged : numpy.ndarray
-        1-D array giving the number of detectors flagged at each sample.
-    n_thres : int, optional
-        Minimum number of simultaneously flagged detectors to form a
-        range.  Default is 2.
-    buffer : int, optional
-        Number of samples to pad on each side of each range.  Default
-        is 5.
-
-    Returns
-    -------
-    so3g.proj.Ranges
-        Ranges where at least *n_thres* detectors are flagged.
-    """
-    return Ranges.from_bitmask(n_flagged >= n_thres).buffer(buffer)
-
-
-def get_det_mask(ranges_matrix, ranges):
-    """
-    Given a per-detector ranges matrix and a second set of ranges, return a
-    mask of the detectors that overlap (intersect) the ranges in the latter.
-
-    Parameters
-    ----------
-    ranges_matrix: RangesMatrix
-        The ranges matrix containing a Ranges object for each detector.
-    ranges: Ranges
-        The ranges to be checked for overlap (intersection) with ranges_matrix.
-
-    Returns
-    -------
-    det_mask: list
-        A list of lists containing boolean values indicating whether each
-        detector overlaps (intersects) the ranges in ranges_affected.
-        Dimensions:
-        len(outer list) = len(ranges)
-        len(inner list) = n_detectors
-    """
-    det_mask = [[len(o.ranges()) > 0 for o in (ranges_matrix * Ranges.from_array(ranges.ranges()[i:i+1], ranges.count))]
-                for i in range(len(ranges.ranges()))]
-    return det_mask
-
-
-def ranges2slices(r, offset=0):
-    """Convert a Ranges object to a list of Python slices.
-
-    Parameters
-    ----------
-    r : so3g.proj.Ranges
-        The ranges to convert.
-    offset : int, optional
-        An integer offset added to both the start and stop of every
-        range.  Default is 0.
-
-    Returns
-    -------
-    list of slice
-        One slice per range.
-    """
-    slices = [slice(r_[0]+offset, r_[1]+offset) for r_ in r.ranges()]
-    return slices
-
-
-def build_snippet_layouts(aman, slices, dets_affected):
-    """
-    Build snippet layouts from lists of the affected detectors and slices.
-
-    Parameters
-    ----------
-    aman: AxisManager
-        The axis manager containing the data.
-    slices: list
-        The slices of the data that are affected.
-    dets_affected: list
-        The affected detectors for each slice.
-
-    Returns
-    -------
-    snippets: list
-        A list of AxisManagers, each containing (only) the affected detectors and
-        samples for that snippet, e.g.:
-        AxisManager(dets:LabelAxis(n_dets_affected), samps:OffsetAxis(n_samps_affected))
-    """
-    snippets = [AxisManager(
-                    aman.dets.restriction(aman.dets.vals[dets])[0],
-                    aman.samps.restriction(sl)[0],
-                ) for (sl, dets) in zip(slices, dets_affected)]
-    return snippets
-
-
-def extract_snippet(aman, snippet_layout, in_place=False):
-    """Restrict an AxisManager to the detectors and samples in a snippet layout.
+    This is a convenience function that runs :func:`get_snippets` and
+    :func:`classify_snippets`.
 
     Parameters
     ----------
     aman : AxisManager
-        The full data axis manager.
-    snippet_layout : AxisManager
-        An axis manager whose axes define the restriction.
-    in_place : bool, optional
-        If *True*, modify *aman* in place.  Default is *False*.
+        The TOD containing the signal, detectors, and timesamples.
+    glitch_flags : so3g.proj.RangesMatrix
+        Glitch flags, of shape ``(dets, samps)`` matching *aman*.
+    trained_forest_name : str
+        Path to the pickled trained random forest (the ``.pkl`` extension
+        is optional).
+    n_thres : int, optional
+        Minimum number of simultaneously flagged detectors.  Default is 2.
+    buffer : int, optional
+        Number of samples by which to pad each snippet on either side.
+        Default is 5.
+    detrend_method : str, optional
+        Method used to detrend each snippet before computing its summary
+        statistics: ``"linear"``, ``"mean"`` or ``"median"``.  Default is
+        ``"median"``.
+    n_jobs : int, optional
+        Number of threads the forest uses for prediction.  Default is 1.
 
     Returns
     -------
-    AxisManager
-        The restricted axis manager.
+    snippets : AxisManager
+        The snippets with their summary statistics and predictions.
     """
-    return aman.restrict_axes(snippet_layout._axes, in_place=in_place)
-
-
-def extract_snippets(aman, snippet_layouts):
-    """
-    Helper function to run extract_snippet for a list of snippet_layouts.
-
-    Parameters
-    ----------
-    aman: AxisManager
-        The axis manager containing the data from which to extract the
-        snippets.
-    snippet_layouts: list
-        List of axis managers containing information on the detectors and
-        samples affected by each glitch snippet.
-
-    Returns
-    -------
-    snippets: list
-        A list of AxisManagers, each containing the data for the corresponding
-        snippet layout.
-    """
-    return list(map(partial(extract_snippet, aman), snippet_layouts))
-
-
-def get_snippets(aman, glitch_ranges, det_mask, offset=0):
-    """
-    Given the ranges of the glitches and masks of the affected detectors,
-    return the snippets of data affected by the glitches.
-
-    Parameters
-    ----------
-    aman: AxisManager
-        The axis manager containing the data.
-    glitch_ranges: Ranges
-        The ranges of the glitches.
-    det_mask: list
-        A list of lists of boolean values identifying which detectors are
-        affected by the glitches in glitch_ranges.
-    offset: int
-        The offset to be added to the start of each range. Default is 0.
-
-    Returns
-    -------
-    snippets: list
-        A list of AxisManagers, each containing the data for the corresponding
-        glitch snippet.
-    """
-    # compile slices for each range
-    slices = ranges2slices(glitch_ranges, offset=offset)
-
-    # from the det_mask, get the indices of the affected detectors
-    det_idxs = [np.where(det_mask[i])[0] for i in range(len(det_mask))]
-
-    # build snippet layouts, each of which is an axis manager containing restricted axes
-    snippet_layouts = build_snippet_layouts(aman, slices, det_idxs)
-
-    # extract the snippets from aman
-    snippets = extract_snippets(aman, snippet_layouts)
-
+    snippets = get_snippets(aman, glitch_flags, n_thres=n_thres, buffer=buffer)
+    classify_snippets(aman, snippets, trained_forest_name,
+                      detrend_method=detrend_method, n_jobs=n_jobs)
     return snippets
+
+
+def get_snippets(aman, glitch_flags, n_thres=2, buffer=5):
+    """Find the glitch snippets in a TOD.
+
+    A snippet comprises a range of samples in which at least *n_thres*
+    detectors are flagged simultaneously, padded by *buffer* samples on
+    either side, together with the detectors flagged anywhere within that
+    range.  Snippets that overlap after padding are merged.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The TOD, used for its ``dets`` and ``samps`` axes.
+    glitch_flags : so3g.proj.RangesMatrix
+        Glitch flags, of shape ``(dets, samps)`` matching *aman*.
+    n_thres : int, optional
+        Minimum number of simultaneously flagged detectors.  Default is 2.
+    buffer : int, optional
+        Number of samples by which to pad each snippet on either side.
+        Default is 5.
+
+    Returns
+    -------
+    snippets : AxisManager
+        With the ``dets`` and ``samps`` axes of *aman*, a ``snippets`` axis,
+        and the fields:
+
+        - ``snippet_ranges`` (``samps``): Ranges of the snippets' samples;
+          ``snippet_ranges.ranges()`` gives one ``(start, stop)`` pair per
+          snippet.
+        - ``det_mask`` (``snippets``, ``dets``): whether each detector is
+          affected in each snippet.
+
+    Raises
+    ------
+    ValueError
+        If the shape of *glitch_flags* does not match *aman*.
+    """
+    shape = (aman.dets.count, aman.samps.count)
+    if tuple(glitch_flags.shape) != shape:
+        raise ValueError(f"glitch_flags has shape {tuple(glitch_flags.shape)}, "
+                         f"but aman has (dets, samps) = {shape}")
+
+    mask = glitch_flags.mask()
+    snippet_ranges = Ranges.from_bitmask(mask.sum(axis=0) >= n_thres).buffer(buffer)
+    intervals = snippet_ranges.ranges()
+    det_mask = np.zeros((len(intervals), aman.dets.count), dtype=bool)
+    for i, (start, stop) in enumerate(intervals):
+        det_mask[i] = mask[:, start:stop].any(axis=1)
+
+    snippets = AxisManager(aman.dets, aman.samps, IndexAxis("snippets", len(intervals)))
+    snippets.wrap("snippet_ranges", snippet_ranges, [(0, "samps")])
+    snippets.wrap("det_mask", det_mask, [(0, "snippets"), (1, "dets")])
+    return snippets
+
+
+def compute_summary_stats(aman, snippets, stats=None, detrend_method="median"):
+    """Compute the summary statistics of glitch snippets.
+
+    For each snippet, the statistics receive the following inputs for the
+    affected detectors:
+
+    - ``signal``: their signal over the snippet, of shape
+      ``(n_dets, n_samps)``, detrended separately for each detector.
+    - ``x_pos``, ``y_pos``: their focal-plane positions in degrees,
+      rotated by the mean boresight roll over the snippet.
+
+    Detectors without (finite) focal-plane positions are excluded from all
+    statistics.  If a snippet does not have any detectors with a valid
+    position, all of its statistics will be NaN.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The TOD that *snippets* was found in.  Must contain ``signal``,
+        ``boresight.roll``, ``focal_plane.xi`` and ``focal_plane.eta``.
+    snippets : AxisManager
+        Glitch snippets from :func:`get_snippets`.
+    stats : list of str, optional
+        Names of the statistics to compute.  Default is all registered
+        statistics, in registration order (see :func:`get_all_stat_names`).
+    detrend_method : str, optional
+        Detrending method, passed to
+        :func:`~sotodlib.tod_ops.detrend.detrend_tod`: ``"linear"``,
+        ``"mean"`` or ``"median"``.  Default is ``"median"``.
+
+    Returns
+    -------
+    stats_array : numpy.ndarray
+        Array of shape ``(n_snippets, n_stats)``, with columns ordered as
+        *stats*.
+    """
+    if stats is None:
+        stats = get_all_stat_names()
+    funcs = [get_stat(name) for name in stats]
+
+    stats_array = np.full((snippets.snippets.count, len(funcs)), np.nan)
+    n_no_positions = 0  # counter for snippets with detectors missing focal-plane positions
+    for i, ((start, stop), det_mask) in enumerate(
+            zip(snippets.snippet_ranges.ranges(), snippets.det_mask)):
+        dets = np.flatnonzero(det_mask)
+
+        roll_corr = -np.mean(aman.boresight.roll[start:stop])
+        xi, eta = aman.focal_plane.xi[dets], aman.focal_plane.eta[dets]
+        x_pos = np.rad2deg(xi * np.cos(roll_corr) - eta * np.sin(roll_corr))
+        y_pos = np.rad2deg(eta * np.cos(roll_corr) + xi * np.sin(roll_corr))
+
+        # Detectors without valid positions can't be used in position-based stats
+        has_pos = np.isfinite(x_pos) & np.isfinite(y_pos)
+        if not np.any(has_pos):
+            n_no_positions += 1
+            continue
+
+        # Fancy indexing copies the signal, so detrending won't modify aman
+        signal = _detrend(aman.signal[dets[has_pos], start:stop], detrend_method)
+        inputs = {"signal": signal, "x_pos": x_pos[has_pos], "y_pos": y_pos[has_pos]}
+        # Compute stats
+        stats_array[i] = [f(**{k: inputs[k] for k in f.requires}) for f in funcs]
+
+    if n_no_positions:
+        logger.warning(f"{n_no_positions} of {len(stats_array)} glitch snippets have no "
+                       "detectors with focal-plane positions; their stats are NaN.")
+    return stats_array
+
+
+def _detrend(signal, method):
+    """Detrend each row of a ``(dets, samps)`` array in place."""
+    tod = AxisManager(IndexAxis("dets", signal.shape[0]), IndexAxis("samps", signal.shape[1]))
+    tod.wrap("signal", signal, [(0, "dets"), (1, "samps")])
+    return detrend_tod(tod, method=method)
 
 
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
 
-def get_default_stats():
-    """Return the default set of summary statistics for glitch classification.
-
-    Returns all stat names from the stat registry, in registration order.
-
-    Returns
-    -------
-    list of str
-    """
-    return get_all_stat_names()
-
-
-def compute_summary_stats(snippet, stats=None):
-    """Compute the summary statistics for glitch classification.
-
-    Parameters
-    ----------
-    snippet : AxisManager
-        Axis manager containing glitch snippets computed with
-        :func:`extract_snippets`.
-    stats : list of str, optional
-        Summary statistics to compute.  Each entry must be a registered
-        stat name.  If *None*, all default statistics are used.
-
-    Returns
-    -------
-    stats_arr : numpy.ndarray
-        Array of shape ``(n_stats,)`` with the computed summary statistics.
-    """
-    if stats is None:
-        stats = get_default_stats()
-
-    signal = detrend_tod(snippet, method='median')
-
-    roll_corr = -np.mean(snippet.boresight.roll)  # roll correction
-    xi, eta = snippet.focal_plane.xi, snippet.focal_plane.eta
-    x_wnans = np.rad2deg(xi * np.cos(roll_corr) - eta * np.sin(roll_corr))
-    y_wnans = np.rad2deg(eta * np.cos(roll_corr) + xi * np.sin(roll_corr))
-
-    x_t = x_wnans[~np.isnan(x_wnans)]
-    y_t = y_wnans[~np.isnan(y_wnans)]
-
-    data = {'signal': signal, 'x_pos': x_t, 'y_pos': y_t}
-
-    stats_arr = np.array([
-        get_stat(s).calc(**{k: data[k] for k in get_stat(s).requires})
-        for s in stats
-    ])
-
-    return stats_arr
-
-
-def train_forest(X_train, y_train, stats=None, n_trees=50, max_depth=15):
-    """Train a random forest classifier for glitch classification.
-
-    Parameters
-    ----------
-    X_train : numpy.ndarray
-        Training data of shape ``(n_samples, n_features)``.
-    y_train : numpy.ndarray
-        Training labels of shape ``(n_samples,)``.
-    stats : list of str, optional
-        Feature names corresponding to the columns of *X_train*.  If
-        *None*, the default statistics from :func:`get_default_stats` are
-        used.
-    n_trees : int, optional
-        Number of trees in the forest.  Default is 50.
-    max_depth : int, optional
-        Maximum depth of each tree.  Default is 15.
-
-    Returns
-    -------
-    forest : sklearn.ensemble.RandomForestClassifier
-        Trained random forest with ``feature_names_in_`` set to *stats*.
-
-    Raises
-    ------
-    ValueError
-        If the number of columns in *X_train* does not match the length
-        of *stats*.
-    """
-    if stats is None:
-        stats = get_default_stats()
-
-    if X_train.shape[1] != len(stats):
-        raise ValueError(
-            f"Number of columns in X_train ({X_train.shape[1]}) does not "
-            f"match number of stat names ({len(stats)})")
-
-    forest = RandomForestClassifier(criterion='entropy', n_estimators=n_trees, random_state=1, n_jobs=2, max_depth=max_depth)
-
-    forest.fit(X_train, y_train)
-    forest.feature_names_in_ = np.array(stats)
-
-    return forest
-
-
-#: Column names for the prediction arrays returned by :func:`classify_data_forest`
-#: and :func:`classify_snippets`.  Column 0 is the predicted class label (0–3);
-#: columns 1–4 are the class probabilities.
+#: Column names of the ``predictions`` array (see :func:`classify_snippets`).
+#: Column 0 is the predicted class (0-3, as listed in the module
+#: description); columns 1-4 are the probabilities of classes 0-3.
 PRED_COLUMNS = ['Glitch Prediction', 'Probability of being a Point Source',
                 'Probability of being a Point Source + Other',
                 'Probability of being a Cosmic Ray',
                 'Probability of being an Electronic Glitch']
 
 
-def classify_data_forest(X_classify, trained_forest):
-    """Classify glitches using a trained random forest.
+def classify_snippets(aman, snippets, trained_forest, detrend_method="median", n_jobs=1):
+    """Classify glitch snippets with a trained random forest.
+
+    Computes the summary statistics that the forest uses (see
+    :func:`compute_summary_stats`) and classifies the snippets whose
+    statistics are all finite.
 
     Parameters
     ----------
-    X_classify : numpy.ndarray
-        2-D array of shape ``(n_samples, n_features)``.  Columns must be
-        ordered to match ``trained_forest.feature_names_in_``.
-    trained_forest : sklearn.ensemble.RandomForestClassifier
-        Trained random forest.
+    aman : AxisManager
+        The TOD that *snippets* was found in (see
+        :func:`compute_summary_stats`).
+    snippets : AxisManager
+        Glitch snippets from :func:`get_snippets`; modified in place.
+    trained_forest : sklearn.ensemble.RandomForestClassifier or str
+        The trained forest, or the path to a pickled one (the ``.pkl``
+        extension is optional).  Its ``feature_names_in_`` must be names of
+        registered statistics, and its classes must be those defined in
+        :data:`PRED_COLUMNS`.
+    detrend_method : str, optional
+        See :func:`compute_summary_stats`.  Should match the method used to
+        compute the forest's training data.  Default is ``"median"``.
+    n_jobs : int or None, optional
+        Number of threads the forest uses for prediction; this sets
+        ``trained_forest.n_jobs``.  If None, the forest's own setting is
+        kept.  Default is 1, as for the number of snippets in a typical TOD,
+        the overhead of starting threads outweighs the gain.
 
     Returns
     -------
-    preds : numpy.ndarray
-        2-D array of shape ``(n_samples, 5)``.  Columns correspond to
+    snippets : AxisManager
+        The input *snippets*, with the added fields:
+
+        - ``stats`` (``snippets``, ``stat_names``): the summary statistics,
+          where the ``stat_names`` axis holds the forest's feature names.
+        - ``predictions`` (``snippets``, ``pred_cols``): the predicted class
+          and the class probabilities, where the ``pred_cols`` axis holds
+          :data:`PRED_COLUMNS`.  Snippets with non-finite statistics are not
+          classified, and their predictions are NaN.
+        - ``detrend_method``: *detrend_method*.
+
+    Raises
+    ------
+    ValueError
+        If the forest's classes do not match those implied by
         :data:`PRED_COLUMNS`.
     """
-    y_pred_forest = trained_forest.predict(X_classify)
+    if isinstance(trained_forest, str):
+        if not trained_forest.endswith(".pkl"):
+            trained_forest += ".pkl"
+        with open(trained_forest, "rb") as f:
+            trained_forest = pickle.load(f)
+    if n_jobs is not None:
+        trained_forest.n_jobs = n_jobs
 
-    y_pred_forest_probs = trained_forest.predict_proba(X_classify)
+    # predict_proba orders its columns by trained_forest.classes_, so these
+    # must be the classes that PRED_COLUMNS assumes
+    classes = np.arange(len(PRED_COLUMNS) - 1)
+    if not np.array_equal(trained_forest.classes_, classes):
+        raise ValueError(f"Expected a forest with classes {classes.tolist()}, "
+                         f"but got {trained_forest.classes_.tolist()}")
 
-    preds = np.column_stack((y_pred_forest, y_pred_forest_probs))
+    # Compute the stats in the order the forest expects
+    stat_names = list(trained_forest.feature_names_in_)
+    stats = compute_summary_stats(aman, snippets, stats=stat_names,
+                                  detrend_method=detrend_method)
 
-    return preds
+    # Classify snippets; those with non-finite statistics are returned as NaN
+    preds = np.full((len(stats), len(PRED_COLUMNS)), np.nan)
+    valid = np.all(np.isfinite(stats), axis=1)
+    if np.any(valid):
+        with warnings.catch_warnings():
+            # The forest was fit with feature names, which a numpy array
+            # doesn't have; its columns are already in the right order
+            warnings.filterwarnings("ignore", message="X does not have valid feature names")
+            probs = trained_forest.predict_proba(stats[valid])
+        # Predicted class is the one with the highest probability; following line
+        # is same as trained_forest.predict(), without computing probs twice
+        preds[valid, 0] = trained_forest.classes_[np.argmax(probs, axis=1)]
+        preds[valid, 1:] = probs
+
+    snippets.wrap("stats", stats,
+                  [(0, "snippets"), (1, LabelAxis("stat_names", stat_names))])
+    snippets.wrap("predictions", preds,
+                  [(0, "snippets"), (1, LabelAxis("pred_cols", PRED_COLUMNS))])
+    snippets.wrap("detrend_method", detrend_method)
+    return snippets
 
 
-def classify_snippets(snippets, trained_forest):
-    """
-    From their summary statistics, classify the glitch snippets using a trained
-    random forest.
+def train_forest(X_train, y_train, stats=None, n_trees=50, max_depth=15, n_jobs=None):
+    """Train a random forest to classify glitch snippets.
 
     Parameters
     ----------
-    snippets: list
-        A list of glitch snippets, each of which is an AxisManager object
-        containing the glitch data.
-    trained_forest: RandomForestClassifier or str
-        The trained random forest classifier. If a string is provided, it is
-        assumed to be the filename of a pickled RandomForestClassifier object.
+    X_train : numpy.ndarray
+        Summary statistics of the training snippets, of shape
+        ``(n_snippets, n_stats)`` (see :func:`compute_summary_stats`).
+    y_train : numpy.ndarray
+        Classes of the training snippets, of shape ``(n_snippets,)``.
+    stats : list of str, optional
+        Names of the statistics in the columns of *X_train*.  Default is
+        all registered statistics, in registration order (see
+        :func:`get_all_stat_names`), which is also the default column order
+        of :func:`compute_summary_stats`.
+    n_trees : int, optional
+        Number of trees in the forest.  Default is 50.
+    max_depth : int, optional
+        Maximum depth of each tree.  Default is 15.
+    n_jobs : int or None, optional
+        Number of threads used for training (-1 for all cores).  This only
+        affects the speed of training, not the trained forest.  Default is
+        None, i.e., a single thread.
 
     Returns
     -------
-    preds : numpy.ndarray
-        2-D array of shape ``(n_snippets, 5)`` with predictions and
-        probabilities.  Columns correspond to :data:`PRED_COLUMNS`.
-        Rows with invalid stats are NaN.
-    stats_array: numpy.ndarray
-        2D array of shape (n_snippets, n_stats) with the computed statistics
-        used for classification.
-    col_names: dict
-        Dictionary with keys ``'preds'`` and ``'stats'``, giving the column
-        names for ``preds`` and ``stats_array``.
+    forest : sklearn.ensemble.RandomForestClassifier
+        The trained forest, with ``feature_names_in_`` set to *stats*.
+
+    Raises
+    ------
+    ValueError
+        If the number of columns of *X_train* does not match the number of
+        *stats*.
     """
-    if isinstance(trained_forest, str):
-        if not trained_forest.endswith('.pkl'):
-            trained_forest += '.pkl'
-        with open(trained_forest, 'rb') as f:
-            trained_forest = pk.load(f)
+    if stats is None:
+        stats = get_all_stat_names()
 
-    # Compute the summary statistics in the order the forest expects
-    stat_names = list(trained_forest.feature_names_in_)
-    stats_array = np.array([compute_summary_stats(s, stats=stat_names) for s in snippets])
+    if X_train.shape[1] != len(stats):
+        raise ValueError(
+            f"Number of columns in X_train ({X_train.shape[1]}) does not "
+            f"match number of stat names ({len(stats)})")
 
-    # Build a mask of valid rows (no inf or nan)
-    valid_mask = np.all(np.isfinite(stats_array), axis=1)
+    forest = RandomForestClassifier(criterion="entropy", n_estimators=n_trees,
+                                    max_depth=max_depth, random_state=1, n_jobs=n_jobs)
+    forest.fit(X_train, y_train)
+    forest.feature_names_in_ = np.array(stats)
 
-    # Classify only valid rows
-    preds = np.full((len(snippets), len(PRED_COLUMNS)), np.nan)
-    if np.any(valid_mask):
-        preds[valid_mask] = classify_data_forest(stats_array[valid_mask], trained_forest)
-
-    col_names = {'preds': list(PRED_COLUMNS), 'stats': stat_names}
-
-    return preds, stats_array, col_names
+    return forest
 
 
 # ---------------------------------------------------------------------------
-# Summary statistics — base class and registry
+# Summary statistics: registry
 # ---------------------------------------------------------------------------
 
-class GlitchStat(ABC):
-    """Base class for a single glitch summary statistic.
+#: Inputs available to the summary statistics (see
+#: :func:`compute_summary_stats`).
+STAT_INPUTS = ("signal", "x_pos", "y_pos")
 
-    Subclasses must set two class-level attributes:
+_STAT_REGISTRY = {}
 
-    Attributes
+
+def register_stat(name):
+    """Decorator registering a function as a summary statistic.
+
+    The function receives, as keyword arguments, the inputs named by its
+    parameters, which must be among :data:`STAT_INPUTS` (see
+    :func:`compute_summary_stats` for their definitions), and must return
+    a scalar.
+
+    Parameters
     ----------
     name : str
-        Human-readable label used as the key in the stat registry.
-    requires : tuple of str
-        Inputs that the :meth:`calc` method needs,
-        e.g., ``('signal', 'x_pos', 'y_pos')``.
+        Name of the statistic.  Trained forests identify their features by
+        these names, so a statistic must keep its name once a forest has
+        been trained with it.
+
+    Raises
+    ------
+    ValueError
+        If the function has parameters not in :data:`STAT_INPUTS`.
     """
-
-    name: str
-    requires: tuple
-
-    @abstractmethod
-    def calc(self, **kwargs):
-        """Compute and return the statistic (scalar)."""
-        ...
-
-    def __repr__(self):
-        return f"{type(self).__name__}(name={self.name!r})"
-
-
-_STAT_REGISTRY: dict = {}
-
-
-def register_stat(cls):
-    """Class decorator: instantiate *cls* and add it to the registry."""
-    instance = cls()
-    _STAT_REGISTRY[instance.name] = instance
-    return cls
+    def decorator(func):
+        requires = tuple(inspect.signature(func).parameters)
+        unknown = [p for p in requires if p not in STAT_INPUTS]
+        if unknown:
+            raise ValueError(f"Stat {name!r} requires unknown inputs {unknown}; "
+                             f"available inputs are {STAT_INPUTS}")
+        func.requires = requires
+        _STAT_REGISTRY[name] = func
+        return func
+    return decorator
 
 
 def get_stat(name):
-    """Return the :class:`GlitchStat` instance registered under *name*.
-
-    Usage::
-
-        get_stat("Name of Statistic").calc(signal=...)
-        get_stat("Name of Statistic").calc(**data)
-
-    where ``data`` is a dict containing the keys listed in
-    :attr:`GlitchStat.requires`.
-
-    Parameters
-    ----------
-    name : str
-        Name of the statistic (must match :attr:`GlitchStat.name`).
-
-    Returns
-    -------
-    GlitchStat
+    """Return the function of the summary statistic registered as *name*.
 
     Raises
     ------
     KeyError
-        If *name* is not in the registry.
+        If no statistic is registered as *name*.
     """
     return _STAT_REGISTRY[name]
 
 
 def get_all_stat_names():
-    """Return the names of all registered stats in registration order.
+    """Return the names of all registered statistics, in registration order.
 
     Returns
     -------
     list of str
     """
-    return list(_STAT_REGISTRY.keys())
-
-
-def get_stat_registry():
-    """Return a copy of the full ``{name: GlitchStat}`` registry.
-
-    Returns
-    -------
-    dict
-    """
-    return dict(_STAT_REGISTRY)
+    return list(_STAT_REGISTRY)
 
 
 # ---------------------------------------------------------------------------
-# Summary statistics — built-in stat classes
+# Summary statistics: built-in
 # ---------------------------------------------------------------------------
 
-@register_stat
-class NumDets(GlitchStat):
-    """Return the number of detectors affected by the glitch."""
-
-    name = "Number of Detectors"
-    requires = ("x_pos",)
-
-    def calc(self, *, x_pos):
-        return len(x_pos)
+@register_stat("Number of Detectors")
+def num_dets(x_pos):
+    """Number of affected detectors."""
+    return len(x_pos)
 
 
-@register_stat
-class RatioYXExtent(GlitchStat):
-    """Ratio of the focal plane extents in y and x.
+@register_stat("Y and X Extent Ratio")
+def yx_extent_ratio(x_pos, y_pos):
+    """Ratio of the extents of the affected detectors in y and x.
 
-    Returns ``inf`` when the x range is zero.
+    Returns ``inf`` if the x extent is zero, or ``nan`` if both extents are
+    zero (e.g., a single detector, or detectors in the same pixel).
     """
-
-    name = "Y and X Extent Ratio"
-    requires = ("x_pos", "y_pos")
-
-    def calc(self, *, x_pos, y_pos):
-        x_range = np.max(x_pos) - np.min(x_pos)
-        if x_range == 0:
-            return np.inf
-        return (np.max(y_pos) - np.min(y_pos)) / x_range
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return (np.max(y_pos) - np.min(y_pos)) / (np.max(x_pos) - np.min(x_pos))
 
 
-@register_stat
-class MeanCorrelation(GlitchStat):
-    """Mean absolute Pearson correlation between detector pairs.
+@register_stat("Mean abs(Correlation)")
+def mean_abs_correlation(signal):
+    """Mean absolute Pearson correlation between the detectors' signals.
 
-    Uses :func:`numpy.corrcoef` to compute the full correlation matrix.
-    The upper triangle (including the diagonal) is averaged.
+    Averages the upper triangle of the correlation matrix *including* the
+    diagonal (i.e., each detector's correlation of 1 with itself).  NaN
+    correlations (e.g., of a constant signal) are ignored.
+
+    Returns ``nan`` if there are fewer than 2 samples.
     """
-
-    name = "Mean abs(Correlation)"
-    requires = ("signal",)
-
-    def calc(self, *, signal):
-        if signal.shape[0] < 2 or signal.shape[1] < 2:
-            return np.nan
-        corr = np.corrcoef(signal)
-        mask = np.triu(np.ones_like(corr, dtype=bool))
-        return np.nanmean(np.abs(corr[mask]))
+    if signal.shape[1] < 2:
+        return np.nan
+    # corrcoef returns a scalar for a single detector
+    corr = np.atleast_2d(np.corrcoef(signal))
+    return np.nanmean(np.abs(corr[np.triu_indices_from(corr)]))
 
 
-@register_stat
-class MeanTimeLags(GlitchStat):
-    """Mean absolute time lag via FFT cross-correlation.
+@register_stat("Mean abs(Time Lag)")
+def mean_abs_time_lag(signal):
+    """Mean absolute time lag, in samples, between pairs of detectors.
 
-    Detector-pair time lags are estimated as the argmax of the circular FFT
-    cross-correlation (in samples), choosing the smaller of the forward or
-    wrap-around shift.
+    The lag between two detectors is the shift that maximizes the circular
+    cross-correlation of their signals, taking the shorter of the forward
+    and backward shifts.
 
-    Returns ``nan`` if fewer than 2 detectors or samples.
+    Returns ``nan`` if there are fewer than 2 detectors or samples.
     """
+    n_dets, n_samps = signal.shape
+    if n_dets < 2 or n_samps < 2:
+        return np.nan
 
-    name = "Mean abs(Time Lag)"
-    requires = ("signal",)
-
-    def calc(self, *, signal):
-        n_dets, n_samps = signal.shape
-        if n_dets < 2 or n_samps < 2:
-            return np.nan
-
-        ffts = np.fft.fft(signal, axis=1)
-
-        # Compute cross-power spectra for upper-triangle pairs only
-        idx_i, idx_j = np.triu_indices(n_dets, k=1)
-        cross_power = ffts[idx_i] * np.conj(ffts[idx_j])
-        cross_corr = np.fft.ifft(cross_power, axis=1).real
-
-        max_indices = np.argmax(cross_corr, axis=1)
-        # Take the smaller absolute lag: forward shift or backward wrap-around
-        shifts = max_indices - n_samps
-        lags = np.where(np.abs(shifts) < max_indices, shifts, max_indices)
-
-        return np.mean(np.abs(lags))
+    ffts = np.fft.fft(signal, axis=1)
+    # Cross-correlate each detector with all later detectors
+    shifts = np.concatenate([
+        np.argmax(np.fft.ifft(ffts[i] * np.conj(ffts[i + 1:]), axis=1), axis=1)
+        for i in range(n_dets - 1)])
+    # A forward shift by s samples is a backward shift by n_samps - s
+    return np.mean(np.minimum(shifts, n_samps - shifts))
 
 
-@register_stat
-class FracMaxAdjY(GlitchStat):
-    """Fraction of detectors in the peak and adjacent y-histogram bins.
+@register_stat("Y Hist Max and Adjacent/Number of Detectors")
+def frac_max_adjacent_y(y_pos):
+    """Fraction of detectors in the peak bin of the y histogram and its neighbours.
 
-    Computes a histogram of *y_pos*, finds the peak bin, sums that bin
-    and its immediate neighbours, and divides by the total detector
-    count.
+    Uses the default 10-bin histogram of :func:`numpy.histogram`.
     """
-
-    name = "Y Hist Max and Adjacent/Number of Detectors"
-    requires = ("y_pos",)
-
-    def calc(self, *, y_pos):
-        counts, _ = np.histogram(y_pos)
-        peak_idx = int(np.argmax(counts))
-        lo = max(peak_idx - 1, 0)
-        hi = min(peak_idx + 1, len(counts) - 1)
-        return counts[lo:hi + 1].sum() / len(y_pos)
+    counts, _ = np.histogram(y_pos)
+    peak_idx = np.argmax(counts)
+    lo = max(peak_idx - 1, 0)
+    hi = min(peak_idx + 1, len(counts) - 1)
+    return counts[lo:hi + 1].sum() / len(y_pos)
 
 
-@register_stat
-class FracMaxNearY(GlitchStat):
-    """Fraction of detectors within 0.1 of the y-histogram peak.
+@register_stat("Within 0.1 of Y Hist Max/Number of Detectors")
+def frac_near_max_y(y_pos):
+    """Fraction of detectors in the y-histogram bins near the peak bin.
 
-    Computes the histogram and selects all bins whose left edge is
-    within 0.1 of the peak bin's left edge.
+    Counts the detectors in the bins of the default 10-bin histogram of
+    :func:`numpy.histogram` whose edges both lie within 0.1 (deg) of the
+    lower edge of the peak bin.  Note the result is 0 if the bins are wider
+    than 0.1, i.e., if the y extent exceeds 1 deg.
     """
-
-    name = "Within 0.1 of Y Hist Max/Number of Detectors"
-    requires = ("y_pos",)
-
-    def calc(self, *, y_pos):
-        counts, edges = np.histogram(y_pos)
-        peak_idx = int(np.argmax(counts))
-        peak_edge = edges[peak_idx]
-        close = np.where(np.abs(edges - peak_edge) <= 0.1)[0]
-        # Edge array is one longer than counts; clip to valid bin indices
-        bin_indices = close[close < len(counts)]
-        return counts[bin_indices].sum() / len(y_pos)
+    counts, edges = np.histogram(y_pos)
+    peak_edge = edges[np.argmax(counts)]
+    near = np.abs(edges - peak_edge) <= 0.1
+    # Bin k spans edges[k] to edges[k + 1]
+    return counts[near[:-1] & near[1:]].sum() / len(y_pos)
 
 
-@register_stat
-class NumPeaks(GlitchStat):
-    """Number of peaks in the combined (max-across-detectors) TOD.
+@register_stat("Number of Peaks")
+def num_peaks(signal):
+    """Number of peaks in the combined signal of the affected detectors.
 
-    Smooths the per-sample maximum/mean across detectors with a 3-wide
-    boxcar, selects prominent samples, and counts peaks with
-    :func:`scipy.signal.find_peaks`.
+    The per-sample maximum and mean of the signal across detectors are
+    smoothed with a 3-sample boxcar.  The combined signal is the smoothed
+    maximum where it exceeds the smoothed mean by at least 3 times the
+    standard deviation of the signal, and the smoothed mean elsewhere.
+    Peaks are found with :func:`scipy.signal.find_peaks`, with a minimum
+    prominence of the absolute mean of the combined signal plus twice the
+    standard deviation of the signal.
+
+    As the smoothing kernel is defined in samples, the result depends on
+    the sample rate.
     """
+    kernel_size = 3
+    kernel = np.ones(kernel_size) / kernel_size
+    max_vals = np.convolve(np.max(signal, axis=0), kernel, mode="same")
+    mean_vals = np.convolve(np.mean(signal, axis=0), kernel, mode="same")
+    std_val = np.std(signal)
 
-    name = "Number of Peaks"
-    requires = ("signal",)
+    vals_for_peaks = np.where(max_vals >= mean_vals + 3 * std_val, max_vals, mean_vals)
 
-    def calc(self, *, signal):
-        kernel = np.ones(3) / 3
-        max_vals = np.convolve(np.max(signal, axis=0), kernel, mode="same")
-        mean_vals = np.convolve(np.mean(signal, axis=0), kernel, mode="same")
-        std_val = np.std(signal)
-
-        vals_for_peaks = np.where(
-            max_vals >= mean_vals + 3 * std_val, max_vals, mean_vals
-        )
-
-        prom = max(1e-12, abs(np.mean(vals_for_peaks)) + 2.0 * std_val)
-        peaks, _ = scipy.signal.find_peaks(vals_for_peaks, prominence=prom)
-        return len(peaks)
+    prom = np.max([1e-12, np.abs(np.mean(vals_for_peaks)) + 2.0 * std_val])
+    peaks, _ = scipy.signal.find_peaks(vals_for_peaks, prominence=prom)
+    return len(peaks)
