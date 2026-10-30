@@ -10,6 +10,7 @@ import traceback
 import inspect
 from pathlib import Path
 import re
+from collections.abc import Mapping
 from tqdm import tqdm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import pointing_model
@@ -17,7 +18,7 @@ from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
-from sotodlib.site_pipeline.jobdb import JState
+from sotodlib.site_pipeline.jobdb import JState, JobLockedError
 from sotodlib.core.util import H5ContextManager
 
 from .. import core
@@ -50,6 +51,62 @@ class PreprocessErrors:
         tb = ''.join(traceback.format_tb(e.__traceback__))
 
         return errmsg, tb
+
+
+def get_jobdb_config(configs):
+    """Return the JobDB path and update batch size from a preproc config.
+
+    ``jobdb`` may use the historical string form or the mapping form that
+    supplies ``path`` and an optional ``batch_size``.
+    """
+    config = configs.get("jobdb")
+    if config is None:
+        return None, 1
+    if isinstance(config, (str, os.PathLike)):
+        return os.fspath(config), 1
+    if not isinstance(config, Mapping):
+        raise TypeError("jobdb must be a path, a mapping, or null.")
+
+    path = config.get("path")
+    batch_size = config.get("batch_size", 1)
+    if path is not None and not isinstance(path, (str, os.PathLike)):
+        raise TypeError("jobdb.path must be a filesystem path or null.")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) \
+            or batch_size < 1:
+        raise ValueError("jobdb.batch_size must be a positive integer.")
+    return (None if path is None else os.fspath(path)), batch_size
+
+
+def update_jobdb(jdb, updates):
+    """Apply a batch of preprocessing state updates to JobDB.
+
+    Each update is a mapping containing ``job``, ``jstate`` and ``error``.
+    Updates are matched by job ID so database query ordering cannot associate
+    a result with the wrong observation.
+    """
+    if not updates:
+        return
+
+    updates_by_id = {update["job"].id: update for update in updates}
+    if len(updates_by_id) != len(updates):
+        raise ValueError("A JobDB update batch contains duplicate job IDs.")
+
+    requested = [update["job"] for update in updates]
+    with jdb.locked(requested, count=len(requested)) as locked_jobs:
+        locked_by_id = {job.id: job for job in locked_jobs}
+        missing = [job.id for job in requested if job.id not in locked_by_id]
+        if missing:
+            raise JobLockedError(
+                f"Could not lock all jobs in preprocessing batch; missing {missing}."
+            )
+
+        for job_id, job in locked_by_id.items():
+            update = updates_by_id[job_id]
+            job.mark_visited()
+            job.jstate = update["jstate"]
+            for tag in job._tags:
+                if tag.key == "error":
+                    tag.value = update["error"]
 
 
 def _get_aman_encodings(encodings, field):
