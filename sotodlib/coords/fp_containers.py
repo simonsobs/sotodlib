@@ -1562,6 +1562,27 @@ class Receiver:
             return self.optics_tubes[ot_names.index(key)]
         raise IndexError(f"Invalid key: {key}")
 
+    def find_fpc(self, ot_name: str, fp_name: str) -> Optional[FocalPlaneCollection]:
+        """
+        Find a FocalPlaneCollection by its OpticsTube and collection names.
+
+        Parameters
+        ----------
+        ot_name : str
+            Name of the OpticsTube.
+        fp_name : str
+            Name of the FocalPlaneCollection.
+
+        Returns
+        -------
+        fpc : Optional[FocalPlaneCollection]
+            The matching focal-plane collection, or None if not found.
+        """
+        try:
+            return self[ot_name][fp_name]
+        except IndexError:
+            return None
+
     def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
@@ -2137,7 +2158,8 @@ class PointingSystem:
 
         rx_group = cast(h5py.Group, f[f"{path}/receivers"])
         receivers = tuple(
-            Receiver.load(f, f"{path}/receivers/{name}", pointing_models) for name in sorted(rx_group.keys())
+            Receiver.load(f, f"{path}/receivers/{name}", pointing_models)
+            for name in sorted(rx_group.keys())
         )
 
         return cls(

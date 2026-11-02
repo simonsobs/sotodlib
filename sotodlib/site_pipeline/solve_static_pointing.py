@@ -40,6 +40,7 @@ default_config = {
     "point_meta": "focal_plane",
     "obs_whitelist": [],
     "obs_blacklist": [],
+    "weight_factor": 1000,
 }
 
 
@@ -273,6 +274,40 @@ def _get_obslist(ctx, cfg, system):
     return obslist
 
 
+def _load_obs(obs, ctx, system, cfg):
+    aman_full = ctx.get_meta(obs)
+    rx = system.search("receiver", obs["timestamp"])
+    pm = system.search("pointing_model", obs["timestamp"])
+    loaded = []
+    for array in np.unique(aman_full.wafer.array):
+        aman = aman_full.restrict(
+            "dets", aman_full.wafer.array == array, in_place=False
+        )
+        fp = rx.find_fpc(obs["tube_slot"], array)
+        if fp is None:
+            raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
+        loaded += [
+            (
+                obs["tube_slot"],
+                fpc.FocalPlane.from_aman(
+                    fp.name,
+                    obs["obs_id"],
+                    aman,
+                    fp.template,
+                    fp.template_fp,
+                    fp.template_ot,
+                    pm,
+                    fp.autofreeze,
+                    fp.fake_gamma,
+                    cfg.weight_factor,
+                ),
+            )
+        ]
+
+    # Not adding to the system so that we can leave ourselves open to parallelism
+    return loaded
+
+
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
     require = (
@@ -315,10 +350,12 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
     # TODO: Mark pad epochs as pad
 
-    # TODO: Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
-
     # Get obs list
     obslist = _get_obslist(ctx, cfg, system)
+
+    # TODO: Set up per-obs jobs
+
+    # TODO: Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
 
     # TODO: Fit for pointing model and focal planes
 
