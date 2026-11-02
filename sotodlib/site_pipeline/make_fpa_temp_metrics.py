@@ -13,7 +13,6 @@ Pipeline (see the ``__main__`` block / :func:`main`):
    scan range with flag counts overlaid.
 """
 
-import sys
 import os
 import argparse
 import traceback
@@ -21,6 +20,7 @@ import datetime as dtime
 from typing import Optional
 
 import yaml
+import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -31,8 +31,10 @@ from tqdm import tqdm
 from sotodlib import core, tod_ops
 from sotodlib.io import hkdb
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
-
+from sotodlib.site_pipeline.utils.logging import init_logger
+logger = init_logger('make_fpa_temp_metrics', 'make_fpa_temp_metrics: ')
 date = dtime.datetime.now()
+DEG = np.pi / 180
 
 def exe_p2p_ana_load(ctx, iobs):
     ws = "ws0"
@@ -65,16 +67,7 @@ def exe_p2p_ana_load(ctx, iobs):
     return aman
 
 
-def load_az_temp(aman, platform="satp1", hpc="tiger"):
-    if hpc == "tiger":
-        hkcfg_file = f"/home/jl7466/work_dir/so_analysis/so_analysis/configs/{platform}_hk_tiger.yaml"
-    elif hpc == "site":
-        hkcfg_file = (
-            f"/so/home/jblloyd/so_analysis/so_analysis/configs/{platform}_hk_site.yaml"
-        )
-    else:
-        raise ValueError("Invalid HPC argument, select either 'tiger' or 'site'.")
-
+def load_az_temp(aman, hkcfg_file, platform="satp1"):
     cfg = hkdb.HkConfig.from_yaml(hkcfg_file)
     if platform == "satp1":
         spec = hkdb.LoadSpec(
@@ -170,13 +163,13 @@ def make_binning(sigs, rs, r_bins):
 def exe_azbin(
     ctx,
     iobs,
+    hkcfg_file,
     platform="satp1",
     cut=5,
-    hpc="tiger",
 ):
 
     aman = exe_p2p_ana_load(ctx, iobs)
-    load_az_temp(aman, platform, hpc)
+    load_az_temp(aman, hkcfg_file, platform)
     az_deg = aman.boresight.az / DEG
     azmax = round(np.max(aman.boresight.az / DEG), 1)
     azmin = round(np.min(aman.boresight.az / DEG), 1)
@@ -668,7 +661,6 @@ def dataframe_maker(
                 ctx,
                 iobs,
                 platform=platform,
-                hpc="site",
             )
             df["obsid"] = iobs
             df["dt"] = [
@@ -724,7 +716,6 @@ def get_fpa_metrics(df, setpoint=75):
     ret = {}
     for idx in range(len(df["ret"])):
         try:
-            # save_f = os.path.join(save_dir + f"/{df['obsid'][idx]}.pkl")
             temp = df["ret"][idx]["fp_no_turnarounds"] * 1e3
             t = df["ret"][idx]["timestamps_no_turnarounds"]
             x = (t - t[0]) / 60  # time in minutes
@@ -802,6 +793,7 @@ def metric_analyzer(
     metric_dict,
     save_path=None,
     platform="satp1",
+    show_plot=False,
 ):
     """Flag observations whose FPA metrics exceed platform-specific thresholds.
 
@@ -872,7 +864,6 @@ def metric_analyzer(
             ):
                 print(std, std_threshold[j])
                 if std > std_threshold[j]:
-                    # send alert, figure this out
                     print(
                         f"Standard deviation of observation {obs} is over threshold value of {std_threshold[j]} mK at {round(std, 2)} mK."
                     )
@@ -911,23 +902,24 @@ def metric_analyzer(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_gauss[j] += 1
-                    plt.hist(
-                        variance,
-                        density=True,
-                        bins=50,
-                        histtype="step",
-                        label="Binned Data",
-                    )
-                    plt.plot(
-                        x_fit, y_fit, label=f"Gaussian fit\nR_sq: {round(r_sq, 2)}"
-                    )
-                    plt.xlabel("Temperature Residual (mK)")
-                    plt.ylabel("Probability Density")
-                    plt.title("Gaussian fit to Deviation from Zero")
-                    plt.legend()
-                    if save_path != None:
-                        plt.savefig(os.path.join(save_path + f"/{obs}_gaussian.png"))
-                    plt.close()
+                    if show_plot:    
+                        plt.hist(
+                            variance,
+                            density=True,
+                            bins=50,
+                            histtype="step",
+                            label="Binned Data",
+                        )
+                        plt.plot(
+                            x_fit, y_fit, label=f"Gaussian fit\nR_sq: {round(r_sq, 2)}"
+                        )
+                        plt.xlabel("Temperature Residual (mK)")
+                        plt.ylabel("Probability Density")
+                        plt.title("Gaussian fit to Deviation from Zero")
+                        plt.legend()
+                        if save_path != None:
+                            plt.savefig(os.path.join(save_path + f"/{obs}_gaussian.png"))
+                        plt.close()
         print(f"Number of Standard deviation flags: {n_std[j]}")
         print(f"Number of right turnaround P2P flags: {n_r_p2p[j]}")
         print(f"Number of left turnaround P2P flags: {n_l_p2p[j]}")
@@ -941,7 +933,6 @@ def metric_analyzer(
         "gof_cnt": n_gauss,
     }
     return ret
-
 
 def az_circle_plotter(
     cnt_dict,
@@ -994,11 +985,6 @@ def az_circle_plotter(
         None. Optionally displays the figure and, if ``save_path`` is given,
         saves it to disk.
     """
-    sys.path.append("/so/home/jblloyd/so_analysis/so_analysis/stylesheets/")
-    import general_stylesheet
-
-    general_stylesheet.apply_style()
-    colors = general_stylesheet.COLORS
 
     # Set figure params and geographical data
     offset = 0.8
@@ -1201,6 +1187,17 @@ def az_circle_plotter(
     # noisy edge of the trace).
     edge_trim = 50
     DEG = np.pi / 180
+    colors = {
+    "purple": "#9400D3",
+    "blue": "#0066FF",
+    "orange": "#FF8800",
+    "red": "#FF2200",
+    "green": "#00CC44",
+    "yellow": "#FFD500",
+    "cyan": "#00D5FF",
+    "lime": "#A6E22E",
+    "teal": "#00C2A8",
+    }
 
     for i, imask in enumerate([dfm["az1"], dfm["az2"], dfm["az3"], dfm["az4"]]):
         if not imask.any():
@@ -1391,7 +1388,6 @@ PLATFORM_SETTINGS = {
     "satp3": {"ctx_key": "ctx_path3", "setpoint": 62},
 }
 
-
 def ensure_dir(path):
     """Create a directory if it doesn't already exist, logging the outcome.
 
@@ -1417,7 +1413,6 @@ def ensure_dir(path):
         print(f"An error occurred creating directory '{path}':")
         traceback.print_exc()
     return path
-
 
 def get_parser(parser=None):
     """Parse command-line arguments for the FPA metrics pipeline.
@@ -1461,6 +1456,7 @@ def get_parser(parser=None):
 
 def main(
     config: str, 
+    verbose: Optional[int] = 2,
     ys: Optional[int] = date.year,
     ms: Optional[int] = date.month,
     ds: Optional[int] = 1,
@@ -1477,22 +1473,21 @@ def main(
         argv (list[str], optional): Argument list to parse instead of
             ``sys.argv`` (useful for testing). Defaults to None.
     """
+    # Set verbose
+    if verbose == 0:
+        logger.setLevel(logging.ERROR)
+    elif verbose == 1:
+        logger.setLevel(logging.WARNING)
+    elif verbose == 2:
+        logger.setLevel(logging.INFO)
+    elif verbose == 3:
+        logger.setLevel(logging.DEBUG)
+    
     configs = yaml.safe_load(open(config, "r"))
 
     settings = PLATFORM_SETTINGS[platform]
     ctx = core.Context(configs["contexts"][settings["ctx_key"]])
     setpoint = settings["setpoint"]
-
-    pkl_parent_dir = f"/so/home/jblloyd/output/fpa_metrics/{platform}/az_pkls"
-    metric_parent_dir = f"/so/home/jblloyd/output/fpa_metrics/{platform}/metric_pkls"
-    date_subdir = f"{ys}/{ms}/{ds}-{de}/{scan_type}"
-
-    pkl_save_p = ensure_dir(os.path.join(pkl_parent_dir, date_subdir))
-    metric_save_dir = ensure_dir(os.path.join(metric_parent_dir, date_subdir))
-    metric_save_p = os.path.join(metric_save_dir, f"{ye}_{me}_{de}.pkl")
-
-    print("trying to save pkls")
-    # Save pkl files
     dfm, df = dataframe_maker(
         ctx,
         ys=ys,
@@ -1520,16 +1515,11 @@ def main(
 
     print("trying to analyze metrics")
     cnt_ret = metric_analyzer(metric_dict, save_path=None, platform=platform)
-
-    ret_save_p = os.path.join(
-        metric_save_dir, f"{ye}_{me}_{de}_cnts.pkl"
-    )
-    save_pkl(cnt_ret, ret_save_p)
-
+    
     if df_ids:
         print("trying to save cirlce plot")
         circle_plt_save_p = os.path.join(
-            metric_save_dir, f"{ye}_{me}_{de}_circle_plot.png"
+            metric_save_dir, f"{args.ye}_{args.me}_{args.de}_circle_plot.png"
         )
         az_circle_plotter(
             cnt_dict=cnt_ret,
