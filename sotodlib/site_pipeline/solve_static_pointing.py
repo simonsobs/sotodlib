@@ -37,6 +37,9 @@ default_config = {
     "root_dir": "~",
     "project_dir": "pointing",
     "append": "",
+    "point_meta": "focal_plane",
+    "obs_whitelist": [],
+    "obs_blacklist": [],
 }
 
 
@@ -225,6 +228,51 @@ def _get_old(outfile, overwrite, backup):
     return old_system, old_cfg
 
 
+def _get_obslist(ctx, cfg, system):
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
+
+    # Make sure we have the metadata we want
+    point_db = None
+    required = ["assignment", "det_info", "wafer_info", cfg.point_meta]
+    for req in required:
+        dbs = [
+            md
+            for md in ctx["metadata"]
+            if md.get("name", "") == req or md.get("label", "") == req
+        ]
+        if len(dbs) == 0 or len(dbs) > 1:
+            raise ValueError(
+                f"Found {len(dbs)} entries in Context for required metadata: {req}"
+            )
+        if req == cfg.point_meta:
+            point_db = metadata.ManifestDb(dbs[0]["db"])
+    if point_db is None:
+        raise ValueError("Pointing metadata not found")
+
+    # Get all of the obs ids in our pointing db
+    cols = [c[0] for c in point_db.scheme.cols]
+    if "obs:obs_id" not in cols:
+        raise ValueError("Pointing metadata not indexed on obsdb!")
+    obsids = np.unique(np.array([entry["obs:obs_id"] for entry in point_db.inspect()]))
+
+    # Validate against black and whitelist
+    if len(cfg.obs_whitelist) > 0:
+        obsids = np.intersect1d(obsids, cfg.obs_whitelist)
+    if len(cfg.obs_blacklist) > 0:
+        obsids = np.setdiff1d(obsids, cfg.obs_blacklist)
+
+    # Load obsdb rows and filter by timestamp
+    obslist = [ctx.obsdb.get(obs_id) for obs_id in obsids]
+    obslist = [
+        obs
+        for obs in obslist
+        if system.search("receiver", obs["timestamp"]) is not None
+    ]
+
+    return obslist
+
+
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
     require = (
@@ -268,6 +316,9 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # TODO: Mark pad epochs as pad
 
     # TODO: Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+
+    # Get obs list
+    obslist = _get_obslist(ctx, cfg, system)
 
     # TODO: Fit for pointing model and focal planes
 
