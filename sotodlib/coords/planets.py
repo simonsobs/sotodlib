@@ -579,7 +579,7 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
       mask: source masking instructions (see note).
       wrap: key in tod at which to store the result.
       res: If P is None, sets the target mask map resolution
-        (radians).
+        (radians).  If None, defaults to 0.01 deg.
       max_pix: If P is None, this sets the maximum acceptable number
         of pixels for the mask map.  This is to catch cases where an
         incorrect source has been passed in, for example, leading to a
