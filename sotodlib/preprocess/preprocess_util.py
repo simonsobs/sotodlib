@@ -19,6 +19,7 @@ from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
+from sotodlib.sim import leakage_sim
 
 from .. import core
 from . import Pipeline
@@ -814,7 +815,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        ignore_cfg_check=False,
                                        data_amans=None,
                                        interpol=None,
-                                       apply_wobble=False):
+                                       apply_wobble=False,
+                                       leakage=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -861,6 +863,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         This only works when all detectors belong to a single wafer_slot
         and bandpass. See `coords.helpers.get_deflected_sightline`.
         Defaults to False.
+    leakage: None or  pipeline.configs.LeakageCfg
+        If not None, simulate leakage TOD.
     Returns
     -------
     aman : core.AxisManager or None
@@ -948,8 +952,12 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                 sight = None
             aman.move("signal", None)
 
-            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True,
-                              interpol=interpol, sight=sight)
+            if leakage is not None:
+                leakage_sim.from_map(aman, leakage, wrap=True,
+                                     modulated=True, sight=sight)
+            else:
+                demod_mm.from_map(aman, sim_map, wrap=True, modulated=True,
+                                interpol=interpol, sight=sight)
 
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, sim=True)
