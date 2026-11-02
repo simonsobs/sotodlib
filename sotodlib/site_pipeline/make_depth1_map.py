@@ -110,6 +110,26 @@ def get_parser(parser=None):
     return parser
 
 
+def log_tile_occupancy(signal_map, comm, L, pre="", nobs=0):
+    """Log how many map tiles each rank holds for a tiled SignalMap.
+
+    """
+    geo_work = signal_map.geo_work
+    geo_own = signal_map.rhs.geometry
+    # Pixels per map, and bytes per pixel for rhs + div + hits
+    work_pix = int(np.sum(geo_work.npixs[geo_work.active]))
+    own_pix = int(np.sum(geo_own.npixs[geo_own.active]))
+    ncomp = signal_map.ncomp
+    bytes_per_pix = (ncomp + ncomp**2 + 1) * np.dtype(signal_map.dtype).itemsize
+    L.debug(
+        f"{pre} Tiles rank {comm.rank:4d}/{comm.size}: nobs {nobs:3d} "
+        f"work {geo_work.nactive:5d}/{geo_own.ntile} tiles "
+        f"({work_pix * bytes_per_pix / 2**20:8.1f} MB) "
+        f"owned {geo_own.nactive:5d}/{geo_own.ntile} tiles "
+        f"({own_pix * bytes_per_pix / 2**20:8.1f} MB)"
+    )
+
+
 def make_depth1_map(
     context,
     obslist,
@@ -210,10 +230,13 @@ def make_depth1_map(
         del obs, pmap, Nt, obs_time_rhs
         nobs_kept += 1
 
+    nobs_kept_local = nobs_kept
     nobs_kept = comm.allreduce(nobs_kept)
     if nobs_kept == 0:
         raise d1u.DataMissing("All data cut")
     mapmaker.prepare()
+    if signal_map.tiled:
+        log_tile_occupancy(signal_map, comm, L, pre=pre, nobs=nobs_kept_local)
     # mapmaker doesn't know about time_rhs, so handle it manually
     if signal_map.tiled:
         time_rhs = tilemap.redistribute(time_rhs, comm)
@@ -275,6 +298,8 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
     # Set up logging.
     L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
 
+    if comm.rank == 0:
+        L.debug(f"Depth1 mapmaker config: {args}")
     # set up the preprocessing
     preproc = _get_config(args["preprocess_config"])
 
@@ -316,6 +341,8 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         freq=args["freq"],
         per_tube=True,
     )
+    if comm.rank == 0:
+        L.debug(f"Depth 1 mapmaking obslist: {obslists}")
 
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
