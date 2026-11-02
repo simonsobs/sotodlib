@@ -235,7 +235,8 @@ class P:
             return proj.zeros(super_shape)
         elif self.pix_scheme == 'rectpix':
             if self.tiled:
-                return tilemap.from_tiles(proj.zeros(super_shape), self.geom)
+                # second super_shape here only needed when all tiles are empty
+                return tilemap.from_tiles(proj.zeros(super_shape), self.geom.copy(pre=super_shape))
             else:
                 return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 

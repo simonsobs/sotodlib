@@ -322,6 +322,9 @@ class SuperLoader:
         assert(len(results) > 0)
         if len(results) == 1:
             result = results[0]
+        elif isinstance(results[0], core.AxisManager):
+            result = results[0].concatenate(
+                results, other_fields=spec.other_fields)
         else:
             result = results[0].concatenate(results)
         return result
@@ -859,6 +862,13 @@ class MetadataSpec:
         metadata.  (The dropping is applied after any restrictions on
         the loading using load_fields).
 
+    ``other_fields`` (str)
+        Policy for combining fields that do not share the
+        concatenation axis when this product is loaded in several
+        pieces (e.g. per wafer_slot / bandpass) and concatenated.
+        Passed to ``AxisManager.concatenate``; see there for the
+        accepted policies. Defaults to 'exact'.
+
     The following dict keys are deprecated, but are processed for
     backwards compatibility.
 
@@ -973,13 +983,15 @@ class MetadataSpec:
     unpack = None
     load_fields = None
     drop_fields = []
+    other_fields = 'exact'
 
     @classmethod
     def from_dict(cls, spec):
         self = cls()
         # canonical ...
         for k in ['db', 'label', 'unpack', 'det_info', 'loader',
-                  'on_missing', 'load_fields', 'drop_fields']:
+                  'on_missing', 'load_fields', 'drop_fields',
+                  'other_fields']:
             if k in spec:
                 setattr(self, k, spec[k])
         # "name" used to be unpacking instructions.

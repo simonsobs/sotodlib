@@ -603,8 +603,6 @@ def main(opts=None, comm=None):
         help="Create one task per wafer-observation",
     )
 
-    # Options for real data
-
     parser.add_argument(
         "--obs_file",
         required=False,
@@ -612,6 +610,8 @@ def main(opts=None, comm=None):
         default=None,
         help="File with observation IDs",
     )
+
+    # Context options
 
     parser.add_argument(
         "--context_file",
@@ -636,6 +636,8 @@ def main(opts=None, comm=None):
         default=None,
         help="Deprecated:  alias for `context_dets_select`",
     )
+
+    # HDF5 options
 
     parser.add_argument(
         "--hdf5_volume",
@@ -687,6 +689,15 @@ def main(opts=None, comm=None):
         help="Synthetic observing schedule",
     )
 
+    # Detailed debugging of the batch system
+
+    parser.add_argument(
+        "--debug_batch",
+        action="store_true",
+        default=False,
+        help="Enable debug mode in MPIBatch",
+    )
+
     # Parse just the args we are using in this wrapper
     args, remaining = parser.parse_known_args(args=opts)
 
@@ -695,10 +706,11 @@ def main(opts=None, comm=None):
         log.warning(msg)
         args.context_dets_select = args.dets_select
 
+    # Cleanup any requested states
+    cleanup_states(args)
+
     # If we are printing status, just do that and exit
     if args.status:
-        # Cleanup any running states if needed
-        cleanup_states(args)
         print_status(args)
         return
 
@@ -730,9 +742,6 @@ def main(opts=None, comm=None):
         msg += " or `sim_schedule`"
         raise RuntimeError(msg)
 
-    # Cleanup any running states if needed
-    cleanup_states(args)
-
     if args.worker_size is None:
         if comm is None:
             worker_size = 1
@@ -753,7 +762,7 @@ def main(opts=None, comm=None):
         n_task,
         task_fs_root=args.out_root,
         task_fs_names=[x["name"] for x in tasks],
-        debug=False,
+        debug=args.debug_batch,
     )
 
     msg = f"Using {batch.n_worker} workers"

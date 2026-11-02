@@ -1,5 +1,6 @@
 import os
 import warnings
+import time
 
 import numpy as np
 import h5py
@@ -12,6 +13,12 @@ from . import utils as smutils
 from .. import coords
 from .pointing_matrix import PmatCut
 from .noise_model import NmatUncorr
+
+# Hooking in the enlib logging system for now, to investigate
+# weird MLMapmaker slowness. Should merge these logging systems into
+# a best-of-both-worlds solution at some point
+from . import log as smlog
+L = smlog.getLogger("enlib")
 
 class MLMapmaker:
     def __init__(
@@ -57,6 +64,7 @@ class MLMapmaker:
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None:
             noise_model = self.noise_model
+        t1 = time.time()
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
         if noise_model.ready:
@@ -74,11 +82,14 @@ class MLMapmaker:
             # adding it back can reintroduce a slope. Fix that here.
             if deslope:
                 putils.deslope(tod, w=5, inplace=True)
+        t2 = time.time()
         # And apply it to the tod
         tod = nmat.apply(tod)
+        t3 = time.time()
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
+        t4 = time.time()
         # Save what we need about this observation
         self.data.append(
             bunch.Bunch(
@@ -89,6 +100,7 @@ class MLMapmaker:
                 nmat=nmat,
             )
         )
+        L.debug("b Nb %5.2f N %5.2f S %5.2f %s %4d %6d" % (t2-t1, t3-t2, t4-t3, id, *tod.shape))
 
     def prepare(self):
         if self.ready:
@@ -110,21 +122,37 @@ class MLMapmaker:
     def A(self, x_zip):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
+        t1 = time.time()
         evaluator   = self.evaluator(x_zip)
         accumulator = self.accumulator()
+        t2 = time.time()
         for di, data in enumerate(self.data):
+            ta1 = time.time()
             tod = evaluator.evaluate(data)
+            ta2 = time.time()
             data.nmat.apply(tod)
+            ta3 = time.time()
             accumulator.accumulate(data, tod)
+            ta4 = time.time()
+            L.debug("A P %5.2f N %5.2f P' %5.2f %s %4d %6d" % (ta2-ta1, ta3-ta2, ta4-ta3, data.id, *tod.shape))
+        t3 = time.time()
         accumulator.finish()
+        t4 = time.time()
         self.prior(evaluator.x, accumulator.x)
-        return self.dof.zip(*accumulator.x)
+        t5 = time.time()
+        res = self.dof.zip(*accumulator.x)
+        t6 = time.time()
+        L.debug("A prep %5.1f PNP %5.1f fin %5.1f pri %5.1f zip %5.1f" % (t2-t1, t3-t2, t4-t3, t5-t4, t6-t5))
+        return res
 
     def M(self, x_zip):
+        t1 = time.time()
         iwork = self.dof.unzip(x_zip)
         result = self.dof.zip(
             *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
         )
+        t2 = time.time()
+        L.debug("M %5.1f" % (t2-t1))
         return result
 
     def solve(
@@ -198,7 +226,10 @@ class MLEvaluator:
         """Evaluate Px for one tod"""
         if tod is None: tod = np.zeros([data.ndet, data.nsamp], self.dtype)
         for si, signal in reversed(list(enumerate(self.signals))):
+            t1 = time.time()
             signal.forward(data.id, tod, self.iwork[si])
+            t2 = time.time()
+        L.log(9, "Ev %5.2f %-12s %s %4d %6d" % (t2-t1, signal.__class__.__name__, data.id, *tod.shape))
         return tod
 
 class MLAccumulator:
@@ -210,7 +241,10 @@ class MLAccumulator:
     def accumulate(self, data, tod):
         """Accumulate P'd for one tod"""
         for si, signal in enumerate(self.signals):
+            t1 = time.time()
             signal.backward(data.id, tod, self.owork[si])
+            t2 = time.time()
+            L.log(9, "Ac %5.2f %-12s %s %4d %6d" % (t2-t1, signal.__class__.__name__, data.id, *tod.shape))
     def finish(self):
         """Return the full P'd based on the previous accumulation"""
         self.x = [signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
@@ -650,6 +684,7 @@ class SignalSrcsamp(SignalCut):
         """
         # First scan our mask to find which samples need this
         # treatment
+        ctime  = obs.timestamps
         if self.recenter:
             rec = smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
                     geom=(self.mask.shape, self.mask.wcs), site=smutils.unarr(obs.site))

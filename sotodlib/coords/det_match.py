@@ -1,6 +1,6 @@
 import warnings
 from dataclasses import dataclass, fields, asdict, field
-from typing import List, Optional, Tuple, Iterator, Union
+from typing import List, Optional, Tuple, Iterator, Union, get_origin, get_args
 from copy import deepcopy
 import h5py
 
@@ -147,10 +147,10 @@ class Resonator:
     bg: int = -1
     det_x: float = np.nan
     det_y: float = np.nan
-    det_row: int = 0
-    det_col: int = 0
+    det_row: Optional[int] = None
+    det_col: Optional[int] = None
     pixel_num: int = 0
-    det_rhomb: str = ''
+    det_rhomb: Optional[str] = None
     det_pol: str = ''
     det_freq: int = 0
     det_bandpass: str = ''
@@ -190,12 +190,18 @@ def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointin
         r = deepcopy(smurf_res)
 
     design_props = [
-        'bg', 'det_x', 'det_y', 'det_row', 'det_col', 'pixel_num', 'det_rhomb',
+        'bg', 'det_x', 'det_y', 'pixel_num',
         'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
         'det_angle_actual_deg', 'det_type', 'det_id', 'is_optical',
         'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
         'mux_layout_pos'
     ]
+
+    # for LF
+    for attr in ('det_row', 'det_col', 'det_rhomb'):
+        if getattr(design_res, attr, None) is not None:
+            design_props.append(attr)
+
     if apply_pointing:
         design_props += ['xi', 'eta', 'gamma']
 
@@ -267,6 +273,8 @@ class ResSet:
         dtype = []
         data = []
         for field in fields(Resonator):
+            if get_origin(field.type) is Union and type(None) in get_args(field.type):
+                continue
             if field.type == str:
                 typ = '<U50'
             else:
@@ -399,11 +407,16 @@ class ResSet:
         with h5py.File(wafer_info_file) as f:
             wafer_array = np.array(f[array_name])
 
+        # LF does not have det_row, det_col, or rhombus
+        has_det_row = 'dets:wafer.det_row' in wafer_array.dtype.names
+        has_det_col = 'dets:wafer.det_col' in wafer_array.dtype.names
+        has_rhomb = 'dets:wafer.rhombus' in wafer_array.dtype.names
+
         resonators = []
         idx = 0
         for r in wafer_array:
             is_north = r['dets:wafer.coax'] == b'N'
-            res = Resonator(
+            kwargs = dict(
                 idx=idx,
                 det_id=r['dets:det_id'].decode(),
                 mux_bondpad=r['dets:wafer.bond_pad'],
@@ -415,15 +428,24 @@ class ResSet:
                 bg=r['dets:wafer.bias_line'],
                 det_pol=r['dets:wafer.pol'],
                 det_bandpass=r['dets:wafer.bandpass'],
-                det_row=r['dets:wafer.det_row'],
-                det_col=r['dets:wafer.det_col'],
-                det_rhomb=r['dets:wafer.rhombus'],
                 det_type=r['dets:wafer.type'],
                 det_x=r['dets:wafer.x'],
                 det_y=r['dets:wafer.y'],
                 det_angle_actual_deg=r['dets:wafer.angle'],
                 is_north=is_north
             )
+
+            optional_fields = {
+                "det_row": (has_det_row, 'dets:wafer.det_row'),
+                "det_col": (has_det_col, 'dets:wafer.det_col'),
+                "rhombus": (has_rhomb, 'dets:wafer.rhombus'),
+            }
+
+            for key, (found, val) in optional_fields.items():
+                if found and field in r.dtype.names:
+                    kwargs[key] = val
+
+            res = Resonator(**kwargs)
 
             if pt_cfg is not None:
                 res.xi, res.eta, res.gamma = pt_cfg.get_pointing(res.det_x, res.det_y)
@@ -469,7 +491,7 @@ class ResSet:
             for i in range(len(labels)):
                 labels[i] = labels[i].strip()
 
-            #Helper needed for when sol file has saved ints as floats
+            # Helper needed for when sol file has saved ints as floats
             def _int(val, null_val=None): 
                 is_null = (val == 'null' or val == '')
                 if is_null and null_val is not None:
@@ -485,22 +507,40 @@ class ResSet:
                 # is_north = d['is_north'].lower().strip() == 'true'
                 is_north = _int(d['bias_line']) < 6
                 is_optical = (d['is_optical'].lower() == 'true')
-                r = Resonator(
-                    i, res_freq=float(d['freq_mhz']), smurf_band=_int(d['smurf_band']),
-                    bg=_int(d['bias_line']), det_x=float(d['det_x']),
-                    det_y=float(d['det_y']), det_rhomb=d['rhomb'],
-                    det_row=_int(d['det_row']), det_col=_int(d['det_col']),
+
+                kwargs = dict(
+                    i=i,
+                    res_freq=float(d['freq_mhz']),
+                    smurf_band=_int(d['smurf_band']),
+                    bg=_int(d['bias_line']),
+                    det_x=float(d['det_x']),
+                    det_y=float(d['det_y']),
                     pixel_num=_int(d['pixel_num'], null_val=-1),
-                    det_type=d['det_type'], det_id=d['detector_id'].strip(),
-                    mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
-                    mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
+                    det_type=d['det_type'],
+                    det_id=d['detector_id'].strip(),
+                    mux_band=_int(d['mux_band']),
+                    mux_channel=_int(d['mux_channel']),
+                    mux_subband=d['mux_subband'],
+                    mux_bondpad=d['bond_pad'],
                     det_angle_raw_deg=float(d['angle_raw_deg']),
                     det_angle_actual_deg=float(d['angle_actual_deg']),
                     mux_layout_pos=_int(d['mux_layout_position']),
-                    det_bandpass=d['bandpass'], det_pol=d['pol'],
+                    det_bandpass=d['bandpass'],
+                    det_pol=d['pol'],
                     is_optical=is_optical,
                     is_north=is_north
                 )
+
+                optional_fields = {
+                    "det_row": ('det_row', _int),
+                    "det_col": ('det_col', _int),
+                    "det_rhomb": ('rhomb', lambda x: x),
+                }
+
+                for key, (src_key, fn) in optional_fields.items():
+                    if src_key in d and d[src_key] not in (None, ''):
+                        kwargs[key] = fn(d[src_key])
+                r = Resonator(**kwargs)
 
                 if _int(d['smurf_channel']) != -1:
                     r.smurf_channel = _int(d['smurf_channel'])
@@ -593,10 +633,12 @@ class MatchParams:
         enforce_pointing_reqs (bool):
             If this is enabled, it will enforce the following requirements when
             matching:
-
              - Resonators with OPTC det_type must have pointing data.
              - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
              - Resonators with DARK or SLOT det_types may or may not have pointing data.
+        allow_unassigned_to_assigned (bool):
+            Allow resonators from dst that do not have an assigned bias group
+            to be matched to one in src that has an assigned bias group.
         assigned_bg_unmatched_pen (float):
             Penalty to apply to leaving a resonator with an assigned bg
             unmatched
@@ -613,10 +655,11 @@ class MatchParams:
     unassigned_slots: int = 1000
     freq_offset_mhz: float = 0.0
     freq_width: float = 2.
-    dist_width: float =0.01
+    dist_width: float = 0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
     enforce_pointing_reqs: bool = False
+    allow_unassigned_to_assigned: bool = True
 
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
@@ -697,14 +740,19 @@ class Match:
         self.stats = self.get_stats()
 
     def _get_biadjacency_matrix(self) -> np.ndarray:
-        src_arr = self.src.as_array()
-        dst_arr = self.dst.as_array()
+        src_arr = self.src.as_array() # pointing or tuneset
+        dst_arr = self.dst.as_array() # design or pointing
 
         mat = np.zeros((len(self.src), len(self.dst)), dtype=float)
 
         # N/S mismatch
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
+
+        src_no_match = np.isin(src_arr['det_type'], ['NC'])
+        dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
+        mat[src_no_match, :] = np.inf
+        mat[:, dst_no_match] = np.inf
 
         if self.match_pars.enforce_pointing_reqs:
             # Det types of DARK and SLOT are allowed to may or may not have
@@ -714,11 +762,7 @@ class Match:
             src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
             dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
 
-            src_no_match = np.isin(src_arr['det_type'], ['NC'])
-            dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
-            mat[src_no_match, :] = np.inf
-            mat[:, dst_no_match] = np.inf
-
+            # UNRT, SQID, and BARE must not have pointing
             src_pointing_forbidden = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
             dst_pointing_forbidden = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
             m = src_pointing_forbidden[:, None] & dst_has_pointing[None, :]
@@ -726,6 +770,7 @@ class Match:
             m = src_has_pointing[:, None] & dst_pointing_forbidden[None, :]
             mat[m] = np.inf
 
+            # OPTC must have pointing
             src_pointing_required = np.isin(src_arr['det_type'], ['OPTC'])
             dst_pointing_required = np.isin(dst_arr['det_type'], ['OPTC'])
             m = src_pointing_required[:, None] & (~dst_has_pointing[None, :])
@@ -733,19 +778,44 @@ class Match:
             m = (~src_has_pointing[:, None]) & dst_pointing_required[None, :]
             mat[m] = np.inf
 
+        # These should always have BG = -1
+        src_unassigned_type = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+        dst_unassigned_type = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+        # pointing or tuneset have unassigned type (shouldn't ever happen since
+        # they won't have det_types yet)
+        m = src_unassigned_type[:, None] & (dst_arr['bg'][None, :] !=-1)
+        mat[m] = np.inf
+        # Design or pointing have unassigned type (should happen since dst
+        # will have det_types)
+        m = dst_unassigned_type[None, :] & (src_arr['bg'][:, None] !=-1)
+        mat[m] = np.inf
+
         # Frequency offset
         df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
         df -= self.match_pars.freq_offset_mhz
         mat += np.exp((np.abs(df / self.match_pars.freq_width)) ** 2)
 
-        # BG mismatch
-        bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
-        bgs_unassigned = (src_arr['bg'][:, None] == -1) | (dst_arr['bg'][None, :] == -1)
+        # Design or pointing unassigned
+        dst_unassigned = (dst_arr['bg'][None, :] == -1)
+        # pointing or tune unassigned
+        src_unassigned = (src_arr['bg'][:, None] == -1)
 
-        m = bgs_mismatch & bgs_unassigned
+        # Whether or not to match unassigned bg to assigned bgs
+        # don't want matches when matching from design to pointing
+        m = dst_unassigned & (~src_unassigned)
+        if not self.match_pars.allow_unassigned_to_assigned:
+            mat[m] = np.inf
+        else:
+            mat[m] += self.match_pars.unassigned_bg_mismatch_pen
+
+        # Match assigned bg to unassigned bg
+        m = (~dst_unassigned) & src_unassigned
         mat[m] += self.match_pars.unassigned_bg_mismatch_pen
-        m = bgs_mismatch & (~bgs_unassigned)
-        mat[m] += self.match_pars.assigned_bg_mismatch_pen
+
+        # Assigned bgs must not be mismatched
+        bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
+        m = bgs_mismatch & (~dst_unassigned) & (~src_unassigned)
+        mat[m] = np.inf
 
         # If pointing, add cost if assigned too far
         dd = np.sqrt(
@@ -801,9 +871,11 @@ class Match:
         for r1, r2 in self.get_match_iter(include_unmatched=True):
             if r1 is None:
                 r2.matched = 0
+                r2.match_idx = -1
                 continue
             if r2 is None:
                 r1.matched = 0
+                r1.match_idx = -1
                 continue
 
             r1.matched = 1

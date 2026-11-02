@@ -80,8 +80,9 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
         ), "When using naive pointing model, wrap=... not supported"
         return apply_basic_pointing_model(tod)
 
-    pointing_model = _valid_arg(pointing_model, "pointing_model", src=tod)
-    ancil = _valid_arg(ancil, "ancil", src=tod)
+    if tod is not None:
+        pointing_model = _valid_arg(pointing_model, "pointing_model", src=tod)
+        ancil = _valid_arg(ancil, "ancil", src=tod)
 
     # Encoder values, to radians.
     if pointing_model is None:
@@ -99,7 +100,7 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
 
     if wrap is None:
         wrap = "boresight"
-    if wrap is not False:
+    if wrap is not False and tod is not None:
         if wrap in tod._fields:
             del tod[wrap]
         tod.wrap(wrap, boresight)

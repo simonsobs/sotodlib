@@ -136,6 +136,17 @@ operations (different combinations of ``update-base-data`` and
     run-job -c ancil.yaml standard_7day_update
 
 
+This script complements the basic Book checking and indexing done by
+``site_pipeline.update_obsdb``. To import records from some upstream
+obsdb into the "target_obsdb", use the ``import-records`` command
+(this requires ``upstream_obsdb`` to be set in the config file).  To
+trigger a run of the ``site_pipeline.update_obsdb`` script, the
+``update-books`` command can be used.  Note this command should be
+provided with a config file suitable for
+``site_pipeline.update_obsdb``.  The CLI arguments ``config_file``,
+``lookback_days``, and ``redo`` are translated to ``config``,
+``recency`` and ``overwrite``, respectively.
+
 For testing there are ``check`` and ``test`` commands.  The ``check``
 command simply instantiates an engine for each dataset -- basically
 checking for configuration problems and summarizing some easily
@@ -206,6 +217,10 @@ Here's an annotated example:
 
   # ObsDb to use for update-obsdb jobs
   target_obsdb: /so/metadata/obsdb.sqlite
+
+  # ObsDb to use as a source for "import-records" (optional; will not
+  # be modified).
+  upstream_obsdb: /so/metadata/obsdb0.sqlite
 
   # This (optionally) sets the default data_prefix used for base data
   # in all datasets (can be overridden by setting data_prefix in a
@@ -377,8 +392,260 @@ The output database ``wafer_info.sqlite`` and HDF5 file
 ``wafer_info.h5`` are written to the ``output_dir``, which is created
 if it does not exist.
 
-make_read_det_match
+
+get_brightsrc_pointing_part1  
+----------------------------
+
+The two-part ``get_brightsrc_pointing_part{}`` script set will solve for the xieta
+coordinates of detectors that observe a bright source during an observation.
+
+It is a two part process that requires a map step and then a TOD step.
+The scripts require the settings and preprocessing config files described below. 
+
+For job submission and parallelization, see example NERSC slurm submission config at the end of this section.
+
+The code will process all wafers unless otherwise specified. 
+It is recommended to run with ``parallel_job: True`` in the config files if analyzing 
+multiple wafers at once. 
+Otherwise, specify a wafer slot or restrict detectors in command line args to debug.
+
+Command Line arguments:
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1
+   :func: get_parser
+
+
+There options to include min_ctime and max_ctime arguments, which will process all observations
+in the time frame, is not recommended unless severely restricting the detectors for debugging.
+
+
+Generated results
 ```````````````````
+The Step 1 map-based analysis scripts will generate the following outputs in the specified directory:
+
+ 1. Single detector maps in ``/results/single_det_maps/<obs_id>_<ws#>.hdf``. 
+
+  * All single maps are packaged in a single hdf file, with detector readout_id as the keys in the h5py file. 
+
+ 2. Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/map_based_results``
+ as specified in the Step 1 config file. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'
+
+  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, R2], N rows>``
+
+
+The Step 2 TOD-based analysis scripts will use the map-based results as a starting point
+ and then generate the finalized outputs in the specified directory:
+
+ 1.  Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/tod_based_results``
+ as specified in config file for Step-2. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'.
+ The median boresight values from small time range the source was visible to each detector is included.
+
+  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, xi_err, eta_err, R2, redchi2, az, el, roll], N rows>``
+ 
+Configuration Files
+```````````````````
+The configuration files to be input as ``configs`` in the command line should 
+have the following arguments as well as any preprocessing steps wished to be taken.
+Only processing steps that are agnostic of det-match can be used to do
+initial analyses without formalized metadata.
+
+The parameters in these examples could be used for SAT mid-freq moon observations.
+
+Step 1 Config:
+
+.. code-block:: yaml
+
+  context_file: /path/to/context.yaml
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
+
+  optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
+  single_det_maps_dir: /path/to/results/single_det_maps
+  results_dir: /path/to/results/map_based_results
+
+  parallel_job: True  #For job submission. Parallel across wafers.
+  wafer_mask_det: 8.  # (degrees) mask around detector to cut TOD when source too far away. 
+  res_deg: 0.3
+  xieta_bs_offset: [0., 0.]  #Good to input xieta offset in radians. (!!! for satp2)
+  save_normal_roll: False  #false for SAT, true for LAT
+  save_force_zero_roll: True  #true for SAT, false for LAT
+
+  hit_circle_r_deg: 7.  # radial mask to decide which UFMs are hit by source and should be analyzed.
+  hit_time_threshold: 600  #seconds, if hit_time not met then UFM does not get analyzed.
+
+  process_pipe:
+    - name: 'detrend'
+      process:
+        count: 2000
+        method: 'linear'
+    - name: 'apodize'
+      process:
+        apodize_samps: 2000
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "low_pass_sine2"
+        trim_samps: null
+        filter_params:
+          cutoff: 1.9
+          width: 0.2
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "high_pass_sine2"
+        trim_samps: 2000
+        filter_params:
+          cutoff: 0.05
+          width: 0.1
+  
+Part 2 is the TOD-based step. Its config file should look like the following.
+The parameters in these examples are used for SAT mid-freq moon observations.
+
+.. code-block:: yaml
+
+  context_file: /path/to/context.yaml
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
+
+  optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
+  fp_hdf_dir: /path/to/results/map_based_results from step 1 config file. 
+      # If force_zero_roll is was True, then append _force_zero_roll to the end.
+      # Just make sure it matches where the results from Step 1 are.
+  result_dir: /path/to/resuls/tod_based_results #Where you want the final Step2 results to show up.
+  
+  parallel_job: True
+  force_zero_roll: True  #Results will show up roatated in the xi-eta results as they are on the sky.
+  ds_factor: 40
+  mask_deg: 2.5  # (degrees) size for circular mask around SSO (helps exclude focal plane reflections too)
+  fit_func_name: 'gaussian2d_nonlin'
+  max_non_linear_order: 3  #Suggested to use 1 for jupiter or sso's 
+                           #that do not saturate.
+  fwhm_init_deg: 0.5  # (degrees) Lower for SATp2
+  error_estimation_method: 'force_one_redchi2'
+  flag_name_rms_calc: 'around_source'
+  flag_rms_calc_exclusive: False
+
+  process_pipe:
+    - name: 'detrend'
+      process:
+        count: 2000
+        method: 'linear'
+    - name: 'fourier_filter'
+      process:
+        signal_name: 'signal'
+        filt_function: 'iir_filter'
+        trim_samps: null
+        filter_params:
+          invert: True
+    - name: 'apodize'
+      process:
+        apodize_samps: 2000
+    - name: 'fourier_filter'
+      process:
+        signal_name: "signal"
+        wrap_name: null
+        filt_function: "low_pass_sine2"
+        trim_samps: null
+        filter_params:
+          cutoff: 1.9
+          width: 0.2
+    - name: 'source_flags'
+      source_flags_name: 'source_wide'
+      save: True
+      calc:
+        mask:
+          shape: circle
+          xyr: [0., 0., 5.0]
+        merge: True
+        max_pix: 10000000000
+    - name: 'source_flags'
+      source_flags_name: 'source_narrow'
+      save: True
+      calc:
+        mask:
+          shape: circle
+          xyr: [0., 0., 3.0]
+        merge: True
+        max_pix: 10000000000
+    - name: 'combine_flags'
+      process:
+        flag_labels: ['source_wide.moon', 'source_narrow.moon']
+        method: 'except' 
+        total_flags_label: 'around_source'
+    - name: 'flag_turnarounds'
+      process:
+        truncate: True
+    - name: 'sub_polyf'
+      process: 
+        method: 'legendre'
+        degree: 2
+        mask: 'around_source'
+        exclusive: False
+
+Example NERSC slurm job submission config file
+``````````````````````````````````````````````
+
+.. code-block:: yaml
+  #!/bin/bash -l
+
+  #SBATCH --qos=shared
+  #SBATCH --constraint=cpu
+  #SBATCH --nodes=1
+  #SBATCH --ntasks=1
+  
+  #SBATCH --cpus-per-task=14
+  #SBATCH --time=00:30:00
+  #SBATCH --mem=220G`` #(may need regular queue & up to 400 Gb for long obs)
+  
+  export OMP_NUM_THREADS=1
+  set -e
+
+  tele=$1
+  obs=$2
+  map=$3
+  basis=$4
+  source="moon_from_moon"
+
+  ymldir="/path/to/processing_settings_config_folder"
+  yfile="${ymldir}/preprocess_config_moon_${basis}_based_${tele}.yaml"
+
+  if (($map)); then
+    echo submitted map job;
+    srun -n 1 -N 1 -c 14 python3 
+       /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile
+       --obs_id=${2} --sso_name="moon";
+  else
+    echo submitted tod job;
+    srun -n 1 -N 1 -c 14 python3 
+        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile 
+        --obs_id=${2} --sso_name="moon";
+  fi
+
+
+Submit the job submission file with the following commands:
+
+1. For Step 1 map-based
+
+ * ``sbatch submit_moon_job_script.sh <platform> <obs_id> 1 map``
+
+2. For Step 2 TOD based
+
+ * ``sbatch submit_moon_job_script.sh <platform> <obs_id> 0 tod``
+
+
+get_brightsrc_pointing_part2
+----------------------------
+See Part 1 for description
+
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :func: get_parser
+
+
+make_read_det_match
+-------------------
 This script generates the readout ID to detector ID mapping required to
 translate between the detector hardware information (ex: pixel position) and the
 readout IDs of the resonators used to index the SMuRF data. The script uses the 
@@ -446,6 +713,7 @@ entries mater.
         - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
           multi: true
+
 
 update_det_match
 ------------------
@@ -692,6 +960,10 @@ The ``focal_plane_full`` dataset contains nine columns:
 - ``eta_m``: The measured eta in radians
 - ``gamma_m``: The measured gamma in radians.
 - ``weights``: The average weights of the measurements for this det.
+- ``r2``: The fit weight passed in from the get_brightsrc_pointing dataset
+- ``az``: The median Az value in radians from source-detector crossing
+- ``el``: The median El value in radians from source-detector crossing
+- ``roll``: The median Roll value in radians from source-detector crossing
 - ``n_point``: The number of pointing fits used for the det.
 - ``n_gamma``: The number of gamma fits used for this det.
 
@@ -732,7 +1004,7 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
 By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
+If you are running in ``per_obs`` mode then it will be indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
@@ -748,6 +1020,140 @@ the ``focal_plane`` dataset. This can be done like so:
 
 This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
 The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
+
+solve_pointing_model
+--------------------
+
+This script solves for the pointing model parameters using moon observations. 
+The inputs are the the el_center, roll_center, and the UFM
+center locations as fit by finalize_focal_plane, 
+per each moon observation.
+The fitter uses lmfit with a Nelder-Mead minimization routine to minimize
+the distance between modeled data points and the reference data points. 
+By default, the measured UFM centers are the reference points, 
+and the quaternion rotations of the pointing model are applied to the nominal, template, UFM center locations.
+However, the model can be applied in reverse, with the template positions as reference -- some diagnostic plots are in this space, as it makes it easier to view residuals from multiple boresight orientations at once.
+See the ``xieta_model`` parameter comments for more details.
+
+``solve_pointing_model`` can be iterated once after the first parameter fit.
+Specifying ``iterate_cutoff`` in arcmin will exlude outliers from next round of fitting.
+
+.. automodule:: sotodlib.site_pipeline.solve_pointing_model
+   :members:
+   :undoc-members:
+
+Config file format
+``````````````````
+
+Here is an annotated basic configuration file. 
+The first block are mandatory entries. The second block are optional.
+
+.. code-block:: yaml
+
+    # Mandatory to include in config file
+
+    # Specify platform for the code to run on. (satp1, satp3 are supported)
+    platform: satp1
+    # pm_version tells coords.pointing_model which pointing model to use.
+    # It determines the quaternion model. Don't change this.
+    pm_version: sat_v1
+    # Tag for metadata versioning, will appended to output directory
+    solution_version_tag: YYMMDDr
+    # Output directory to save results in.
+    # A sub directory in {outdir} will be created as
+    #{platform}_pointing_model_{solution_version_tag}_{xieta_model}_{add_tag}
+    outdir: /your/save/directory
+    # Load data and reference focal plane templates
+    # ffp_path must be common mode subtracted version of focal_plane
+    ffp_path: "/path/to/centered/focal_plane/metadata/focal_plane_cmsub.h5"
+    # per_obs_fps are multiple per-observation focal_plane
+    # fits saved into one h5 file. These are fitted to moon measurements.
+    # only data from UFMs that had good detector fits are included.
+    per_obs_fps: /path/to/per-obs/finalize/focal/plane/results/per_obs/focal_plane.h5
+    # The provided context file is used to load boresight/elevation data from
+    # obs_ids included in per_obs_fps
+    context:
+        path: "/so/metadata/satp1/contexts/nominal/focal_plane.h5"
+    # List of ufms in order of wafer slot, not currently future
+    # proof when new ufms are swapped in.
+    # This assists unpacking per_obs_fps with its sparse UFM info.
+    ufms: ['ufm_mv19', 'ufm_mv18', 'ufm_mv22', 'ufm_mv29', 
+           'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] #satp1
+    # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35', 'ufm_mv12',
+    # 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
+
+    # Optional configuration parameters
+
+    # parameters included here will be fixed in the minimization.
+    # See comments for which to fix for different platforms.
+    fixed_params:
+      - az_rot          #all
+      - base_tilt_cos   #all
+      - base_tilt_sin   #all
+      - fp_rot_eta0     #all
+      - fp_offset_eta0  #all
+      - fp_rot_xi0      #satp3 only
+    # "xieta_model" decides which parameter space the fitting occurs in.
+    # "measured": The fitter applies pointing model to template UFM xi-eta
+    #             locations based on El and Roll of the obs, to get the modeled
+    #             xi-etas to match the measured data points.
+    #             Modeled data points get spread out based on boresight.
+    # "template": The fitter applies pointing model "backwards" on measured
+    #             xieta data points to match them to template locations.
+    #             The modeled data points cluster around
+    #             the nominal template locations.
+    # Each method gives slightly different results. "measured" is default.
+    xieta_model: measured
+    # Define a weight cutoff for fitting routine.
+    weight_cutoff: 0.2
+    # Cut out any known bad observations.
+    skip_tags:
+      - "_1713" #bad timing satp1
+      - "1716423951" #Just a very bad fit satp1
+    # Option to iterate parameter fitting. If not None, data points with
+    # fit residuals higher than cutoff will be excluded from second round of fits.
+    iterate_cutoff: None # or arcmin
+    # Make diagnostic plots.
+    make_plots: True
+    # any additional tag to append on results directory
+    append: ""
+    save_output: True
+
+
+Output file format
+``````````````````
+
+The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
+Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
+
+.. code-block:: text
+
+    - ancil (aman)
+      - az_enc (num_obs * 7)
+      - boresight_enc (num_obs * 7)
+      - el_enc (num_obs * 7)
+    - ffp_ufm_center_fits ((xi, eta, gamma), num_obs * 7) #This where the info from per_obs_fps gets stored
+    - nom_ufm_centers ((xi, eta, gamma), num_obs * 7) #This is where info from cmsub focal_plane goes.
+    - obs_info (aman) 
+      - obs_ids (num_obs)
+    - roll_c (num_obs * 7)
+    - weights (num_obs * 7)
+    - model_fits (aman)
+      - eta (num_obs * 7)
+      - xi (num_obs * 7)    
+    - pointing_model (aman)
+      - pm_version
+      - parameters by name
+    #- parameter_fit_stats #Not yet implemented in output, but visible in log file.
+    #  - name 
+    #  - value 
+    #  - vary 
+    #  - min 
+    #  - max
+    #  - stderr 
+    #  - correl #correlation with other fit params
+    #- excluded (Data points)
+
 
 preprocess-tod
 --------------

@@ -238,7 +238,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             if db is not None and not overwrite:
                 x = db.inspect({'obs:obs_id': obs_id})
                 if x is not None and len(x) != 0 and len(x) != len(groups):
-                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    try:
+                        [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    except Exception as e:
+                        logger.error(f"filtering of {groups} for {obs_id} with entry {x} failed with {e}")
+                        raise
+
 
             for group in groups:
                 if 'NC' not in group:
