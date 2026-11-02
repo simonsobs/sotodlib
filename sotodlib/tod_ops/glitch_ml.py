@@ -35,6 +35,7 @@ receives (see :func:`register_stat`).
 
 import inspect
 import logging
+import os
 import pickle
 import warnings
 
@@ -276,6 +277,10 @@ def classify_snippets(aman, snippets, trained_forest, detrend_method="median", n
           :data:`PRED_COLUMNS`.  Snippets with non-finite statistics are not
           classified, and their predictions are NaN.
         - ``detrend_method``: *detrend_method*.
+        - ``trained_forest_used``: file name of the pickled forest, including
+          the ``.pkl`` extension, if *trained_forest* was passed in as a
+          path; ``"Not available"`` if it was passed in as a forest object
+          directly.
 
     Raises
     ------
@@ -286,8 +291,11 @@ def classify_snippets(aman, snippets, trained_forest, detrend_method="median", n
     if isinstance(trained_forest, str):
         if not trained_forest.endswith(".pkl"):
             trained_forest += ".pkl"
+        trained_forest_name = os.path.basename(trained_forest)
         with open(trained_forest, "rb") as f:
             trained_forest = pickle.load(f)
+    else:
+        trained_forest_name = "Not available"
     if n_jobs is not None:
         trained_forest.n_jobs = n_jobs
 
@@ -322,6 +330,7 @@ def classify_snippets(aman, snippets, trained_forest, detrend_method="median", n
     snippets.wrap("predictions", preds,
                   [(0, "snippets"), (1, LabelAxis("pred_cols", PRED_COLUMNS))])
     snippets.wrap("detrend_method", detrend_method)
+    snippets.wrap("trained_forest_used", trained_forest_name)
     return snippets
 
 
