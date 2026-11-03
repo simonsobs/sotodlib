@@ -47,13 +47,21 @@ default_config = {
     "obs_whitelist": [],
     "obs_blacklist": [],
     "weight_factor": 1000,
+    "min_frac_dets": .25,
+    "max_dscale": .1,
+    "max_shear": .05,
 }
 
-class ErrCode(Enum):                                                                                                                                                                                                                                                                                                     
+class ErrCode(Enum):
     NO_ERR = 0
+    LOADER = 1
+    MIN_DETS = 2
+    AFF_ERR = 3
+    HIGH_SCALE = 4
+    HIGH_SHEAR = 5
 
 def _get_jobdict_po(jdb):
-    return {f"{job.tags['obs_id']}_{job.tags['wafer_slot']}_{job.tags['array']}" : job for job in jdb.get_jobs(jclass="per_obs")}
+    return {f"{job.tags['obs_id']}+{job.tags['wafer_slot']}+{job.tags['array']}" : job for job in jdb.get_jobs(jclass="per_obs")}
 
 def _get_jobit_po(jdb, obslist, ctx):
     _ = jdb
@@ -77,7 +85,7 @@ def _get_jobit_po(jdb, obslist, ctx):
 
 def _get_jobstr_po(info):
     obs, wafer_slot, array = info
-    return f"{obs['obs_id']}_{wafer_slot}_{array}"
+    return f"{obs['obs_id']}+{wafer_slot}+{array}"
 
 def _get_tags_po(obs):
     return {"obs_id" : obs["obs_id"], "ot" : obs["tube_slot"], "timestamp" : obs["timestamp"], "array": "", "wafer_slot" : "", "errcode" : 0, "message" : ""}
@@ -348,9 +356,9 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
     for rx in system.receivers:
         for ot in rx.optics_tubes:
             for fp in ot.focal_planes:
-                in_system += [f"{meas.meas_id}_{meas.name}" for meas in fp.focal_planes]
-    done_ids = [f"{job.tags['obs_id']}_{job.tags['array']}" for job in done_jobs]
-    open_ids = [f"{job.tags['obs_id']}_{job.tags['array']}" for job in open_jobs]
+                in_system += [f"{meas.meas_id}+{meas.name}" for meas in fp.focal_planes]
+    done_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in done_jobs]
+    open_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in open_jobs]
     all_ids = done_ids + open_ids
 
     # Check if there are any measurements without a job
@@ -372,15 +380,16 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
                 refreshed_job = session.get(jobdb.Job, jid)
                 session.expunge(refreshed_job)
                 open_jobs.append(refreshed_job)
+    done_jobs = [job for job, jid in zip(done_jobs, done_ids) if jid in not_in_system]
 
     # Anything that is an open job needs to be removed from the system
-    open_ids += [f"{job.tags['obs_id']}_{job.tags['array']}" for job in to_open]
+    open_ids += [f"{job.tags['obs_id']}+{job.tags['array']}" for job in to_open]
     for rx in system.receivers:
         for ot in rx.optics_tubes:
             for fp in ot.focal_planes:
-                fp.focal_planes= [meas for meas in fp if f"{meas.meas_id}_{meas.name}" not in open_ids]
+                fp.focal_planes= [meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids]
 
-    return open_jobs
+    return open_jobs, done_jobs
 
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
@@ -422,6 +431,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Make templates and load old data if we can
     _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
+    # Save our template
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+
     # TODO: Mark pad epochs as pad
 
     # Get obs list
@@ -431,11 +444,84 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     jdb_path = os.path.join(data_dir, "jobdb.sqlite")
     jdb, open_jobs = ju.setup_jobs(None, jdb_path, "per_obs", _get_jobdict_po, partial(_get_jobit_po, obslist=obslist, ctx=ctx), _get_jobstr_po, _get_tags_po, [], overwrite, False, None, 0, False, logger)
     done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
-    open_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
+    open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
 
-    # TODO: Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+    # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+    job = None
+    njobs = len(open_jobs)
+    logger.info("Starting per-obs mode with %d open jobs and %d already done", njobs, len(done_jobs))
+    for i, j in enumerate(open_jobs):
+        if job is not None:
+            logger.debug("Writing to db")
+            ju.update_jobs_retry(jdb, [job], 10, logger)
+        job = None
+        if j is not None:
+            with jdb.session_scope() as session:
+                job = session.get(jobdb.Job, j.id)
+                if job is not None:
+                    session.expunge(job)
+        if job is None:
+            continue
+
+        job.mark_visited()
+        obs_id = job.tags["obs_id"]
+        ws = job.tags["wafer_slot"]
+        array = job.tags["array"]
+        jstr = f"{obs_id}+{ws}+{array}"
+        logger.info("Loading and processing %s (%d/%d)", jstr, i+1, njobs)
+
+        # Load
+        try:
+            ot, meas = _load_obs(obs_id, array, ctx, system, cfg)
+        except Exception as e:
+            msg = f"Failed to load with error: {e}"
+            ju.fail(job, ErrCode.LOADER, msg, logger)
+            continue
+
+        # Check min dets
+        dfrac = np.nansum(meas.weights)/len(meas.weights)
+        if dfrac < cfg.min_frac_dets:
+            msg = f"Only {100*np.round(dfrac, 2)}% of weighted dets uncut"
+            ju.fail(job, ErrCode.MIN_DETS, msg, logger)
+            continue
+
+        # Cut on scale and shear
+        try:
+            scale, shear, _ = meas.transform.decompose
+        except Exception as e:
+            msg = f"Failed to compute affine with error: {e}"
+            ju.fail(job, ErrCode.AFF_ERR, msg, logger)
+            continue
+        if abs(1 - np.max(scale)) > cfg.max_dscale:
+            msg = f"Scale too high: {str(scale)}"
+            ju.fail(job, ErrCode.HIGH_SCALE, msg, logger)
+            continue
+        if shear > cfg.max_shear:
+            msg = f"Shear too high: {np.round(shear, 2)}"
+            ju.fail(job, ErrCode.HIGH_SHEAR, msg, logger)
+            continue
+
+        # TODO: Plot
+
+        # Add to system
+        rx = system.search("receivers", job.tags["timestamp"])
+        if rx is None:
+            raise ValueError(f"Somehow found no receiver for {jstr}")
+        fp = rx.find_fpc(ot, array)
+        if fp is None:
+            raise ValueError(f"Somehow found no focal plane for {jstr}")
+        fp.focal_planes += [meas]
+        job.jstate = cast(sqy.Column[str], jobdb.JState.done)
+    logger.info("Done with per-obs mode!")
+
+    # Save our per-obs results
+    system.set_static(True)
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    
 
     # TODO: Fit for pointing model and focal planes
+    system.set_static(False)
 
     # Save
     # TODO: Setup databases!

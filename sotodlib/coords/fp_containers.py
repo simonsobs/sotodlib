@@ -1764,6 +1764,24 @@ class PointingSystem:
         # Force consistancy
         self.update_parameters(self.parameters)
 
+    def set_static(self, static : bool):
+        """
+        Set `static` for all relevent childen.
+
+        Parameters
+        ----------
+        static : bool
+            The value to set `static` to for all relevent children.
+        """
+        for rx in receivers:
+            rx.static = static
+            for ot in rx.optics_tubes:
+                ot.static = static
+                for fp in ot.focal_planes:
+                    fp.static = static
+                    for meas in fp.focal_planes:
+                        meas.static = static
+
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
         return np.array(
