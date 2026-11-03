@@ -10,6 +10,9 @@ import datetime as dt
 import hashlib
 import os
 import shutil
+from enum import Enum
+from functools import partial
+from typing import cast
 
 import git
 import h5py
@@ -17,6 +20,7 @@ import numpy as np
 import pyinstrument
 import sotodlib.coords.fp_containers as fpc
 import sotodlib.coords.fp_plots as fpp
+import sotodlib.utils.jdb_utils as ju
 import yaml
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
@@ -24,6 +28,8 @@ from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.utils import epochs
 from sotodlib.utils.config import load_config_namespace
+from sotodlib.site_pipeline import jobdb
+import sqlalchemy as sqy
 
 logger = init_logger(__name__, "solve_static_pointing: ")
 default_config = {
@@ -42,6 +48,39 @@ default_config = {
     "obs_blacklist": [],
     "weight_factor": 1000,
 }
+
+class ErrCode(Enum):                                                                                                                                                                                                                                                                                                     
+    NO_ERR = 0
+
+def _get_jobdict_po(jdb):
+    return {f"{job.tags['obs_id']}_{job.tags['wafer_slot']}_{job.tags['array']}" : job for job in jdb.get_jobs(jclass="per_obs")}
+
+def _get_jobit_po(jdb, obslist, ctx):
+    _ = jdb
+    jobit = []
+    for obs in obslist:
+        det_info = ctx.get_det_info(obs["obs_id"])
+        ws = det_info["wafer_slot"]
+        if "wafer.wafer_slot" in det_info.keys:
+            ws = np.array(
+                [
+                    ws1 if ws1 != "ws." else ws2
+                    for ws1, ws2 in zip(
+                        det_info["wafer_slot"], det_info["wafer.wafer_slot"]
+                    )
+                ]
+            )
+        wsufms= np.unique( np.column_stack([ws, det_info["wafer.array"]]), axis=0)
+        for ws, arr in wsufms:
+            jobit += [(obs, ws, arr)]
+    return jobit
+
+def _get_jobstr_po(info):
+    obs, wafer_slot, array = info
+    return f"{obs['obs_id']}_{wafer_slot}_{array}"
+
+def _get_tags_po(obs):
+    return {"obs_id" : obs["obs_id"], "ot" : obs["tube_slot"], "timestamp" : obs["timestamp"], "array": "", "wafer_slot" : "", "errcode" : 0, "message" : ""}
 
 
 def _setup_paths(root_dir, project, tel, append=""):
@@ -274,39 +313,74 @@ def _get_obslist(ctx, cfg, system):
     return obslist
 
 
-def _load_obs(obs, ctx, system, cfg):
-    aman_full = ctx.get_meta(obs)
+def _load_obs(obs, array, ctx, system, cfg):
     rx = system.search("receiver", obs["timestamp"])
     pm = system.search("pointing_model", obs["timestamp"])
     loaded = []
-    for array in np.unique(aman_full.wafer.array):
-        aman = aman_full.restrict(
-            "dets", aman_full.wafer.array == array, in_place=False
+    aman = ctx.get_meta(obs, dets = {"wafer.array" : array})
+    fp = rx.find_fpc(obs["tube_slot"], array)
+    if fp is None:
+        raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
+    loaded += [
+        (
+            obs["tube_slot"],
+            fpc.FocalPlane.from_aman(
+                fp.name,
+                obs["obs_id"],
+                aman,
+                fp.template,
+                fp.template_fp,
+                fp.template_ot,
+                pm,
+                fp.autofreeze,
+                fp.fake_gamma,
+                cfg.weight_factor,
+            ),
         )
-        fp = rx.find_fpc(obs["tube_slot"], array)
-        if fp is None:
-            raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
-        loaded += [
-            (
-                obs["tube_slot"],
-                fpc.FocalPlane.from_aman(
-                    fp.name,
-                    obs["obs_id"],
-                    aman,
-                    fp.template,
-                    fp.template_fp,
-                    fp.template_ot,
-                    pm,
-                    fp.autofreeze,
-                    fp.fake_gamma,
-                    cfg.weight_factor,
-                ),
-            )
-        ]
+    ]
 
     # Not adding to the system so that we can leave ourselves open to parallelism
     return loaded
 
+def _check_jobs(system, jdb, done_jobs, open_jobs):
+    to_open = []
+    in_system = []
+    for rx in system.receivers:
+        for ot in rx.optics_tubes:
+            for fp in ot.focal_planes:
+                in_system += [f"{meas.meas_id}_{meas.name}" for meas in fp.focal_planes]
+    done_ids = [f"{job.tags['obs_id']}_{job.tags['array']}" for job in done_jobs]
+    open_ids = [f"{job.tags['obs_id']}_{job.tags['array']}" for job in open_jobs]
+    all_ids = done_ids + open_ids
+
+    # Check if there are any measurements without a job
+    not_in_jdb = np.setdiff1d(in_system, all_ids)
+    if len(not_in_jdb) > 0:
+        raise ValueError(f"{len(not_in_jdb)} jobs in current system but not found in jdb!\n{not_in_jdb}")
+
+    # Check if there are any jobs marked done not in the system and reopen them
+    not_in_system = np.setdiff1d(done_ids, in_system)
+    to_open = np.array(done_jobs)[np.isin(done_ids, not_in_system)]
+    if len(not_in_system) > 0:
+        for job in to_open:
+            job.jstate = cast(sqy.Column[str], jobdb.JState.open)
+        logger.info("Opening %s old jobs", len(to_open))
+        jdb.update_jobs(to_open)
+        with jdb.session_scope() as session:
+            for job in to_open:  # updated_jobs:
+                jid = job.id
+                refreshed_job = session.get(jobdb.Job, jid)
+                session.expunge(refreshed_job)
+                open_jobs.append(refreshed_job)
+
+    # Anything that is an open job needs to be removed from the system
+    open_ids += [f"{job.tags['obs_id']}_{job.tags['array']}" for job in to_open]
+    for rx in system.receivers:
+        for ot in rx.optics_tubes:
+            for fp in ot.focal_planes:
+                fp.focal_planes= [meas for meas in fp if f"{meas.meas_id}_{meas.name}" not in open_ids]
+
+    return open_jobs
 
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
@@ -353,7 +427,11 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Get obs list
     obslist = _get_obslist(ctx, cfg, system)
 
-    # TODO: Set up per-obs jobs
+    # Set up per-obs jobs
+    jdb_path = os.path.join(data_dir, "jobdb.sqlite")
+    jdb, open_jobs = ju.setup_jobs(None, jdb_path, "per_obs", _get_jobdict_po, partial(_get_jobit_po, obslist=obslist, ctx=ctx), _get_jobstr_po, _get_tags_po, [], overwrite, False, None, 0, False, logger)
+    done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
+    open_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
 
     # TODO: Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
 

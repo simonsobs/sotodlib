@@ -1089,6 +1089,12 @@ class FocalPlaneCollection:
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
 
+    def __getitem__(self, key):
+        fp_ids = [fp.meas_id for fp in self.focal_planes]
+        if key in fp_ids:
+            return self.focal_planes[fp_ids.index(key)]
+        raise IndexError(f"Invalid key: {key}")
+
     def freeze(self, static: bool):
         """
         Save the current dynamic properties to the static fields.
