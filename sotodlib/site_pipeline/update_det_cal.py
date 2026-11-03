@@ -61,6 +61,7 @@ def get_data_root(ctx: core.Context, obs_id:str) -> str:
     # add telescope str to path
     tel_str = obs_id.split(('_'))[2]
     res = os.path.join(res, tel_str)
+    res = os.path.join(ctx.obsfiledb.prefix, tel_str)
     return res
 
 
