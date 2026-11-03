@@ -177,9 +177,6 @@ class PreprocessValidDets(PreprocessQA):
     thresh : float
         The threshold for the fraction of valid samples above which a detector is
         deemed good (default 0.75)
-    process_name : str
-        The process from which to read the valid dataset. (default 'glitches')
-
     """
 
     _influx_meas = "preprocesstod"
@@ -196,7 +193,6 @@ class PreprocessValidDets(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", {})
         self._thresh = process_args.get("thresh", 0.75)
-        self._key = process_args.get("process_name", "glitches")
 
     def _process(self, meta):
 
@@ -229,7 +225,7 @@ class PreprocessValidDets(PreprocessQA):
                     # Compute the number of samples that are valid
                     frac_valid = np.array([
                         np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
-                        for r in meta.preprocess[self._key].valid[subset]
+                        for r in meta.preprocess.valid_data.valid_data[subset]
                     ])
 
                     # Count detectors with fraction valid above threshold

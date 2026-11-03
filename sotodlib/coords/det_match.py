@@ -624,7 +624,7 @@ class MatchParams:
             matching.
         freq_width (float):
             width of exponential to use in the frequency cost function (MHz).
-        dist_width (float)
+        dist_width (float):
             width of exponential to use in the pointing cost function (rad)
         unmatched_good_res_pen (float):
             penalty to apply to leaving a resonator with a good qi unassigned
@@ -633,6 +633,7 @@ class MatchParams:
         enforce_pointing_reqs (bool):
             If this is enabled, it will enforce the following requirements when
             matching:
+
              - Resonators with OPTC det_type must have pointing data.
              - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
              - Resonators with DARK or SLOT det_types may or may not have pointing data.

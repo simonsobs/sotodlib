@@ -48,8 +48,8 @@ class ReportDataConfig:
         platform: Literal["satp1", "satp2", "satp3", "lat"],
         site_url: str,
         ctx_path: str,
-        start_time: Union[dt.datetime, float, str],
-        stop_time: Union[dt.datetime, float, str],
+        start_time: Union[dt.datetime, int, float, str],
+        stop_time: Union[dt.datetime, int, float, str],
         hk_cfg: Union[HkConfig, str, Dict[str, Any]],
         load_hkdb: bool = True,
         buffer_time: float = 3600,
@@ -79,14 +79,14 @@ class ReportDataConfig:
         else:
             self.cal_targets = cal_targets
 
-        if isinstance(start_time, float):
+        if isinstance(start_time, (int, float)):
             self.start_time: dt.datetime = dt.datetime.fromtimestamp(start_time)
         elif isinstance(start_time, str):
             self.start_time = dt.datetime.fromisoformat(start_time)
         else:
             self.start_time = start_time
 
-        if isinstance(stop_time, float):
+        if isinstance(stop_time, (int, float)):
             self.stop_time: dt.datetime = dt.datetime.fromtimestamp(stop_time)
         elif isinstance(stop_time, str):
             self.stop_time = dt.datetime.fromisoformat(stop_time)
@@ -234,34 +234,6 @@ def load_hkdb(cfg: ReportDataConfig) -> hkdb.HkResult:
     )
 
     return result.data
-
-
-def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
-    """
-    Load PWV data from the range specified in the ReportDataConfig.
-    Uses hk_cfg file or dict specified in the config.
-    """
-    if isinstance(cfg.hk_cfg, str):
-        hk_cfg: HkConfig = HkConfig.from_yaml(cfg.hk_cfg)
-    elif isinstance(cfg.hk_cfg, dict):
-        hk_cfg = HkConfig.from_dict(cfg.hk_cfg)
-    else:
-        hk_cfg = cfg.hk_cfg
-
-    result = hkdb.load_hk(
-        hkdb.LoadSpec(
-            cfg=hk_cfg,
-            start=cfg.start_time.timestamp() - cfg.buffer_time,
-            end=cfg.stop_time.timestamp() + cfg.buffer_time,
-            fields=["pwv"],
-        ),
-        show_pb=cfg.show_hk_pb,
-    )
-
-    if "env-radiometer-class.pwvs.pwv" in result.data.keys():
-        return result.data["env-radiometer-class.pwvs.pwv"]
-    else:
-        return None
 
 
 def get_and_merge_apex_pwv(cfg: ReportDataConfig, toco_pwv=None):
@@ -677,7 +649,7 @@ class ReportData:
         Save compiled data to an H5 file.
         """
         with h5py.File(data_path, "w" if overwrite else "a") as hdf:
-            d = self.cfg.__dict__
+            d = self.cfg.__dict__.copy()
             for k, v in d.items():
                 if isinstance(v, dt.datetime):
                     d[k] = v.isoformat()

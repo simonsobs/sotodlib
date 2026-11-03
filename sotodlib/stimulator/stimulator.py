@@ -171,7 +171,7 @@ def calc_gain(aman):
     aman.stm_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
 
 
-def calc_timeconstant(aman, idxs=None):
+def calc_timeconstant(aman, idxs=None, method="leastsq", fit_kws=None):
     """
     Calculate the time constant of the detectors and the readout delay.
 
@@ -186,6 +186,8 @@ def calc_timeconstant(aman, idxs=None):
         aman: Axis manager of TOD data, including timestamps and raw signal.
         hkdata: HK data for aman.
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
+        method: Fitting method to use.
+        fit_kws: Keyword arguments for the fitting function.
     """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
@@ -216,15 +218,12 @@ def calc_timeconstant(aman, idxs=None):
                 if f_key != "f1_gain"
             ]
 
-            # Edit a0 and t0 result
+            # Edit t0 result
             # This flip of half period of sin function is needed because limiting a0 range to positive values makes fitting fails sometimes.
             # Fitting function will be changed to a*cos(t)+b*sin(t) instead of a0*sin(t+t0) in the future to prevent this issue.
             for i in range(len(t0s)):
                 if a0s[i] < 0:
                     t0s[i] = t0s[i] - 0.5
-                if i > 0:
-                    if t0s[i] < t0s[i - 1]:
-                        t0s[i] = t0s[i] + 1
             a0s = np.abs(a0s)
             t0s = np.array(t0s)
 
@@ -242,7 +241,7 @@ def calc_timeconstant(aman, idxs=None):
                         continue
 
                     result = models[fit_key].fit(
-                        a0s, params, f=f, method="least_squares"
+                        a0s, params, f=f, method=method, fit_kws=fit_kws
                     )
                     fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                 else:
@@ -259,12 +258,17 @@ def calc_timeconstant(aman, idxs=None):
                                 -np.array(t0s) * 360,
                                 params,
                                 f=f,
-                                method="least_squares",
+                                method=method,
+                                fit_kws=fit_kws,
                             )
                             fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
                     else:
                         result = models[fit_key].fit(
-                            -np.array(t0s) * 360, params, f=f, method="least_squares"
+                            -np.array(t0s) * 360,
+                            params,
+                            f=f,
+                            method=method,
+                            fit_kws=fit_kws,
                         )
                         fill_result(aman.stm_cal[fit_key][filt_key], result, i_det)
 

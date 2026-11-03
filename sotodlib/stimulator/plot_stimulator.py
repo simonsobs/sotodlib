@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt  # type: ignore
+from matplotlib.ticker import FuncFormatter
 import numpy as np
 from pathlib import Path
 
@@ -34,9 +35,9 @@ def plot_hkdata(aman, hkdata, cal_type, show=True, output_dir=None):
 
     # Chopping freq with t_cuts
     y = 1 / (aman.stm_cal.t_enc[1:] - aman.stm_cal.t_enc[:-1])
-    axes["A"].plot(aman.stm_cal.t_enc[:-1] - t0, y, label="Chopping_freq")
+    axes["A"].plot(aman.stm_cal.t_enc[:-1] - t0, y, label="Chop freq")
     axes["A"].set_xlabel("Time [s]")
-    axes["A"].set_ylabel("Chopping frequency [Hz]")
+    axes["A"].set_ylabel("Chop freq [Hz]")
     axes["A"].vlines(
         aman.timestamps[0] - t0,
         ymin=min(y),
@@ -169,6 +170,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
     t0 = aman.timestamps[0]
     ufm = aman.det_info.stream_id[i_det][4:]
     ufm = ufm[0].upper() + ufm[1:]
+    formatter = FuncFormatter(lambda x, _: f"{x:.2f}".rstrip("0").rstrip("."))
 
     if cal_type == "gain":
         fig, axes = plt.subplots(3, 2, figsize=(10, 8))
@@ -181,7 +183,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         y = aman.signal[i_det] - np.mean(aman.signal[i_det])
         axes[i_y, i_x].plot(aman.timestamps - t0, y, label="Raw_data - mean")
         axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal_hpf[i_det], label="HPFed data"
+            aman.timestamps - t0, aman.signal_hpf[i_det], label="(IIRC+HPF)ed data"
         )
         axes[i_y, i_x].set_ylim(
             min(y) - (max(y) - min(y)) * 0.1, max(y) + (max(y) - min(y)) * 0.1
@@ -203,7 +205,10 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             label="Raw data - mean",
         )
         axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal_hpf[i_det], label="HPFed data", color="C1"
+            aman.timestamps - t0,
+            aman.signal_hpf[i_det],
+            label="(IIRC+HPF)ed data",
+            color="C1",
         )
         axes[i_y, i_x].set_title(f"TOD data, i_det={i_det}")
         axes[i_y, i_x].set_xlabel("time [s]")
@@ -220,7 +225,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         i_y = 2
         i_x = 0
         f = np.arange(0, 10, 0.01)
-        axes[i_y, i_x].set_title("High Pass Filter")
+        axes[i_y, i_x].set_title("Filters")
         axes[i_y, i_x].set_xlabel("Frequency [Hz]")
         axes[i_y, i_x].set_ylabel("HPF")
 
@@ -240,7 +245,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         y = aman.stm_cal.coadd_data["hpf"]["f1_gain"]["y"][i_det]
         yerr = aman.stm_cal.coadd_data["hpf"]["f1_gain"]["yerr"][i_det]
         axes[i_y, i_x].errorbar(
-            x, y, yerr, fmt="o", capsize=5, color="C1", zorder=0, label="HPFed"
+            x, y, yerr, fmt="o", capsize=5, color="C1", zorder=0, label="(IIRC+HPF)ed"
         )
         axes[i_y, i_x].set_title(f"Co-added signal: Filtered data, {ufm}")
 
@@ -289,7 +294,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         axes[i_y, i_x].plot(
             aman.stm_cal.t_enc[:-1] - t0,
             1 / (aman.stm_cal.t_enc[1:] - aman.stm_cal.t_enc[:-1]),
-            label="y: chopping freq, t: encoder",
+            label="y: chop freq, t: encoder",
         )
         axes[i_y, i_x].plot(aman.timestamps - t0, aman.signal[i_det], label="TOD")
         for key_freq, (t_min, t_max) in zip(
@@ -298,7 +303,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             if key_freq == "f1_gain":
                 axes[i_y, i_x].axvspan(t_min, t_max, alpha=0.3, label="used data")
         axes[i_y, i_x].set_title("Overplot")
-        axes[i_y, i_x].set_ylabel("Chopping frequency[Hz]")
+        axes[i_y, i_x].set_ylabel("Chop freq [Hz]")
         axes[i_y, i_x].set_xlabel("TOD time [s]")
         axes[i_y, i_x].legend()
 
@@ -336,7 +341,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         y = aman.signal[i_det] - np.mean(aman.signal[i_det])
         axes[i_y, i_x].plot(aman.timestamps - t0, y, label="Raw_data - mean")
         axes[i_y, i_x].plot(
-            aman.timestamps - t0, aman.signal_hpf[i_det], label="HPFed data"
+            aman.timestamps - t0, aman.signal_hpf[i_det], label="(IIRC+HPF)ed data"
         )
         axes[i_y, i_x].set_ylim(
             min(y) - (max(y) - min(y)) * 0.1, max(y) + (max(y) - min(y)) * 0.1
@@ -351,7 +356,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         axes[i_y, i_x].plot(
             aman.stm_cal.t_enc[:-1] - t0,
             1 / (aman.stm_cal.t_enc[1:] - aman.stm_cal.t_enc[:-1]),
-            label="y: chopping freq, t: encoder",
+            label="y: chop freq, t: encoder",
         )
         axes[i_y, i_x].plot(aman.timestamps - t0, aman.signal[i_det], label="TOD")
         for key_freq, (t_min, t_max) in zip(
@@ -363,9 +368,11 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
                 else:
                     axes[i_y, i_x].axvspan(t_min, t_max, alpha=0.3)
         axes[i_y, i_x].set_title("Overplot")
-        axes[i_y, i_x].set_ylabel("Chopping frequency[Hz]")
+        axes[i_y, i_x].set_ylabel("Chop freq [Hz]")
         axes[i_y, i_x].set_xlabel("TOD time [s]")
-        axes[i_y, i_x].legend()
+        axes[i_y, i_x].legend(
+            loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize="small"
+        )
 
         i_y = 1
         i_x = 0
@@ -413,7 +420,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             color="orange",
             zorder=3,
         )
-        axes[i_y, i_x].set_xlabel("Chopping freq [Hz]")
+        axes[i_y, i_x].set_xlabel("Chop freq [Hz]")
         axes[i_y, i_x].set_ylabel("sin_theta amplitude [pW]")
         axes[i_y, i_x].set_title("Amplitude fit")
         axes[i_y, i_x].legend()
@@ -432,7 +439,9 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             "-",
             color="blue",
             zorder=3,
-            label=rf"$\tau$={tau * 1e3:.2f}ms, $\theta_\text{{geo}}$={theta_geo:.0f}deg, $\Delta t$={dt * 1e3:.2f}ms",
+            label=rf"$\tau$={tau * 1e3:.2f}ms"
+            "\n"
+            rf"$\theta_\text{{geo}}$={theta_geo:.0f}deg, $\Delta t$={dt * 1e3:.2f}ms",
         )
 
         tau = aman.stm_cal["fit_phase__fix_tau"]["lpf"]["tau"][i_det]
@@ -444,13 +453,17 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             "-",
             color="green",
             zorder=3,
-            label=rf"$\tau$={tau * 1e3:.2f}ms(fix), $\theta_\text{{geo}}$={theta_geo:.0f}deg , $\Delta t$={dt * 1e3:.2f}ms",
+            label=rf"$\tau$={tau * 1e3:.2f}ms(fix)"
+            "\n"
+            rf"$\theta_\text{{geo}}$={theta_geo:.0f}deg , $\Delta t$={dt * 1e3:.2f}ms",
         )
 
-        axes[i_y, i_x].set_xlabel("Chopping freq [Hz]")
+        axes[i_y, i_x].set_xlabel("Chop freq [Hz]")
         axes[i_y, i_x].set_ylabel("Phase delay [deg]")
         axes[i_y, i_x].set_title("Phase fit")
-        axes[i_y, i_x].legend()
+        axes[i_y, i_x].legend(
+            loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize="small"
+        )
 
         i_y = 1
         for i_freq, f_key in enumerate(["f1", "f2", "f3", "f4", "f5", "f6", "f7"]):
@@ -470,7 +483,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             axes[i_y, i_x].plot(
                 aman.timestamps - t0,
                 aman.signal_hpf[i_det],
-                label="HPFed data",
+                label="(IIRC+HPF)ed data",
                 color="C1",
             )
             axes[i_y, i_x].set_title(
@@ -478,6 +491,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             )
             axes[i_y, i_x].set_xlabel("time [s]")
             axes[i_y, i_x].set_ylabel("TOD [pW]")
+            axes[i_y, i_x].xaxis.set_major_formatter(formatter)
             axes[i_y, i_x].legend()
             axes[i_y, i_x].set_ylim(
                 min(aman.signal_hpf[i_det][100:-100]),
@@ -557,8 +571,8 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
                 zorder=1,
                 label=r"sin$\theta$ for HPF fit",
             )
-            axes[i_y, i_x].legend()
-
+            axes[i_y, i_x].legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+        plt.tight_layout()
     else:
         raise ValueError(
             f"'{cal_type}' is a wrong type. Please specify 'gain' or 'timeconstant'."
@@ -576,7 +590,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
 
         output_dir_ = Path(f"{output_dir}/{ufm}_{obs_id}")
         output_dir_.mkdir(parents=True, exist_ok=True)
-        plt.savefig(f"{output_dir_}/{cal_type}_det{i_det:04d}.png")
+        plt.savefig(f"{output_dir_}/{cal_type}_det{i_det:04d}.png", bbox_inches="tight")
 
     if not show:
         plt.close(fig)

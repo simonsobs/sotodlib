@@ -194,12 +194,12 @@ class G3tSmurf:
 
         Args
         -----
-            archive_path: path
+            archive_path: str
                 Path to the data directory
-            db_path: path, optional
+            db_path: str, optional
                 Path to the sqlite file. Defaults to
                 ``<archive_path>/frames.db``
-            meta_path: path, optional
+            meta_path: str, optional
                 Path of directory containing smurf related metadata (ie. channel
                 assignments). Required for full functionality.
             echo: bool, optional
@@ -375,7 +375,7 @@ class G3tSmurf:
 
         Args
         ----
-            path: path
+            path: str
                 Path of the file to index
             session : SQLAlchemy session
                 Current, active sqlalchemy session
@@ -672,7 +672,7 @@ class G3tSmurf:
             assignemnt
         cha : string
             The file name of the channel assignment
-        cha_path : path
+        cha_path : str
             The absolute path to the channel assignment
         session : SQLAlchemy Session
             The active session
@@ -749,7 +749,7 @@ class G3tSmurf:
 
         Args
         -------
-        tune_path : path
+        tune_path : str
             The absolute path to the tune file
         ctime : int
             ctime of SMuRF Action
@@ -809,7 +809,7 @@ class G3tSmurf:
             The stream id for the particular SMuRF slot
         ctime : int
             The ctime of the SMuRF action called to create the tuning file.
-        tune_path : path
+        tune_path : str
             The absolute path to the tune file
         session : SQLAlchemy Session
             The active session
@@ -2988,7 +2988,8 @@ def load_file(
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance if we don't want to use the one from the
           first file
-      det_axis : name of the axis used for channels / detectors
+      det_axis : str
+          Name of the axis used for channels / detectors
       linearize_timestamps : bool
           sent to _get_timestamps. if true and using unix timing, linearize the timing
           based on the frame counter
