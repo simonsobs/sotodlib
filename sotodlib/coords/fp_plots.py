@@ -6,7 +6,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .fp_containers import DetectorOffsets, Receiver
+from .fp_containers import DetectorOffsets, FocalPlane, FocalPlaneCollection, Receiver
 
 
 def plot_detector_offsets(
@@ -186,3 +186,75 @@ def plot_receiver_templates(
     ax.set_title(f"{receiver.name.upper()} Template (At Window, From Front)")
     ax.set_aspect("equal")
     save_and_finish(fig, "template_front")
+
+
+def plot_ufm(
+    focal_plane: FocalPlane | FocalPlaneCollection,
+    output_dir: str,
+    figsize: tuple[float, float] = (12, 6),
+):
+    """
+    Plot the UFM focal-plane fit and residual distribution.
+
+    Parameters
+    ----------
+    focal_plane : FocalPlane | FocalPlaneCollection
+        Focal-plane object for a specefic observation.
+    output_dir : str
+        Directory in which to save the plot.
+    figsize : tuple[float, float], default=(12, 6)
+        Figure dimensions in inches.
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
+
+    # Plot focal-plane pointing.
+    plot_detector_offsets(
+        ax1,
+        focal_plane.template,
+        color="blue",
+        alpha=0.4,
+        label="template",
+        marker="P",
+    )
+    plot_detector_offsets(
+        ax1,
+        focal_plane.transformed,
+        color="black",
+        alpha=0.4,
+        label="transformed",
+        marker="X",
+    )
+    plot_detector_offsets(
+        ax1,
+        focal_plane.data,
+        color="orange",
+        alpha=0.4,
+        label="measured",
+    )
+    ax1.set_xlabel("Xi (rad)")
+    ax1.set_ylabel("Eta (rad)")
+    ax1.set_aspect("equal")
+    ax1.legend()
+
+    # Plot histogram of residuals.
+    dist = 3600 * np.rad2deg(
+        (focal_plane.transformed.xyz - focal_plane.template.xyz)[
+            np.isnan(focal_plane.weights)
+        ]
+    )
+    if len(dist) > 0:
+        dist_thresh = np.percentile(dist, 97)
+        bins = max(int(len(dist) / 20), 10)
+        ax2.hist(dist[dist < dist_thresh], bins=bins)
+
+    ax2.set_xlabel('Residual (")')
+    ax2.set_ylabel("Detectors")
+
+    title = focal_plane.name
+    if isinstance(focal_plane, FocalPlane):
+        title += f" {focal_plane.meas_id}"
+    fig.suptitle(title.replace(" ", "\n"))
+    fig.savefig(
+        os.path.join(output_dir, f"{title.replace(' ', '+')}.png"), bbox_inches="tight"
+    )
+    plt.close(fig)

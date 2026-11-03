@@ -47,10 +47,11 @@ default_config = {
     "obs_whitelist": [],
     "obs_blacklist": [],
     "weight_factor": 1000,
-    "min_frac_dets": .25,
-    "max_dscale": .1,
-    "max_shear": .05,
+    "min_frac_dets": 0.25,
+    "max_dscale": 0.1,
+    "max_shear": 0.05,
 }
+
 
 class ErrCode(Enum):
     NO_ERR = 0
@@ -59,9 +60,15 @@ class ErrCode(Enum):
     AFF_ERR = 3
     HIGH_SCALE = 4
     HIGH_SHEAR = 5
+    PLOT = 6
+
 
 def _get_jobdict_po(jdb):
-    return {f"{job.tags['obs_id']}+{job.tags['wafer_slot']}+{job.tags['array']}" : job for job in jdb.get_jobs(jclass="per_obs")}
+    return {
+        f"{job.tags['obs_id']}+{job.tags['wafer_slot']}+{job.tags['array']}": job
+        for job in jdb.get_jobs(jclass="per_obs")
+    }
+
 
 def _get_jobit_po(jdb, obslist, ctx):
     _ = jdb
@@ -78,17 +85,27 @@ def _get_jobit_po(jdb, obslist, ctx):
                     )
                 ]
             )
-        wsufms= np.unique( np.column_stack([ws, det_info["wafer.array"]]), axis=0)
+        wsufms = np.unique(np.column_stack([ws, det_info["wafer.array"]]), axis=0)
         for ws, arr in wsufms:
             jobit += [(obs, ws, arr)]
     return jobit
+
 
 def _get_jobstr_po(info):
     obs, wafer_slot, array = info
     return f"{obs['obs_id']}+{wafer_slot}+{array}"
 
+
 def _get_tags_po(obs):
-    return {"obs_id" : obs["obs_id"], "ot" : obs["tube_slot"], "timestamp" : obs["timestamp"], "array": "", "wafer_slot" : "", "errcode" : 0, "message" : ""}
+    return {
+        "obs_id": obs["obs_id"],
+        "ot": obs["tube_slot"],
+        "timestamp": obs["timestamp"],
+        "array": "",
+        "wafer_slot": "",
+        "errcode": 0,
+        "message": "",
+    }
 
 
 def _setup_paths(root_dir, project, tel, append=""):
@@ -325,7 +342,7 @@ def _load_obs(obs, array, ctx, system, cfg):
     rx = system.search("receiver", obs["timestamp"])
     pm = system.search("pointing_model", obs["timestamp"])
     loaded = []
-    aman = ctx.get_meta(obs, dets = {"wafer.array" : array})
+    aman = ctx.get_meta(obs, dets={"wafer.array": array})
     fp = rx.find_fpc(obs["tube_slot"], array)
     if fp is None:
         raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
@@ -350,6 +367,7 @@ def _load_obs(obs, array, ctx, system, cfg):
     # Not adding to the system so that we can leave ourselves open to parallelism
     return loaded
 
+
 def _check_jobs(system, jdb, done_jobs, open_jobs):
     to_open = []
     in_system = []
@@ -364,7 +382,9 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
     # Check if there are any measurements without a job
     not_in_jdb = np.setdiff1d(in_system, all_ids)
     if len(not_in_jdb) > 0:
-        raise ValueError(f"{len(not_in_jdb)} jobs in current system but not found in jdb!\n{not_in_jdb}")
+        raise ValueError(
+            f"{len(not_in_jdb)} jobs in current system but not found in jdb!\n{not_in_jdb}"
+        )
 
     # Check if there are any jobs marked done not in the system and reopen them
     not_in_system = np.setdiff1d(done_ids, in_system)
@@ -387,9 +407,12 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
     for rx in system.receivers:
         for ot in rx.optics_tubes:
             for fp in ot.focal_planes:
-                fp.focal_planes= [meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids]
+                fp.focal_planes = [
+                    meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids
+                ]
 
     return open_jobs, done_jobs
+
 
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
@@ -442,14 +465,33 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
     # Set up per-obs jobs
     jdb_path = os.path.join(data_dir, "jobdb.sqlite")
-    jdb, open_jobs = ju.setup_jobs(None, jdb_path, "per_obs", _get_jobdict_po, partial(_get_jobit_po, obslist=obslist, ctx=ctx), _get_jobstr_po, _get_tags_po, [], overwrite, False, None, 0, False, logger)
+    jdb, open_jobs = ju.setup_jobs(
+        None,
+        jdb_path,
+        "per_obs",
+        _get_jobdict_po,
+        partial(_get_jobit_po, obslist=obslist, ctx=ctx),
+        _get_jobstr_po,
+        _get_tags_po,
+        [],
+        overwrite,
+        False,
+        None,
+        0,
+        False,
+        logger,
+    )
     done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
     open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
 
     # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
     job = None
     njobs = len(open_jobs)
-    logger.info("Starting per-obs mode with %d open jobs and %d already done", njobs, len(done_jobs))
+    logger.info(
+        "Starting per-obs mode with %d open jobs and %d already done",
+        njobs,
+        len(done_jobs),
+    )
     for i, j in enumerate(open_jobs):
         if job is not None:
             logger.debug("Writing to db")
@@ -468,7 +510,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         ws = job.tags["wafer_slot"]
         array = job.tags["array"]
         jstr = f"{obs_id}+{ws}+{array}"
-        logger.info("Loading and processing %s (%d/%d)", jstr, i+1, njobs)
+        logger.info("Loading and processing %s (%d/%d)", jstr, i + 1, njobs)
 
         # Load
         try:
@@ -479,7 +521,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             continue
 
         # Check min dets
-        dfrac = np.nansum(meas.weights)/len(meas.weights)
+        dfrac = np.nansum(meas.weights) / len(meas.weights)
         if dfrac < cfg.min_frac_dets:
             msg = f"Only {100*np.round(dfrac, 2)}% of weighted dets uncut"
             ju.fail(job, ErrCode.MIN_DETS, msg, logger)
@@ -501,15 +543,26 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             ju.fail(job, ErrCode.HIGH_SHEAR, msg, logger)
             continue
 
-        # TODO: Plot
-
-        # Add to system
+        # Locate
+        # TODO: I must be able to cache/hash somehow for this
         rx = system.search("receivers", job.tags["timestamp"])
         if rx is None:
             raise ValueError(f"Somehow found no receiver for {jstr}")
         fp = rx.find_fpc(ot, array)
         if fp is None:
             raise ValueError(f"Somehow found no focal plane for {jstr}")
+
+        # Plot
+        pdir = os.path.join(plot_dir, rx.epoch, "per-obs")
+        os.makedirs(pdir, exist_ok=True)
+        try:
+            fpp.plot_ufm(meas, pdir)
+        except Exception as e:
+            msg = f"Failed to plot with error: {e}"
+            ju.fail(job, ErrCode.PLOT, msg, logger)
+            continue
+
+        # Add to system
         fp.focal_planes += [meas]
         job.jstate = cast(sqy.Column[str], jobdb.JState.done)
     logger.info("Done with per-obs mode!")
@@ -518,7 +571,6 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
-    
 
     # TODO: Fit for pointing model and focal planes
     system.set_static(False)
