@@ -267,7 +267,7 @@ def load_smurf_npy_data(ctx, obs_id, substr, path_only=False):
             fpath = os.path.join(smurf_dir, f)
             break
     else:
-        raise FileNotFoundError("Could not find npy file")
+        raise FileNotFoundError(f"Could not find {substr} npy file for {obs_id}")
     if path_only:
         return fpath
     res = np.load(fpath, allow_pickle=True).item()
