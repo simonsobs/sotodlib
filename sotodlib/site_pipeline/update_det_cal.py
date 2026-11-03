@@ -50,17 +50,34 @@ if not logger.hasHandlers():
     sp_init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context, obs_id:str) -> str:
-    "Get root data directory based on context file"
-    c = ctx.obsfiledb.conn.execute("select name from files limit 1")
-    res = [r[0] for r in c][0]
-    # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(5):
-        res = os.path.dirname(res)
-    # add telescope str to path
-    tel_str = obs_id.split(('_'))[2]
-    res = os.path.join(res, tel_str)
-    return res
+class _QuickFilePath:
+    """Figures out the obsfiledb root path and then lets you get the
+    path to observation data by decoding the obs_id and assuming data
+    are all organized like:
+
+        <data_root>/<teltube>/{obs,oper,...}/<timecode>/<obs_id>/
+
+    This is a shortcut, for SO data -- the ObsFileDb supports more
+    generality than this.
+
+    """
+    def __init__(self, ctx):
+        c = ctx.obsfiledb.conn.execute("select name from files limit 1")
+        res = [r[0] for r in c][0]
+        res = os.path.join(ctx.obsfiledb.prefix, res)
+        # Remove 5 trailing non-data_root components --
+        #   teltube, obs/oper, timecode, obs_id, filename.
+        for _ in range(5):
+            res = os.path.dirname(res)
+        self.root = res
+
+    def get_path(self, obs_id, *subcomps):
+        obs_info = obs_id.split('_')
+        obs_type = obs_info[0]
+        timecode = obs_info[1][:5]
+        teltube = obs_info[2]
+        return os.path.join(
+            self.root, teltube, obs_type, timecode, obs_id, *subcomps)
 
 
 @dataclass
@@ -394,14 +411,12 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         # Automatically determine paths based on data root instead of obsfiledb
         # because obsfiledb queries are slow on nersc.
 
+        obsfiledb_faker = _QuickFilePath(ctx)
         iva_files = {}
         bsa_files = {}
         for dset, oid in iv_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
+                zsmurf_dir = obsfiledb_faker.get_path(oid, "Z_smurf")
                 for f in os.listdir(zsmurf_dir):
                     if "iv" in f:
                         iva_files[dset] = os.path.join(zsmurf_dir, f)
@@ -418,10 +433,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
         for dset, oid in bias_step_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
+                zsmurf_dir = obsfiledb_faker.get_path(oid, "Z_smurf")
                 for f in os.listdir(zsmurf_dir):
                     if "bias_step" in f:
                         bs_file = os.path.join(zsmurf_dir, f)
