@@ -537,6 +537,9 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
     if (not hwpss) and (not undo_R0cut):
         raise ValueError('either hwpss or undo_R0cut should be true')
 
+    # if bgmap_id is None:
+    #     logger.warn('no bgmap, skip undo R0cut')
+    #     undo_R0cut = False
     if undo_R0cut:  # reload bgmap and remove R0_ thresh
         bg_map_file = get_smurf_npy_file(ctx, bgmap_id, 'bias_step_analysis')
         bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
@@ -625,7 +628,8 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             # Reanalyze biasstep with hwpss subtraction
             ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
             bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
-            bgmap_obsids = get_cal_obsids(ctx, obs_id, "bgmap")
+            # longer max_days_before for bgmap since bgmap is less frequent
+            bgmap_obsids = get_cal_obsids(ctx, obs_id, "bgmap", max_days_before=30)
 
             for dset, bsa in bsas.items():
                 oid = bias_step_obsids[dset]
