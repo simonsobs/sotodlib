@@ -51,19 +51,6 @@ if not logger.hasHandlers():
     sp_init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context, obs_id:str) -> str:
-    "Get root data directory based on context file"
-    c = ctx.obsfiledb.conn.execute("select name from files limit 1")
-    res = [r[0] for r in c][0]
-    # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(5):
-        res = os.path.dirname(res)
-    # add telescope str to path
-    tel_str = obs_id.split(('_'))[2]
-    res = os.path.join(res, tel_str)
-    return res
-
-
 @dataclass
 class DetCalCfg:
     """
