@@ -1378,7 +1378,7 @@ def az_circle_plotter(
     if show:
         plt.show()
     if save_path != None:
-        fig.savefig(save_path)
+        fig.savefig(os.path.join(save_path, f"{me}_{de}_circle_plot.png"))
 
 
 # Per-platform context config key and FPA temperature setpoint (mK).
@@ -1402,15 +1402,15 @@ def ensure_dir(path):
         str: ``path``, unchanged, for convenient chaining.
     """
     if os.path.isdir(path):
-        print(f"Directory '{path}' already exists.")
+        logger.info(f"Directory '{path}' already exists.")
         return path
     try:
         os.makedirs(path)
-        print(f"Directory '{path}' created.")
+        logger.info(f"Directory '{path}' created.")
     except PermissionError:
-        print(f"Permission Denied: unable to create directory '{path}'.")
+        logger.error(f"Permission Denied: unable to create directory '{path}'.")
     except Exception:
-        print(f"An error occurred creating directory '{path}':")
+        logger.error(f"An error occurred creating directory '{path}':")
         traceback.print_exc()
     return path
 
@@ -1464,6 +1464,7 @@ def main(
     me: Optional[int] = date.month,
     de: Optional[int] = date.day,
     tag: Optional[str] = None,
+    circle_plt_save_path: Optional[str] = None,
     scan_type: Optional[str] = "cmb",
     platform: Optional[str] = "satp1",
 ):
@@ -1500,27 +1501,24 @@ def main(
         tag=tag,
         scan_type=scan_type,
     )
-    print("Made dataframes")
+    logger.info("Made dataframes")
 
     df_ids = df["obsids"]
     # Get metrics from pkl files
     if not df_ids:
-        print(
+        logger.info(
             f"No observations found for {platform} between "
             f"{ys}/{ms}/{ds} and {ye}/{me}/{de}."
         )
-    print("trying to compute metrics")
+    logger.info("trying to compute metrics")
     metric_dict = get_fpa_metrics(df=df, setpoint=setpoint)
-    print("finished computing metrics")
+    logger.info("finished computing metrics")
 
-    print("trying to analyze metrics")
+    logger.info("trying to analyze metrics")
     cnt_ret = metric_analyzer(metric_dict, save_path=None, platform=platform)
     
     if df_ids:
-        print("trying to save cirlce plot")
-        circle_plt_save_p = os.path.join(
-            metric_save_dir, f"{args.ye}_{args.me}_{args.de}_circle_plot.png"
-        )
+        logger.info("trying to save circle plot")
         az_circle_plotter(
             cnt_dict=cnt_ret,
             dfm=dfm,
@@ -1530,12 +1528,12 @@ def main(
             me=me,
             de=de,
             platform=platform,
-            save_path=circle_plt_save_p,
+            save_path=circle_plt_save_path,
             show=False,
         )
     else:
-        print("Skipping az_circle_plotter since there are no observations to plot.")
-    print("finished analyzing metrics")
+        logger.info("Skipping az_circle_plotter since there are no observations to plot.")
+    logger.info("finished analyzing metrics")
 
 
 if __name__ == "__main__":
