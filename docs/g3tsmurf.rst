@@ -229,11 +229,12 @@ data transfer status between the level 1 servers and the level 2 DAQ node.
 The user running this script must have read, write, and execute permissions to
 the database file in order to perform updates.
 
-Here is the information for this script:
-
-.. argparse::
-    :module: sotodlib.site_pipeline.update_g3tsmurf_db
-    :func: get_parser
+The command line arguments, the meaning of each configuration key, and the
+role this script plays in the wider Level 2 to Level 3 pipeline are documented
+on the :ref:`Data Packaging <data-packaging>` page; see
+:ref:`update_g3tsmurf_db <dpkg-update-g3tsmurf-db>` in particular.  The
+companion script for the housekeeping database is
+:ref:`update_g3thk_database <dpkg-update-g3thk-database>`.
 
 
 Utilities with G3tSmurf
