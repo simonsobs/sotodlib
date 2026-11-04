@@ -328,7 +328,7 @@ def from_map(aman, leakage_config, ws=None, band=None, wrap=True, modulated=True
         band = band[0]
     # get beam model
     if leakage_config.leakage_type == 'dipole':
-        field_max = 18 if leakage_config.second_der else 6
+        field_max = 18 if leakage_config.second_der else 7
         tmapq, tmqpu = get_planck_qumap(savedir=leakage_config.sim_dir,
                                         freq=leakage_config.planck_map_freq,
                                         nside=leakage_config.nside,
