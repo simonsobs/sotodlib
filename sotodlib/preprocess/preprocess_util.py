@@ -19,7 +19,6 @@ from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
-from sotodlib.sim import leakage_sim
 
 from .. import core
 from . import Pipeline
@@ -953,6 +952,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             aman.move("signal", None)
 
             if leakage is not None:
+                from sotodlib.sim import leakage_sim
                 leakage_sim.from_map(aman, leakage, wrap=True,
                                      modulated=True, sight=sight)
             else:

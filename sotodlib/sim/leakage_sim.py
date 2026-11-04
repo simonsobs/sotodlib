@@ -1,14 +1,12 @@
-# General module
-import yaml, os, sys
-import healpy as hp
-import numpy as np
-import time
-from tqdm import tqdm
+import os
 import pickle
-
-# SO related module
+import logging
+import numpy as np
+from tqdm import tqdm
 import so3g
 from sotodlib import coords
+
+logger = logging.getLogger("Leakage_Sim")
 
 def read_pkl(path):
     """read pickle file"""
@@ -31,15 +29,17 @@ def get_planck_map(savedir, freq='100', nside=512, field=np.arange(18), sat=None
     Returns:
         planck_hp_map (array): Healpix map of the Planck data.
     """
+    import healpy as hp
     p = os.path.join(savedir, f'maps_{freq}_{nside}_{sat}_{cool}_{ws}_{qu}.fits')
     if os.path.exists(p):
-        print(f'Planck map path to read: {p}')
+        logger.info(f'Planck map path to read: {p}')
         planck_hp_map = hp.read_map(p, field=field)
     else:
         p = os.path.join(savedir, f'maps_{freq}_{nside}.fits')
-        p = '/scratch/gpfs/SIMONSOBS/users/ys5857/ref/planck/dataset_261008/output_map/maps_100_2048_map2048.fits'
-        print(f'Read fiducial one. Planck map path to read: {p}')
-        planck_hp_map = hp.read_map(p, field=field)
+        if not os.path.exists(p):
+            raise FileNotFoundError(f'No leakage derivative map for {sat} {cool} {ws} {qu} and no fiducial {p}')
+        logger.warning(f'No ws-specific map for {sat} {cool} {ws} {qu}; using fiducial {p}')
+        planck_hp_map = hp.read_map(p, field=field, dtype=np.float32)
     return planck_hp_map
 
 def get_planck_qumap(savedir, freq='100', nside=512, field=np.arange(18), sat=None, cool=None, ws=None):
@@ -50,11 +50,9 @@ def get_planck_qumap(savedir, freq='100', nside=512, field=np.arange(18), sat=No
     return planck_hp_qmap, planck_hp_umap
 
 def construct_beam(isaved = None):
+    """ Helper function to construct beam parameters from the saved pickle file.
+    params in isaved should follow the format of beam_model.
     """
-    params in isaved should follow '/scratch/gpfs/SIMONSOBS/users/ys5857/public/beam_paper/260305/beam_model/satp3_run13_f090_ws0.pkl'
-    """
-    if isaved is None:
-        isaved = '/scratch/gpfs/SIMONSOBS/users/ys5857/public/beam_paper/260305/beam_model/satp3_run13_f090_ws0.pkl'
     ibeam_param = read_pkl(isaved)
 
     fitparamq_md = ibeam_param['fitrqu'][:ibeam_param['num_md']]
@@ -93,9 +91,9 @@ def get_corresponds_differential_pointing(beamd, sat, cool, band, ws):
     """
     ibeamp = os.path.join(beamd, f"{sat}_{cool}_{band}_{ws}.pkl")
     if not os.path.exists(ibeamp):
-        print(f"There is no beam params for {sat}_{cool}_{band}_{ws}, so load ws1 instead (suppose for ws4).")
+        logger.info(f"There is no beam params for {sat}_{cool}_{band}_{ws}, so load ws1 instead (suppose for ws4).")
         ibeamp = os.path.join(beamd, f"{sat}_{cool}_{band}_ws1.pkl")
-    print(f'Beam path to read: {ibeamp}')
+    logger.info(f'Beam path to read: {ibeamp}')
     ibeam_param, fitparamq_md, fitparamu_md, fitparamq_quad, fitparamu_quad, ixn_iyn_xo_yo = construct_beam(isaved = ibeamp)
     ifitt = ibeam_param['fitrt']
     ipeakt = ifitt[0]/(2*np.pi*ifitt[3]*ifitt[4])
@@ -121,22 +119,25 @@ def sim_first_derivative_tod_from_map(maps, ra, dec):
     return tods_dx, tods_dy : array
         Simulated TOD of Q and U
     """
+    import healpy as hp
     nside = hp.get_nside(maps[0])
     pixs = hp.ang2pix(nside, np.pi/2 - dec, ra) # input need to be theta/phi
-    angs = np.array([hp.pix2ang(nside, ipix) for ipix in pixs])
+    angs = np.array(hp.pix2ang(nside, pixs)).T
     # angs is theta/phi, and maps is based on theta/phi
     # dx means difference btw pixel and real pointing in Theta/(90 - Dec)
     # dy means difference btw pixel and real pointing in Phi/RA
     # NOTE first/second derivative map of T w.r.t. phi is already divided by sin(theta) = sin(90 - dec)
     # https://healpy.readthedocs.io/en/latest/generated/healpy.sphtfunc.alm2map_der1.html
     dx = (np.pi/2 - dec) - angs.T[0]
-    dy = ra%(np.pi*2) - angs.T[1]
+    dy = (ra - angs.T[1] + np.pi) % (2*np.pi) - np.pi
     sin = np.sin(np.pi/2 - dec)
     coeffs = np.array([np.ones(len(dx)), dx, dy*sin])
     inds_dx = [3,9,12]
     inds_dy = [6,12,15]
     tods_dx = np.sum(maps[inds_dx][:,pixs]*coeffs, axis = 0)
     tods_dy = np.sum(maps[inds_dy][:,pixs]*coeffs, axis = 0)
+    # d/dtheta of (dT/dphi / sin(theta)) also has a -cot(theta) * (dT/dphi / sin(theta)) term
+    tods_dy -= dx * np.cos(np.pi/2 - dec) / sin * maps[6][pixs]
     return tods_dx, tods_dy
 
 #### dipole leakge ####
@@ -166,6 +167,7 @@ def sim_dipole_leakage_tod_from_map(qmaps, umaps, ra, dec, psi, rhoqx=1, rhoqy=1
     return Qdp, Udp : array
         Dipole leakage TOD for Q and U at sky. For detector timestream, we should consider detector pol angle.
     """
+    import healpy as hp
     nside = hp.get_nside(qmaps[0])
     pixs = hp.ang2pix(nside, np.pi/2 - dec, ra)
     inds_dT = [0, 3, 6] # T, dxT, dyT/sinx
@@ -254,7 +256,7 @@ def replace_dipole_leakage_simtod(aman, qmaps, umaps, rhoqx=1, rhoqy=1, rhoux=1,
     dsTs = []
     demodQs = []
     demodUs = []
-    for i in tqdm(range(aman.dets.count)):
+    for i in tqdm(range(aman.dets.count), disable=True):
         iq_xieta = so3g.proj.quat.rotation_xieta(aman.focal_plane.xi[i], aman.focal_plane.eta[i])
         iqp = sight.Q*iq_xieta
         ira, idec, ipsi = so3g.proj.quat.decompose_lonlat(iqp) # This psi is the same as the one derived from so3g.proj.quat.decompo
@@ -279,12 +281,8 @@ def replace_dipole_leakage_simtod(aman, qmaps, umaps, rhoqx=1, rhoqy=1, rhoux=1,
         tod = dsTs + demodQs*np.cos(4*aman.hwp_angle) + demodUs*np.sin(4*aman.hwp_angle)
         tod = tod.astype(np.float32)
         if wrap:
-            #if isinstance(aman.signal, np.ndarray):
-            try:
+            if 'signal' in aman:
                 aman.move('signal', None)
-            except:
-                print('There was no signal')
-                pass
             aman.wrap('signal', tod, [(0, 'dets'), (1, 'samps')])
         return tod
 
@@ -298,7 +296,7 @@ def replace_dipole_leakage_simtod(aman, qmaps, umaps, rhoqx=1, rhoqy=1, rhoux=1,
                 aman.move('demodQ', None)
                 aman.move('demodU', None)
             except:
-                print('There was no dsT/demodQ/demodU')
+                logger.warning('There was no dsT/demodQ/demodU')
                 pass
             aman.wrap('dsT', dsTs, [(0, 'dets'), (1, 'samps')])
             aman.wrap('demodQ', demodQs, [(0, 'dets'), (1, 'samps')])
@@ -319,15 +317,22 @@ def from_map(aman, leakage_config, ws=None, band=None, wrap=True, modulated=True
             for the simulation. If None, it will be computed from the boresight information.
     """
     if ws is None:
-        ws = aman.det_info.wafer_slot[0]
+        ws = np.unique(aman.det_info.wafer_slot)
+        if len(ws) != 1:
+            raise ValueError(f'leakage sim needs a single wafer slot, got {ws}')
+        ws = ws[0]
     if band is None:
-        band = aman.det_info.wafer.bandpass[0]
+        band = np.unique(aman.det_info.wafer.bandpass)
+        if len(band) != 1:
+            raise ValueError(f'leakage sim needs a single band, got {band}')
+        band = band[0]
     # get beam model
     if leakage_config.leakage_type == 'dipole':
+        field_max = 18 if leakage_config.second_der else 6
         tmapq, tmqpu = get_planck_qumap(savedir=leakage_config.sim_dir,
                                         freq=leakage_config.planck_map_freq,
                                         nside=leakage_config.nside,
-                                        field=np.arange(leakage_config.field_max),
+                                        field=np.arange(field_max),
                                         sat=leakage_config.sat,
                                         cool=leakage_config.cool,
                                         ws=ws,
