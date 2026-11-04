@@ -505,12 +505,15 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id, bgmap_id, undo_R0cut=False, hwpss=Fa
     if (not hwpss) and (not undo_R0cut):
         raise ValueError('either hwpss or undo_R0cut should be true')
 
-    # if bgmap_id is None:
-    #     logger.warn('no bgmap, skip undo R0cut')
-    #     undo_R0cut = False
     if undo_R0cut:  # reload bgmap and remove R0_ thresh
-        bg_map_file = lb.load_smurf_npy_data(ctx, bgmap_id, "bias_step_analysis", path_only=True)
-        bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
+        if bgmap_id is None:
+            logger.warn('no bgmap obs_id, skip undo R0cut')
+        else:
+            try:
+                bg_map_file = lb.load_smurf_npy_data(ctx, bgmap_id, "bias_step_analysis", path_only=True)
+                bsa.bgmap, bsa.polarity = load_bgmap(bsa.bands, bsa.channels, bg_map_file)
+            except FileNotFoundError:
+                logger.warn('no bgmap file, skip undo R0cut')
     if hwpss:
         am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
         bsa.am = am
@@ -597,7 +600,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
             bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
             # longer max_days_before for bgmap since bgmap is less frequent
-            bgmap_obsids = get_cal_obsids(ctx, obs_id, "bgmap", max_days_before=30)
+            bgmap_obsids = get_cal_obsids(ctx, obs_id, "bgmap", max_days_before=40)
 
             for dset, bsa in bsas.items():
                 oid = bias_step_obsids[dset]
