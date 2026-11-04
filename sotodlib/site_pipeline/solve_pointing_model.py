@@ -151,7 +151,52 @@ def _create_culling_mask(obs_index, cull_dets):
         culling_mask[selected_indices] = True
     return culling_mask 
 
+def _create_spatial_bin_mask(az_enc, el_enc, roll_enc, weights=None,
+                             az_bins=25, el_bins=12, roll_bins=8,
+                             max_per_bin=200, seed=42):
+    """
+    Creates a boolean selection mask that caps the number of data points
+    per 3D (Az, El, Roll) spatial bin.
+    """
+    #np.random.seed(seed)
+    valid_mask = np.isfinite(az_enc) & np.isfinite(el_enc) & np.isfinite(roll_enc)
+    if weights is not None:
+        valid_mask &= np.isfinite(weights) & (weights > 0)
     
+    valid_indices = np.where(valid_mask)[0]
+    if len(valid_indices) == 0:
+        return valid_mask
+
+    # Define bin edges across coordinate ranges
+    az_edges = np.linspace(az_enc[valid_mask].min(), az_enc[valid_mask].max(), az_bins + 1)
+    el_edges = np.linspace(el_enc[valid_mask].min(), el_enc[valid_mask].max(), el_bins + 1)
+    roll_edges = np.linspace(roll_enc[valid_mask].min(), roll_enc[valid_mask].max(), roll_bins + 1)
+
+    # Digitize sample coordinates
+    az_idx = np.clip(np.digitize(az_enc[valid_mask], az_edges) - 1, 0, az_bins - 1)
+    el_idx = np.clip(np.digitize(el_enc[valid_mask], el_edges) - 1, 0, el_bins - 1)
+    roll_idx = np.clip(np.digitize(roll_enc[valid_mask], roll_edges) - 1, 0, roll_bins - 1)
+
+    # Group valid global indices into 3D bins
+    grid_map = {}
+    for i, global_idx in enumerate(valid_indices):
+        bin_key = (az_idx[i], el_idx[i], roll_idx[i])
+        grid_map.setdefault(bin_key, []).append(global_idx)
+
+    # Subsample points in over-represented bins
+    selected_indices = []
+    for bin_key, indices in grid_map.items():
+        if len(indices) <= max_per_bin:
+            selected_indices.extend(indices)
+        else:
+            selected_indices.extend(
+                np.random.choice(indices, size=max_per_bin, replace=False)
+            )
+
+    mask = np.zeros(len(az_enc), dtype=bool)
+    mask[selected_indices] = True
+    return mask
+
 def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, return_all_dets=False):
     per_obs_fps = config.get("per_obs_fps")
     skip_tags = config.get("skip_tags", [])
@@ -160,28 +205,46 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     which_data = config.get("use_as_data")
     which_weights = config.get("use_as_weights", None)
     ctx = core.Context(config["context"]["path"])
+    band = config.get("band")
+    if band is not None:
+        band = band.encode("utf-8")
+    cull_dets = config.get("cull_dets", None)
+    cull_twice = config.get("cull_twice", False)
+    even_obs_size = config.get("even_obs_size", False)
+    even_spatial_sampling = config.get("even_spatial_sampling", False)
+    max_per_spatial_bin = config.get("max_per_spatial_bin", 200)
+    which_ufm = config.get("which_ufm", None)
+    filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
+    filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
 
     if return_all_dets:
         band = None
-        cull_dets = config.get("cull_dets", None)
-        cull_twice = config.get("cull_twice", False)
         even_obs_size = False
+        even_spatial_sampling = False
         which_ufm = None
-        filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
-        filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
-
     else:
-        band = config.get("band")
-        if band is not None:
-            band = band.encode("utf-8")  
-        cull_dets = config.get("cull_dets", None)
-        cull_twice = config.get("cull_twice", False)
-        even_obs_size = config.get("even_obs_size", False)
-        which_ufm = config.get("which_ufm", None)
-        filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
-        filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
         if config.get("use_these_files") is not None:
             filelist = [filelist[i] for i in config.get("use_these_files")]
+    # if return_all_dets:
+    #     band = None
+    #     cull_dets = config.get("cull_dets", None)
+    #     cull_twice = config.get("cull_twice", False)
+    #     even_obs_size = False
+    #     which_ufm = None
+    #     filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
+    #     filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
+    # else:
+    #     band = config.get("band")
+    #     if band is not None:
+    #         band = band.encode("utf-8")
+    #     cull_dets = config.get("cull_dets", None)
+    #     cull_twice = config.get("cull_twice", False)
+    #     even_obs_size = config.get("even_obs_size", False)
+    #     which_ufm = config.get("which_ufm", None)
+    #     filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
+    #     filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
+    #     if config.get("use_these_files") is not None:
+    #         filelist = [filelist[i] for i in config.get("use_these_files")]
 
     obs_dets_fits, det_boresight, weights_dets, tot_xe_err, stream_id_list, ot_list, obs_index = [], [], [], [], [], [], []
     for i, ffp in enumerate(filelist):
@@ -230,7 +293,8 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     #Order: [data fits, detector boresight, weights,
     #        nominal, xe_err, detids, ot_list, obs_index]
     #obs_index needs to be last or change index on culling/sizing masks below.
-    # det_ids also needs to be 5th, or change index on ds_det_ids below
+    # det_ids also needs to be (index 5), or change index on ds_det_ids below
+    # det_boresight needs to be (index 1) or change index on even_spatial mask below
     data_group = [obs_dets_fits, det_boresight, weights_dets,
                   all_nom_det_array, tot_xe_err, all_det_ids,
                   ot_list, obs_index] #obs_index needs to be last.
@@ -248,6 +312,16 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
 
         if even_obs_size:
             m = _create_size_mask(data_group[-1])
+            data_group = [arr[m] for arr in data_group]
+
+        if even_spatial_sampling:
+            m = _create_spatial_bin_mask(
+                data_group[1][:, 0] % (360),
+                data_group[1][:, 1],
+                data_group[1][:, 2],
+                data_group[2],
+                max_per_spatial_bin
+            )
             data_group = [arr[m] for arr in data_group]
 
         if cull_dets is not None:
@@ -427,7 +501,10 @@ def _init_fit_params(config, epochs):
                     p_min = float(p_min) if isinstance(p_min, str) else p_min
                     p_max = float(p_max) if isinstance(p_max, str) else p_max
                     break
-            should_vary = (p in free_params) if use_free_params else default_vary
+            should_vary = (
+                any(p == fp or p.startswith(fp + "_") for fp in free_params)
+                if use_free_params else default_vary
+            )
             fit_params.add(p, value=val, vary=should_vary, min=p_min, max=p_max)
         else:
             fit_params.add(p, expr = param_expr[p])
@@ -526,7 +603,7 @@ def model_template_xieta(params, pm_version, aman):
     if "lat" in pm_version:
         az, el, roll = pm._get_lat_enc_radians(aman.ancil)
         q_nomodel = quat.rotation_lonlat(-az, el, roll)
-    boresight = pm.apply_pointing_model(aman, pointing_model=params, wrap=False)
+    boresight, _ = pm.apply_pointing_model(aman, pointing_model=params, wrap_boresight=False)
     az1, el1, roll1 = boresight.az, boresight.el, boresight.roll
     q_model = quat.rotation_lonlat(-az1, el1, roll1)
     q_det_meas = quat.rotation_xieta(xi_meas, eta_meas, 0)
@@ -554,7 +631,7 @@ def model_measured_xieta(params, pm_version, aman):
     else:
         raise ValueError("Pointing model must be for sat or lat!")
 
-    boresight = pm.apply_pointing_model(aman, pointing_model=params, wrap=False)
+    boresight, _ = pm.apply_pointing_model(aman, pointing_model=params, wrap_boresight=False)
     az1, el1, roll1 = boresight.az, boresight.el, boresight.roll
     q_model = quat.rotation_lonlat(-az1, el1, roll1)
     q_det_true = quat.rotation_xieta(xi_true, eta_true, 0)
