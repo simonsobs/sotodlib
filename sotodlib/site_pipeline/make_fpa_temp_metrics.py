@@ -46,7 +46,6 @@ def exe_p2p_ana_load(ctx, iobs):
         if i == 0:
             pass
         else:
-            # print(i, iws)
             ws = iws
             break
     meta = ctx.get_meta(
@@ -62,13 +61,18 @@ def exe_p2p_ana_load(ctx, iobs):
 
     _ = tod_ops.flags.get_turnaround_flags(aman, t_buffer=2, truncate=True)
     if len(aman.timestamps) > 4000 * 2000:
-        print("Skip this data due to the data length is > 4000*200.")
+        logger.info("Skip this data due to the data length is > 4000*200.")
         return np.nan, np.nan, np.nan, np.nan
     return aman
 
 
-def load_az_temp(aman, hkcfg_file, platform="satp1"):
-    cfg = hkdb.HkConfig.from_yaml(hkcfg_file)
+def load_az_temp(aman, hkcfg, platform="satp1"):
+    cfg = hkdb.HkConfig.from_yaml(hkcfg)
+    
+    spec = hkdb.LoadSpec(
+        cfg=cfg, 
+        
+    )
     if platform == "satp1":
         spec = hkdb.LoadSpec(
             cfg=cfg,
@@ -163,13 +167,13 @@ def make_binning(sigs, rs, r_bins):
 def exe_azbin(
     ctx,
     iobs,
-    hkcfg_file,
+    hkcfg,
     platform="satp1",
     cut=5,
 ):
 
     aman = exe_p2p_ana_load(ctx, iobs)
-    load_az_temp(aman, hkcfg_file, platform)
+    load_az_temp(aman, hkcfg, platform)
     az_deg = aman.boresight.az / DEG
     azmax = round(np.max(aman.boresight.az / DEG), 1)
     azmin = round(np.min(aman.boresight.az / DEG), 1)
@@ -505,7 +509,7 @@ def ana1(df):
             ),
         )
         n += 1
-    print(f"Number of observation that went into this plots = {n}")
+    logger.info(f"Number of observation that went into this plots = {n}")
 
     dfm = pd.DataFrame()
     dfm["az"] = azbins
@@ -651,7 +655,7 @@ def dataframe_maker(
     obss = []
     for iobs in obslist:
         if ctx.obsdb.get(iobs["obs_id"], tags=True)["subtype"] == scan_type:
-            print(iobs["obs_id"], ctx.obsdb.get(iobs["obs_id"], tags=True)["tags"])
+            logger.info(iobs["obs_id"], ctx.obsdb.get(iobs["obs_id"], tags=True)["tags"])
             obss.append(iobs["obs_id"])
 
     df = pd.DataFrame()
@@ -670,7 +674,7 @@ def dataframe_maker(
             ]
             df["ret"] = ret
         except Exception:
-            print(f"exe_azbin failed for {iobs}:")
+            logger.error(f"exe_azbin failed for {iobs}:")
             traceback.print_exc()
     dfm = ana1(df)
     return dfm, df
@@ -735,7 +739,7 @@ def get_fpa_metrics(df, setpoint=75):
             try:
                 popt, bin_centers, hist_vals = _fit_gaussian_to_residuals(variance)
             except RuntimeError:
-                print(f"Fit failed for index {df['ret'][idx]}")
+                logger.error(f"Fit failed for index {df['ret'][idx]}")
                 continue
 
             amp, mu, sigma = popt
@@ -784,7 +788,7 @@ def get_fpa_metrics(df, setpoint=75):
                 },
             }
         except Exception:
-            print(f"get_fpa_metrics failed for index {idx}:")
+            logger.error(f"get_fpa_metrics failed for index {idx}:")
             traceback.print_exc()
     return ret
 
@@ -862,28 +866,28 @@ def metric_analyzer(
             if np.isclose(min_az, minaz, rtol=1e-1) & np.isclose(
                 max_az, maxaz, rtol=1e-1
             ):
-                print(std, std_threshold[j])
+                logger.info(std, std_threshold[j])
                 if std > std_threshold[j]:
-                    print(
+                    logger.info(
                         f"Standard deviation of observation {obs} is over threshold value of {std_threshold[j]} mK at {round(std, 2)} mK."
                     )
-                    print(
+                    logger.info(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_std[j] += 1
                 if l_p2p > l_p2p_threshold[j]:
-                    print(
+                    logger.info(
                         f"Left going turnaround of observation {obs} is over threshold value of {l_p2p_threshold[j]} mK at {round(l_p2p, 2)} mK."
                     )
-                    print(
+                    logger.info(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_l_p2p[j] += 1
                 if r_p2p > r_p2p_threshold[j]:
-                    print(
+                    logger.info(
                         f"Right going turnaround of observation {obs} is over threshold value of {r_p2p_threshold[j]} mK at {round(r_p2p, 2)} mK."
                     )
-                    print(
+                    logger.info(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_r_p2p[j] += 1
@@ -895,10 +899,10 @@ def metric_analyzer(
                 r_sq = metric_dict[obs]["r_squared"]
 
                 if r_sq < r_sq_threshold[j]:
-                    print(
+                    logger.info(
                         f"Gaussian R squared value of observation {obs} is less than the threshold value of {r_sq_threshold[j]} at {round(r_sq, 2)}."
                     )
-                    print(
+                    logger.info(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_gauss[j] += 1
@@ -920,10 +924,10 @@ def metric_analyzer(
                         if save_path != None:
                             plt.savefig(os.path.join(save_path + f"/{obs}_gaussian.png"))
                         plt.close()
-        print(f"Number of Standard deviation flags: {n_std[j]}")
-        print(f"Number of right turnaround P2P flags: {n_r_p2p[j]}")
-        print(f"Number of left turnaround P2P flags: {n_l_p2p[j]}")
-        print(f"Number of goodness of fit flags: {n_gauss[j]}")
+        logger.info(f"Number of Standard deviation flags: {n_std[j]}")
+        logger.info(f"Number of right turnaround P2P flags: {n_r_p2p[j]}")
+        logger.info(f"Number of left turnaround P2P flags: {n_l_p2p[j]}")
+        logger.info(f"Number of goodness of fit flags: {n_gauss[j]}")
 
     # Save flag counts to dict and return
     ret = {
@@ -1154,8 +1158,8 @@ def az_circle_plotter(
         binned_maxazs[j].append(v)
 
     if debug:
-        print(f"binned minazs: {binned_minazs}")
-        print(f"binned maxazs: {binned_maxazs}")
+        logger.info(f"binned minazs: {binned_minazs}")
+        logger.info(f"binned maxazs: {binned_maxazs}")
 
     azidx = []
     for i in range(len(df)):
@@ -1174,7 +1178,7 @@ def az_circle_plotter(
             azidx.append(-1)
     df["azidx"] = azidx
     if debug:
-        print(azidx)
+        logger.info(azidx)
 
     setpoints = {
         "satp1": 75,
@@ -1205,7 +1209,7 @@ def az_circle_plotter(
             # range -- nothing to plot for it, so skip rather than operate
             # on empty arrays below.
             if debug:
-                print(f"az_circle_plotter: no observations in az bin {i}, skipping")
+                logger.info(f"az_circle_plotter: no observations in az bin {i}, skipping")
             continue
 
         iaz = dfm["az"][imask] + angle_offset
@@ -1213,8 +1217,8 @@ def az_circle_plotter(
         ilaz = dfm["lfp"][imask]
 
         if debug:
-            print(iraz)
-            print(ilaz)
+            logger.info(iraz)
+            logger.info(ilaz)
 
         irfl = ~np.isnan(iraz.values)
         raz = iaz.values[irfl]
@@ -1251,7 +1255,7 @@ def az_circle_plotter(
                     ),
                 )
         elif debug:
-            print(f"az_circle_plotter: no valid right-turnaround data in az bin {i}")
+            logger.info(f"az_circle_plotter: no valid right-turnaround data in az bin {i}")
 
         ilfl = ~np.isnan(ilaz.values)
         laz = iaz.values[ilfl]
@@ -1286,7 +1290,7 @@ def az_circle_plotter(
                     ),
                 )
         elif debug:
-            print(f"az_circle_plotter: no valid left-turnaround data in az bin {i}")
+            logger.info(f"az_circle_plotter: no valid left-turnaround data in az bin {i}")
 
         # arc = patches.Arc(center, 2*radius + 0.02, 2*radius + 0.02, angle=0, theta1=np.min(iaz), theta2=np.max(iaz), color='blue', linewidth=2)
         # ax.add_patch(arc)
