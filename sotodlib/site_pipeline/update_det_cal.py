@@ -27,7 +27,7 @@ from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, Future
+from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
 from sodetlib.operations.iv import IVAnalysis
 from sodetlib.operations.bias_steps import BiasStepAnalysis

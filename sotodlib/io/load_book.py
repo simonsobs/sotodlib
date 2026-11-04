@@ -248,7 +248,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False,
 
 def load_smurf_npy_data(ctx, obs_id, substr, path_only=False):
     """
-    return an sodetlib npy file path from Z_smurf archive of book.
+    Loads an sodetlib npy file from Z_smurf archive of book.
 
     Args
     _____
