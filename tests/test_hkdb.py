@@ -1,3 +1,4 @@
+import importlib
 import unittest
 import tempfile
 
@@ -118,3 +119,13 @@ class HkDbTest(unittest.TestCase):
         fields = hkdb.get_field_list(load_spec, fields=['weird_agent.*.*'])
         self.assertEqual(fields, ['weird_agent.misc_feed.field1',
                                   'weird_agent.misc_feed.field2'])
+
+
+class TestSitePipelineCli(unittest.TestCase):
+    def test_full_parser(self):
+        """Check that the full site-pipeline parser builds without errors."""
+        try:
+            cli = importlib.import_module('sotodlib.site_pipeline.cli')
+        except ImportError as e:
+            self.skipTest(f'optional dependency missing: {e}')
+        cli.get_parser().format_help()
