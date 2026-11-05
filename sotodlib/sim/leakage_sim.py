@@ -326,11 +326,12 @@ def from_map(aman, leakage_config, ws=None, band=None, wrap=True, modulated=True
         if len(band) != 1:
             raise ValueError(f'leakage sim needs a single band, got {band}')
         band = band[0]
+    planck_freq = leakage_config.planck_map_freq[band]
     # get beam model
     if leakage_config.leakage_type == 'dipole':
         field_max = 18 if leakage_config.second_der else 7
         tmapq, tmqpu = get_planck_qumap(savedir=leakage_config.sim_dir,
-                                        freq=leakage_config.planck_map_freq,
+                                        freq=planck_freq,
                                         nside=leakage_config.nside,
                                         field=np.arange(field_max),
                                         sat=leakage_config.sat,
