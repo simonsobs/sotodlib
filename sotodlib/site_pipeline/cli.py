@@ -59,6 +59,7 @@ from . import (
     update_obsdb_ancil,
     make_coadd_atomic_map,
     make_cosamp_hk,
+    make_fpa_temp_metrics,
     update_det_match,
 )
 
@@ -82,6 +83,7 @@ ELEMENTS = {
     'update-obsdb': update_obsdb,
     'update-obsdb-ancil': update_obsdb_ancil,
     'make-cosamp-hk': make_cosamp_hk,
+    'make-fpa-temp-metrics': make_fpa_temp_metrics,
     'make-coadd-atomic-map': make_coadd_atomic_map,
     'update-det-match': update_det_match,
 }

@@ -1,40 +1,67 @@
 """Compute and visualize focal-plane-array (FPA) temperature stability metrics.
 
-Pipeline (see the ``__main__`` block / :func:`main`):
+Pipeline (see :func:`main`):
 
-1. :func:`pkl` queries an observation database over a date range and writes
-   azimuth-binned FPA temperature data to pickle files (via ``exe_azbin``).
-2. :func:`get_fpa_metrics` loads those pickle files and computes RMS,
-   standard deviation, deviation from setpoint, peak-to-peak turnaround, and
-   Gaussian-fit metrics for each observation.
+1. :func:`dataframe_maker` queries an observation database over a date range
+   and runs :func:`exe_azbin` on each matching observation to produce
+   azimuth-binned FPA temperature data, which are accumulated into a
+   DataFrame (by :func:`ana1`) for plotting.
+2. :func:`get_fpa_metrics` computes RMS, standard deviation, deviation from
+   setpoint, peak-to-peak turnaround, and Gaussian-fit metrics for each
+   observation.
 3. :func:`metric_analyzer` flags observations whose metrics exceed
    platform-specific thresholds, binned by azimuth range.
 4. :func:`az_circle_plotter` renders a polar summary plot of the azimuth
    scan range with flag counts overlaid.
 """
 
-import os
 import argparse
-import traceback
 import datetime as dtime
+import logging
+import os
 from typing import Optional
 
-import yaml
-import logging
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
+import yaml
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 from tqdm import tqdm
 
 from sotodlib import core, tod_ops
 from sotodlib.io import hkdb
-from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+
 logger = init_logger('make_fpa_temp_metrics', 'make_fpa_temp_metrics: ')
 date = dtime.datetime.now()
 DEG = np.pi / 180
+
+# Per-platform context config key and FPA temperature setpoint (mK).
+PLATFORM_SETTINGS = {
+    "satp1": {"ctx_key": "ctx_path1", "setpoint": 75},
+    "satp2": {"ctx_key": "ctx_path2", "setpoint": 100},
+    "satp3": {"ctx_key": "ctx_path3", "setpoint": 62},
+}
+
+# Cerro Toco horizon profile: elevation (deg) every 6 deg in azimuth.
+TOCO_AZ = np.arange(0, 360, 6)
+TOCO_EL = np.array(
+    [
+        0.47322, 1.94546, 5.34882, 7.6002, 10.038, 12.86298,
+        15.07134, 14.8658, 11.57238, 9.86114, 12.27982, 12.09818,
+        8.83822, 7.4329, 6.79716, 5.88896, 5.38706, 5.05724,
+        3.43682, 3.42726, 4.8278, 4.8278, 3.69494, 1.90722,
+        1.47702, 1.66344, 1.95024, 2.09842, 2.21314, 0.84606,
+        0.44932, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, -0.44932, -0.33938, -0.5019, -0.42542,
+        -0.44454, -0.60228, -0.8365, -1.41488, -1.673, -2.00282,
+        -2.03628, -2.03628, -1.97892, -1.3384, -1.94546, 1.94546,
+        1.19978, 2.19402, 0.55926, 1.82118, 1.49136, 0.0,
+    ]
+)
+
 
 def exe_p2p_ana_load(ctx, iobs):
     ws = "ws0"
@@ -66,75 +93,35 @@ def exe_p2p_ana_load(ctx, iobs):
     return aman
 
 
-def load_az_temp(aman, hkcfg, platform="satp1"):
-    cfg = hkdb.HkConfig.from_yaml(hkcfg)
-    
+def load_az_temp(aman, hk_cfg):
+    """Load HK azimuth and FPA temperature data and add it to ``aman``.
+
+    The HK data are linearly interpolated onto ``aman.timestamps`` and wrapped
+    into ``aman`` as float32 ``Az_Pos_Des``, ``Az_Pos_Err``,
+    ``Corrected_Azimuth`` and ``fptemp``.
+
+    Args:
+        aman (sotodlib.core.AxisManager): Observation to add the HK data to.
+        hk_cfg (dict): The ``hk`` block of the pipeline config. Contains the
+            :class:`sotodlib.io.hkdb.HkConfig` keys (e.g. ``hk_root``,
+            ``db_file``) plus ``fields``, the four HK fields to load, in the
+            order azimuth setpoint, azimuth error, corrected azimuth, FPA
+            temperature.
+    """
+    hk_cfg = dict(hk_cfg)
+    keys = hk_cfg.pop("fields")
+    cfg = hkdb.HkConfig.from_dict(hk_cfg)
+
     spec = hkdb.LoadSpec(
-        cfg=cfg, 
-        
+        cfg=cfg,
+        fields=keys,
+        start=float(aman.timestamps[0]),
+        end=float(aman.timestamps[-1]),
     )
-    if platform == "satp1":
-        spec = hkdb.LoadSpec(
-            cfg=cfg,
-            fields=[
-                "acu.acu_udp_stream.Az_Pos_Err",
-                "acu.acu_udp_stream.Corrected_Azimuth",
-                "acu.acu_udp_stream.Az_Pos_Des",
-                "cryo-ls372-lsa21yc.temperatures.Channel_02_T",
-            ],
-            start=float(aman.timestamps[0]),
-            end=float(aman.timestamps[-1]),
-        )
-        res = hkdb.load_hk(spec, show_pb=True)
-        keys = [
-            "acu.acu_udp_stream.Az_Pos_Des",
-            "acu.acu_udp_stream.Az_Pos_Err",
-            "acu.acu_udp_stream.Corrected_Azimuth",
-            "cryo-ls372-lsa21yc.temperatures.Channel_02_T",
-        ]
-        labels = ["Az_Pos_Des", "Az_Pos_Err", "Corrected_Azimuth", "fptemp"]
-    if platform == "satp2":
-        spec = hkdb.LoadSpec(
-            cfg=cfg,
-            fields=[
-                "acu.acu_udp_stream.Az_Pos_Err",
-                "acu.acu_udp_stream.Corrected_Azimuth",
-                "acu.acu_udp_stream.Az_Pos_Des",
-                "cryo-ls372-lsa22vx.temperatures.Channel_03_T",
-            ],
-            start=float(aman.timestamps[0]),
-            end=float(aman.timestamps[-1]),
-        )
-        res = hkdb.load_hk(spec, show_pb=True)
-        keys = [
-            "acu.acu_udp_stream.Az_Pos_Des",
-            "acu.acu_udp_stream.Az_Pos_Err",
-            "acu.acu_udp_stream.Corrected_Azimuth",
-            "cryo-ls372-lsa22vx.temperatures.Channel_03_T",
-        ]
-        labels = ["Az_Pos_Des", "Az_Pos_Err", "Corrected_Azimuth", "fptemp"]
-    if platform == "satp3":
-        spec = hkdb.LoadSpec(
-            cfg=cfg,
-            fields=[
-                "acu.acu_udp_stream.Az_Pos_Err",
-                "acu.acu_udp_stream.Corrected_Azimuth",
-                "acu.acu_udp_stream.Az_Pos_Des",
-                "cryo-ls372-lsa2dtc.temperatures.Channel_01_T",
-            ],
-            start=float(aman.timestamps[0]),
-            end=float(aman.timestamps[-1]),
-        )
-        res = hkdb.load_hk(spec, show_pb=True)
-        keys = [
-            "acu.acu_udp_stream.Az_Pos_Des",
-            "acu.acu_udp_stream.Az_Pos_Err",
-            "acu.acu_udp_stream.Corrected_Azimuth",
-            "cryo-ls372-lsa2dtc.temperatures.Channel_01_T",
-        ]
-        labels = ["Az_Pos_Des", "Az_Pos_Err", "Corrected_Azimuth", "fptemp"]
+    res = hkdb.load_hk(spec, show_pb=True)
+    labels = ["Az_Pos_Des", "Az_Pos_Err", "Corrected_Azimuth", "fptemp"]
+
     for ikey, ilabel in zip(keys, labels):
-        # ilabel = ikey.split('.')[-1]
         x, y = res.data[ikey]
         f = interp1d(x, y, kind="linear", fill_value="extrapolate")
         interpol = f(aman.timestamps)
@@ -164,378 +151,167 @@ def make_binning(sigs, rs, r_bins):
     }
 
 
+# Keys returned by _bin_scan_stats, in the order they appear in exe_azbin output.
+_BINNED_KEYS = (
+    "rcount", "lcount", "rfp", "rfp_sqre", "lfp", "lfp_sqre",
+    "raze", "raze_sqre", "laze", "laze_sqre",
+)
+
+
+def _bin_scan_stats(aman, az_deg, az_bin, mask):
+    """Bin FPA temperature and azimuth error by azimuth for each scan direction.
+
+    Args:
+        aman (sotodlib.core.AxisManager): Observation with ``fptemp``,
+            ``Az_Pos_Err`` and left/right scan flags.
+        az_deg (np.ndarray): Boresight azimuth, in degrees.
+        az_bin (np.ndarray): Azimuth bin centers, in degrees.
+        mask (np.ndarray): Boolean sample mask; only samples where it is True
+            are binned.
+
+    Returns:
+        dict: Binned statistics for the right (``r``) and left (``l``)
+            scans, keyed ``{side}count``, ``{side}fp``, ``{side}fp_sqre``,
+            ``{side}aze`` and ``{side}aze_sqre``.
+    """
+    out = {}
+    for side, scan in (("r", aman.flags.right_scan), ("l", aman.flags.left_scan)):
+        smask = scan.mask() & mask
+        fpbin = make_binning(aman.fptemp[smask], az_deg[smask], az_bin)
+        azebin = make_binning(aman.Az_Pos_Err[smask], az_deg[smask], az_bin)
+        out[f"{side}count"] = fpbin["count"]
+        out[f"{side}fp"] = fpbin["sig"]
+        out[f"{side}fp_sqre"] = fpbin["sig_sqre"]
+        out[f"{side}aze"] = azebin["sig"]
+        out[f"{side}aze_sqre"] = azebin["sig_sqre"]
+    return out
+
+
 def exe_azbin(
     ctx,
     iobs,
-    hkcfg,
-    platform="satp1",
+    hk_cfg,
     cut=5,
 ):
+    """Load an observation and bin its FPA temperature in azimuth.
 
+    The full TOD is trimmed in three ways: the full data (no suffix), the
+    region excluding the ``cut`` degrees nearest each end of the scan
+    (``_no_turnarounds``, used for RMS and Gaussian statistics), and only
+    those end regions (``_only_turnarounds``, used for peak-to-peak).
+
+    Args:
+        ctx (sotodlib.core.Context): Context to load the observation from.
+        iobs (str): Observation ID.
+        hk_cfg (dict): HK loading config, passed to :func:`load_az_temp`.
+        platform (str, optional): Telescope platform. Defaults to "satp1".
+        cut (float, optional): Width of the turnaround region at each end of
+            the scan, in degrees. Defaults to 5.
+
+    Returns:
+        tuple: ``(ret, aman)``. ``ret`` is a dict holding, for each of the
+            three trimmings, the trimmed ``fp``, ``az_deg`` and
+            ``timestamps`` arrays plus the :func:`_bin_scan_stats` outputs;
+            ``ret["az"]`` is the azimuth bin array. ``aman`` is the loaded
+            observation.
+    """
     aman = exe_p2p_ana_load(ctx, iobs)
-    load_az_temp(aman, hkcfg, platform)
+    load_az_temp(aman, hk_cfg)
     az_deg = aman.boresight.az / DEG
-    azmax = round(np.max(aman.boresight.az / DEG), 1)
-    azmin = round(np.min(aman.boresight.az / DEG), 1)
+    azmax = round(np.max(az_deg), 1)
+    azmin = round(np.min(az_deg), 1)
     az_bin = np.arange(azmin, azmax, 0.2)
-    rmask_full = aman.flags.right_scan.mask()
-    lmask_full = aman.flags.left_scan.mask()
 
-    fp_full = aman.fptemp
-    timestamps_full = aman.timestamps
-
-    ###################
-    # New way to load data which will make auto script better
-    # This will trim the full TOD in two different ways
-    # 1. For RMS and Gaussian statistics, only want to look at non-turnaround region
-    # 2. For P2P only want turnaround region, which will be defined by a degree variable
-
-    # mask out turnaround region
-    turnaround_mask = (az_deg >= (azmin + cut)) & (az_deg <= (azmax - cut))
-
-    turnaround_rmask = aman.flags.right_scan.mask() & turnaround_mask
-    turnaround_lmask = aman.flags.left_scan.mask() & turnaround_mask
-
-    fp_no_turnarounds = aman.fptemp[turnaround_mask]
-    timestamps_no_turnarounds = aman.timestamps[turnaround_mask]
-    az_deg_no_turnarounds = az_deg[turnaround_mask]
-
-    rfpbin_no_turnarounds = make_binning(
-        aman.fptemp[turnaround_rmask],
-        aman.boresight.az[turnaround_rmask] / DEG,
-        az_bin,
+    # Samples away from the scan ends, and samples within ``cut`` of them.
+    away_from_ends = (az_deg >= (azmin + cut)) & (az_deg <= (azmax - cut))
+    near_ends = ((az_deg >= azmin) & (az_deg <= (azmin + cut))) | (
+        (az_deg <= azmax) & (az_deg >= (azmax - cut))
     )
-    lfpbin_no_turnarounds = make_binning(
-        aman.fptemp[turnaround_lmask],
-        aman.boresight.az[turnaround_lmask] / DEG,
-        az_bin,
-    )
-    razebin_no_turnarounds = make_binning(
-        aman.Az_Pos_Err[turnaround_rmask],
-        aman.boresight.az[turnaround_rmask] / DEG,
-        az_bin,
-    )
-    lazebin_no_turnarounds = make_binning(
-        aman.Az_Pos_Err[turnaround_lmask],
-        aman.boresight.az[turnaround_lmask] / DEG,
-        az_bin,
+    trimmings = (
+        ("", np.ones(az_deg.shape, dtype=bool)),
+        ("_no_turnarounds", away_from_ends),
+        ("_only_turnarounds", near_ends),
     )
 
-    # mask out non-turnaround region
-    near_min = (az_deg >= azmin) & (az_deg <= (azmin + cut))
-    near_max = (az_deg <= azmax) & (az_deg >= (azmax - cut))
-    non_turnaround_mask = near_min | near_max
-
-    non_turnaround_rmask = aman.flags.right_scan.mask() & non_turnaround_mask
-    non_turnaround_lmask = aman.flags.left_scan.mask() & non_turnaround_mask
-
-    fp_only_turnarounds = aman.fptemp[non_turnaround_mask]
-    timestamps_only_turnarounds = aman.timestamps[non_turnaround_mask]
-    az_deg_only_turnarounds = az_deg[non_turnaround_mask]
-
-    rfpbin_only_turnarounds = make_binning(
-        aman.fptemp[non_turnaround_rmask],
-        aman.boresight.az[non_turnaround_rmask] / DEG,
-        az_bin,
-    )
-    lfpbin_only_turnarounds = make_binning(
-        aman.fptemp[non_turnaround_lmask],
-        aman.boresight.az[non_turnaround_lmask] / DEG,
-        az_bin,
-    )
-    razebin_only_turnarounds = make_binning(
-        aman.Az_Pos_Err[non_turnaround_rmask],
-        aman.boresight.az[non_turnaround_rmask] / DEG,
-        az_bin,
-    )
-    lazebin_only_turnarounds = make_binning(
-        aman.Az_Pos_Err[non_turnaround_lmask],
-        aman.boresight.az[non_turnaround_lmask] / DEG,
-        az_bin,
-    )
-
-    ###################
-
-    rfpbin_full = make_binning(
-        aman.fptemp[rmask_full], aman.boresight.az[rmask_full] / DEG, az_bin
-    )
-    lfpbin_full = make_binning(
-        aman.fptemp[lmask_full], aman.boresight.az[lmask_full] / DEG, az_bin
-    )
-    razebin_full = make_binning(
-        aman.Az_Pos_Err[rmask_full], aman.boresight.az[rmask_full] / DEG, az_bin
-    )
-    lazebin_full = make_binning(
-        aman.Az_Pos_Err[lmask_full], aman.boresight.az[lmask_full] / DEG, az_bin
-    )
-
-    ret = {}
-
-    # Full data
-    ret["az"] = az_bin
-    ret["fp"] = fp_full
-    ret["az_deg"] = az_deg
-    ret["timestamps"] = timestamps_full
-    ret["rcount"] = rfpbin_full["count"]
-    ret["lcount"] = lfpbin_full["count"]
-    ret["rfp"] = rfpbin_full["sig"]
-    ret["rfp_sqre"] = rfpbin_full["sig_sqre"]
-    ret["lfp"] = lfpbin_full["sig"]
-    ret["lfp_sqre"] = lfpbin_full["sig_sqre"]
-    ret["raze"] = razebin_full["sig"]
-    ret["raze_sqre"] = razebin_full["sig_sqre"]
-    ret["laze"] = lazebin_full["sig"]
-    ret["laze_sqre"] = lazebin_full["sig_sqre"]
-    # No turnaround data
-    ret["fp_no_turnarounds"] = fp_no_turnarounds
-    ret["az_deg_no_turnarounds"] = az_deg_no_turnarounds
-    ret["timestamps_no_turnarounds"] = timestamps_no_turnarounds
-    ret["rcount_no_turnarounds"] = rfpbin_no_turnarounds["count"]
-    ret["lcount_no_turnarounds"] = lfpbin_no_turnarounds["count"]
-    ret["rfp_no_turnarounds"] = rfpbin_no_turnarounds["sig"]
-    ret["rfp_sqre_no_turnarounds"] = rfpbin_no_turnarounds["sig_sqre"]
-    ret["lfp_no_turnarounds"] = lfpbin_no_turnarounds["sig"]
-    ret["lfp_sqre_no_turnarounds"] = lfpbin_no_turnarounds["sig_sqre"]
-    ret["raze_no_turnarounds"] = razebin_no_turnarounds["sig"]
-    ret["raze_sqre_no_turnarounds"] = razebin_no_turnarounds["sig_sqre"]
-    ret["laze_no_turnarounds"] = lazebin_no_turnarounds["sig"]
-    ret["laze_sqre_no_turnarounds"] = lazebin_no_turnarounds["sig_sqre"]
-    # Only turnaround data
-    ret["fp_only_turnarounds"] = fp_only_turnarounds
-    ret["az_deg_only_turnarounds"] = az_deg_only_turnarounds
-    ret["timestamps_only_turnarounds"] = timestamps_only_turnarounds
-    ret["rcount_only_turnarounds"] = rfpbin_only_turnarounds["count"]
-    ret["lcount_only_turnarounds"] = lfpbin_only_turnarounds["count"]
-    ret["rfp_only_turnarounds"] = rfpbin_only_turnarounds["sig"]
-    ret["rfp_sqre_only_turnarounds"] = rfpbin_only_turnarounds["sig_sqre"]
-    ret["lfp_only_turnarounds"] = lfpbin_only_turnarounds["sig"]
-    ret["lfp_sqre_only_turnarounds"] = lfpbin_only_turnarounds["sig_sqre"]
-    ret["raze_only_turnarounds"] = razebin_only_turnarounds["sig"]
-    ret["raze_sqre_only_turnarounds"] = razebin_only_turnarounds["sig_sqre"]
-    ret["laze_only_turnarounds"] = lazebin_only_turnarounds["sig"]
-    ret["laze_sqre_only_turnarounds"] = lazebin_only_turnarounds["sig_sqre"]
+    ret = {"az": az_bin}
+    for suffix, mask in trimmings:
+        ret[f"fp{suffix}"] = aman.fptemp[mask]
+        ret[f"az_deg{suffix}"] = az_deg[mask]
+        ret[f"timestamps{suffix}"] = aman.timestamps[mask]
+        binned = _bin_scan_stats(aman, az_deg, az_bin, mask)
+        for key in _BINNED_KEYS:
+            ret[f"{key}{suffix}"] = binned[key]
 
     return ret, aman
 
 
 def ana1(df):
+    """Accumulate per-observation azimuth bins into an overall azimuth profile.
+
+    Args:
+        df (pandas.DataFrame): Per-observation data, as built by
+            :func:`dataframe_maker`; its ``ret`` column holds the
+            :func:`exe_azbin` output for each observation.
+
+    Returns:
+        pandas.DataFrame: One row per 0.2 deg azimuth bin, with the mean
+            (``fp``, ``az``), standard deviation (``*s``) and standard error
+            (``*e``) of the FPA temperature (mK) and azimuth error
+            (arcmin), for left (``l``) and right (``r``) scans. The ``mc``
+            columns are not currently filled: they are 0 in bins with data
+            and NaN in empty bins. ``az1``-``az4`` flag the four nominal
+            azimuth ranges.
+    """
     azbins = np.arange(0, 360, 0.2)
-    # Full TOD
-    rcounts = np.zeros(azbins.shape)
-    rfp = np.zeros(azbins.shape)
-    rfp_sqre = np.zeros(azbins.shape)
-    rmc = np.zeros(azbins.shape)
-    rmc_sqre = np.zeros(azbins.shape)
-    raze = np.zeros(azbins.shape)
-    raze_sqre = np.zeros(azbins.shape)
+    suffixes = ("", "_no_turnarounds", "_only_turnarounds")
+    stats = ("fp", "fp_sqre", "aze", "aze_sqre")
 
-    lcounts = np.zeros(azbins.shape)
-    lfp = np.zeros(azbins.shape)
-    lfp_sqre = np.zeros(azbins.shape)
-    lmc = np.zeros(azbins.shape)
-    lmc_sqre = np.zeros(azbins.shape)
-    laze = np.zeros(azbins.shape)
-    laze_sqre = np.zeros(azbins.shape)
+    # Count-weighted sums per scan direction and trimming (see exe_azbin).
+    acc = {
+        (side, sfx): {k: np.zeros(azbins.shape) for k in ("count",) + stats}
+        for side in "rl"
+        for sfx in suffixes
+    }
 
-    # No Turnarounds
-    rcounts_no_turnarounds = np.zeros(azbins.shape)
-    rfp_no_turnarounds = np.zeros(azbins.shape)
-    rfp_sqre_no_turnarounds = np.zeros(azbins.shape)
-    raze_no_turnarounds = np.zeros(azbins.shape)
-    raze_sqre_no_turnarounds = np.zeros(azbins.shape)
-
-    lcounts_no_turnarounds = np.zeros(azbins.shape)
-    lfp_no_turnarounds = np.zeros(azbins.shape)
-    lfp_sqre_no_turnarounds = np.zeros(azbins.shape)
-    laze_no_turnarounds = np.zeros(azbins.shape)
-    laze_sqre_no_turnarounds = np.zeros(azbins.shape)
-
-    # Only Turnarounds
-    rcounts_only_turnarounds = np.zeros(azbins.shape)
-    rfp_only_turnarounds = np.zeros(azbins.shape)
-    rfp_sqre_only_turnarounds = np.zeros(azbins.shape)
-    raze_only_turnarounds = np.zeros(azbins.shape)
-    raze_sqre_only_turnarounds = np.zeros(azbins.shape)
-
-    lcounts_only_turnarounds = np.zeros(azbins.shape)
-    lfp_only_turnarounds = np.zeros(azbins.shape)
-    lfp_sqre_only_turnarounds = np.zeros(azbins.shape)
-    laze_only_turnarounds = np.zeros(azbins.shape)
-    laze_sqre_only_turnarounds = np.zeros(azbins.shape)
-
-    i = 0
     n = 0
     for i in tqdm(range(len(df))):
         iret = df["ret"][i]
-        # Full TOD
         idxs = np.round(iret["az"] / 0.2).astype(int)
-
-        np.add.at(rcounts, idxs, np.nan_to_num(iret["rcount"]))
-        np.add.at(rfp, idxs, np.nan_to_num(iret["rfp"] * iret["rcount"]))
-        np.add.at(rfp_sqre, idxs, np.nan_to_num(iret["rfp_sqre"] * iret["rcount"]))
-        np.add.at(raze, idxs, np.nan_to_num(iret["raze"] * iret["rcount"]))
-        np.add.at(raze_sqre, idxs, np.nan_to_num(iret["raze_sqre"] * iret["rcount"]))
-
-        np.add.at(lcounts, idxs, np.nan_to_num(iret["lcount"]))
-        np.add.at(lfp, idxs, np.nan_to_num(iret["lfp"] * iret["lcount"]))
-        np.add.at(lfp_sqre, idxs, np.nan_to_num(iret["lfp_sqre"] * iret["lcount"]))
-        np.add.at(laze, idxs, np.nan_to_num(iret["laze"] * iret["lcount"]))
-        np.add.at(laze_sqre, idxs, np.nan_to_num(iret["laze_sqre"] * iret["lcount"]))
-
-        # No turnaround TOD
-
-        np.add.at(
-            rcounts_no_turnarounds, idxs, np.nan_to_num(iret["rcount_no_turnarounds"])
-        )
-        np.add.at(
-            rfp_no_turnarounds,
-            idxs,
-            np.nan_to_num(iret["rfp_no_turnarounds"] * iret["rcount_no_turnarounds"]),
-        )
-        np.add.at(
-            rfp_sqre_no_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["rfp_sqre_no_turnarounds"] * iret["rcount_no_turnarounds"]
-            ),
-        )
-        np.add.at(
-            raze_no_turnarounds,
-            idxs,
-            np.nan_to_num(iret["raze_no_turnarounds"] * iret["rcount_no_turnarounds"]),
-        )
-        np.add.at(
-            raze_sqre_no_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["raze_sqre_no_turnarounds"] * iret["rcount_no_turnarounds"]
-            ),
-        )
-
-        np.add.at(
-            lcounts_no_turnarounds, idxs, np.nan_to_num(iret["lcount_no_turnarounds"])
-        )
-        np.add.at(
-            lfp_no_turnarounds,
-            idxs,
-            np.nan_to_num(iret["lfp_no_turnarounds"] * iret["lcount_no_turnarounds"]),
-        )
-        np.add.at(
-            lfp_sqre_no_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["lfp_sqre_no_turnarounds"] * iret["lcount_no_turnarounds"]
-            ),
-        )
-
-        np.add.at(
-            laze_no_turnarounds,
-            idxs,
-            np.nan_to_num(iret["laze_no_turnarounds"] * iret["lcount_no_turnarounds"]),
-        )
-        np.add.at(
-            laze_sqre_no_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["laze_sqre_no_turnarounds"] * iret["lcount_no_turnarounds"]
-            ),
-        )
-
-        # Only turnaround TOD
-        np.add.at(
-            rcounts_only_turnarounds,
-            idxs,
-            np.nan_to_num(iret["rcount_only_turnarounds"]),
-        )
-        np.add.at(
-            rfp_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["rfp_only_turnarounds"] * iret["rcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            rfp_sqre_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["rfp_sqre_only_turnarounds"] * iret["rcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            raze_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["raze_only_turnarounds"] * iret["rcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            raze_sqre_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["raze_sqre_only_turnarounds"] * iret["rcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            lcounts_only_turnarounds,
-            idxs,
-            np.nan_to_num(iret["lcount_only_turnarounds"]),
-        )
-        np.add.at(
-            lfp_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["lfp_only_turnarounds"] * iret["lcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            lfp_sqre_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["lfp_sqre_only_turnarounds"] * iret["lcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            laze_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["laze_only_turnarounds"] * iret["lcount_only_turnarounds"]
-            ),
-        )
-        np.add.at(
-            laze_sqre_only_turnarounds,
-            idxs,
-            np.nan_to_num(
-                iret["laze_sqre_only_turnarounds"] * iret["lcount_only_turnarounds"]
-            ),
-        )
+        for (side, sfx), a in acc.items():
+            count = iret[f"{side}count{sfx}"]
+            np.add.at(a["count"], idxs, np.nan_to_num(count))
+            for k in stats:
+                np.add.at(a[k], idxs, np.nan_to_num(iret[f"{side}{k}{sfx}"] * count))
         n += 1
     logger.info(f"Number of observation that went into this plots = {n}")
 
+    # NOTE: the "mc" quantities are not accumulated yet, so the
+    # corresponding columns are 0 (NaN in empty bins).
+    zeros = np.zeros(azbins.shape)
+    # NOTE: the standard errors of both scan directions are divided by the
+    # left-scan counts.
+    err_counts = acc["l", ""]["count"]
+
     dfm = pd.DataFrame()
     dfm["az"] = azbins
-    dfm["lmc"] = lmc / lcounts * 1e3
-    dfm["lfp"] = lfp / lcounts * 1e3
-    dfm["laz"] = laze / lcounts * 60
+    for side in "lr":
+        a = acc[side, ""]
+        counts = a["count"]
+        dfm[f"{side}mc"] = zeros / counts * 1e3
+        dfm[f"{side}fp"] = a["fp"] / counts * 1e3
+        dfm[f"{side}az"] = a["aze"] / counts * 60
 
-    dfm["lmcs"] = np.sqrt((lmc_sqre / lcounts - (lmc / lcounts) ** 2)) * 1e3
-    dfm["lfps"] = np.sqrt((lfp_sqre / lcounts - (lfp / lcounts) ** 2)) * 1e3
-    dfm["lazs"] = np.sqrt((laze_sqre / lcounts - (laze / lcounts) ** 2)) * 60
+        dfm[f"{side}mcs"] = np.sqrt((zeros / counts - (zeros / counts) ** 2)) * 1e3
+        dfm[f"{side}fps"] = (
+            np.sqrt((a["fp_sqre"] / counts - (a["fp"] / counts) ** 2)) * 1e3
+        )
+        dfm[f"{side}azs"] = (
+            np.sqrt((a["aze_sqre"] / counts - (a["aze"] / counts) ** 2)) * 60
+        )
 
-    dfm["lmce"] = dfm["lmcs"] / np.sqrt(lcounts)
-    dfm["lfpe"] = dfm["lfps"] / np.sqrt(lcounts)
-    dfm["laze"] = dfm["lazs"] / np.sqrt(lcounts)
-
-    dfm["rmc"] = rmc / rcounts * 1e3
-    dfm["rfp"] = rfp / rcounts * 1e3
-    dfm["raz"] = raze / rcounts * 60
-
-    dfm["rmcs"] = np.sqrt((rmc_sqre / rcounts - (rmc / rcounts) ** 2)) * 1e3
-    dfm["rfps"] = np.sqrt((rfp_sqre / rcounts - (rfp / rcounts) ** 2)) * 1e3
-    dfm["razs"] = np.sqrt((raze_sqre / rcounts - (raze / rcounts) ** 2)) * 60
-
-    dfm["rmce"] = dfm["rmcs"] / np.sqrt(lcounts)
-    dfm["rfpe"] = dfm["rfps"] / np.sqrt(lcounts)
-    dfm["raze"] = dfm["razs"] / np.sqrt(lcounts)
+        dfm[f"{side}mce"] = dfm[f"{side}mcs"] / np.sqrt(err_counts)
+        dfm[f"{side}fpe"] = dfm[f"{side}fps"] / np.sqrt(err_counts)
+        dfm[f"{side}aze"] = dfm[f"{side}azs"] / np.sqrt(err_counts)
 
     dfm["az1"] = dfm["az"].between(47, 91)
     dfm["az2"] = dfm["az"].between(109, 153)
@@ -601,6 +377,7 @@ def _gaussian_r_squared(popt, bin_centers, hist_vals):
 
 def dataframe_maker(
     ctx,
+    hk_cfg,
     ys,
     ms,
     ds,
@@ -611,16 +388,15 @@ def dataframe_maker(
     tag=None,
     scan_type="cmb",
 ):
-    """Create azimuth-binned pickle files for observations in a time range.
+    """Create azimuth-binned data for observations in a time range.
 
     The observation database in ``ctx`` is queried between the provided start
     and stop dates, then filtered by ``scan_type``. Each matching observation
-    is passed to ``exe_azbin`` and the resulting pickle files are written to
-    ``pkl_save_dir``.
+    is passed to ``exe_azbin`` and the results are collected in a DataFrame.
 
     Args:
         ctx (sotodlib.core.Context): Context with an observation database.
-        pkl_save_dir (str): Directory where output pickle files are saved.
+        hk_cfg (dict): HK loading config, passed to :func:`load_az_temp`.
         ys (int): Start year.
         ms (int): Start month.
         ds (int): Start day.
@@ -633,14 +409,15 @@ def dataframe_maker(
             'cmb'.
 
     Returns:
-        str: The output directory path.
+        tuple: ``(dfm, df)``, the azimuth-binned summary DataFrame from
+            :func:`ana1` and the per-observation DataFrame.
     """
 
     scan_start = dtime.datetime(ys, ms, ds, 0, 0, 0, 0, tzinfo=dtime.timezone.utc)
     scan_stop = dtime.datetime(
         ye, me, de, date.hour, date.minute, 0, 0, tzinfo=dtime.timezone.utc
     )
-    if tag == None:
+    if tag is None:
         query = {
             "query_text": f"start_time > {scan_start.timestamp()} and start_time < {scan_stop.timestamp()}",
         }
@@ -655,43 +432,42 @@ def dataframe_maker(
     obss = []
     for iobs in obslist:
         if ctx.obsdb.get(iobs["obs_id"], tags=True)["subtype"] == scan_type:
-            logger.info(iobs["obs_id"], ctx.obsdb.get(iobs["obs_id"], tags=True)["tags"])
+            tags = ctx.obsdb.get(iobs["obs_id"], tags=True)["tags"]
+            logger.info(f"{iobs['obs_id']}: {tags}")
             obss.append(iobs["obs_id"])
 
-    df = pd.DataFrame()
+    rows = []
     for iobs in tqdm(obss):
         try:
-            ret = exe_azbin(
+            ret, _ = exe_azbin(
                 ctx,
                 iobs,
+                hk_cfg,
                 platform=platform,
             )
-            df["obsid"] = iobs
-            df["dt"] = [
-                dtime.datetime.fromtimestamp(
-                    int(iobs.split("_")[1]), tz=dtime.timezone.utc
-                )
-            ]
-            df["ret"] = ret
+            dt = dtime.datetime.fromtimestamp(
+                int(iobs.split("_")[1]), tz=dtime.timezone.utc
+            )
+            rows.append({"obsid": iobs, "dt": dt, "ret": ret})
         except Exception:
-            logger.error(f"exe_azbin failed for {iobs}:")
-            traceback.print_exc()
+            logger.exception(f"exe_azbin failed for {iobs}")
+    df = pd.DataFrame(rows, columns=["obsid", "dt", "ret"])
     dfm = ana1(df)
     return dfm, df
 
 
 def get_fpa_metrics(df, setpoint=75):
-    """Calculate FPA temperature metrics from azimuth-binned pickle files.
+    """Calculate FPA temperature metrics from azimuth-binned observation data.
 
-    For each pickle file (one per observation) in ``pkl_save_dir``, this loads
-    the FPA temperature time-ordered data, fits a 3rd order polynomial to
+    For each observation in ``df``, this takes the FPA temperature
+    time-ordered data, fits a 3rd order polynomial to
     remove slow trends, and fits a Gaussian to the residual distribution.
     Also computes the RMS/std of the temperature, its deviation from
     ``setpoint``, and the left/right turnaround peak-to-peak amplitude.
 
     Args:
-        pkl_save_dir (str): Directory containing pickle files with FPA data,
-            as produced by :func:`pkl`.
+        df (pandas.DataFrame): Per-observation data, as returned by
+            :func:`dataframe_maker`.
         setpoint (float, optional): Temperature setpoint, in mK (same units
             as the stored FPA temperature, which is converted from K to mK).
             Defaults to 75.
@@ -788,8 +564,7 @@ def get_fpa_metrics(df, setpoint=75):
                 },
             }
         except Exception:
-            logger.error(f"get_fpa_metrics failed for index {idx}:")
-            traceback.print_exc()
+            logger.exception(f"get_fpa_metrics failed for index {idx}")
     return ret
 
 
@@ -842,16 +617,18 @@ def metric_analyzer(
         r_p2p_threshold = [0.15, 0.12, 0.17, 0.15]
         l_p2p_threshold = [0.15, 0.3, 0.15, 0.12]
         r_sq_threshold = [0.9, 0.9, 0.9, 0.9]
-    if platform == "satp2":
+    elif platform == "satp2":
         std_threshold = [2.2e-1, 2.1e-1, 2.2e-1, 2.2e-1]
         r_p2p_threshold = [0.3, 0.35, 0.4, 0.4]
         l_p2p_threshold = [0.26, 0.35, 0.4, 0.35]
         r_sq_threshold = [0.8, 0.8, 0.8, 0.8]
-    if platform == "satp3":
+    elif platform == "satp3":
         std_threshold = [3.5e-2, 4.5e-2, 4e-2, 4.5e-2]
         r_p2p_threshold = [0.06, 0.08, 0.06, 0.08]
         l_p2p_threshold = [0.1, 0.1, 0.13, 0.15]
         r_sq_threshold = [0.9, 0.9, 0.9, 0.9]
+    else:
+        raise ValueError(f"Unknown platform: {platform}")
 
     for j in range(4):
         minaz, maxaz = minazs[j], maxazs[j]
@@ -866,7 +643,7 @@ def metric_analyzer(
             if np.isclose(min_az, minaz, rtol=1e-1) & np.isclose(
                 max_az, maxaz, rtol=1e-1
             ):
-                logger.info(std, std_threshold[j])
+                logger.debug(f"{obs}: std {std}, threshold {std_threshold[j]}")
                 if std > std_threshold[j]:
                     logger.info(
                         f"Standard deviation of observation {obs} is over threshold value of {std_threshold[j]} mK at {round(std, 2)} mK."
@@ -906,7 +683,7 @@ def metric_analyzer(
                         f"Az range of obs {obs}: {round(min_az, 1), round(max_az, 1)}"
                     )
                     n_gauss[j] += 1
-                    if show_plot:    
+                    if show_plot:
                         plt.hist(
                             variance,
                             density=True,
@@ -921,7 +698,7 @@ def metric_analyzer(
                         plt.ylabel("Probability Density")
                         plt.title("Gaussian fit to Deviation from Zero")
                         plt.legend()
-                        if save_path != None:
+                        if save_path is not None:
                             plt.savefig(os.path.join(save_path + f"/{obs}_gaussian.png"))
                         plt.close()
         logger.info(f"Number of Standard deviation flags: {n_std[j]}")
@@ -938,6 +715,7 @@ def metric_analyzer(
     }
     return ret
 
+
 def az_circle_plotter(
     cnt_dict,
     dfm,
@@ -953,9 +731,7 @@ def az_circle_plotter(
 ):
     """Plot a polar summary of azimuth scans, turnaround temperatures, and flags.
 
-    Independently reloads the azimuth-binned pickle files for the given date
-    range (from the platform's standard ``az_pkls`` output directory) via
-    ``pkl_loader``, groups observations into 4 azimuth bins, and renders a
+    Groups the observations in ``df`` into 4 azimuth bins and renders a
     polar plot showing: the scan azimuth range as a dashed circle, left/right
     turnaround FPA temperature vs. azimuth (blue/red traces, offset radially
     from the setpoint), the local horizon profile (from Cerro Toco survey
@@ -966,14 +742,16 @@ def az_circle_plotter(
         cnt_dict (dict): Per-bin flag counts, as returned by
             :func:`metric_analyzer` (keys 'std_cnt', 'r_p2p_cnt',
             'l_p2p_cnt', 'gof_cnt', each a length-4 array).
-        ys (int): Start year of the date range to reload pickle files for.
-        ms (int): Start month.
+        dfm (pandas.DataFrame): Azimuth-binned summary, as returned by
+            :func:`ana1`.
+        df (pandas.DataFrame): Per-observation data, as returned by
+            :func:`dataframe_maker`.
+        ms (int): Start month (used in the plot title).
         ds (int): Start day.
-        ye (int): End year.
         me (int): End month.
         de (int): End day.
-        platform (str, optional): Telescope platform; selects the pickle
-            directory and temperature setpoint. Defaults to "satp1".
+        platform (str, optional): Telescope platform; selects the
+            temperature setpoint. Defaults to "satp1".
         debug (bool, optional): If True, print extra diagnostic info (azimuth
             bin counts, per-scan data) while building the plot. Defaults to
             False.
@@ -1003,137 +781,9 @@ def az_circle_plotter(
     circle = plt.Circle(center, radius, fill=False, linestyle="--")
     ax.add_patch(circle)
 
-    toco_az = np.array(
-        [
-            0,
-            6,
-            12,
-            18,
-            24,
-            30,
-            36,
-            42,
-            48,
-            54,
-            60,
-            66,
-            72,
-            78,
-            84,
-            90,
-            96,
-            102,
-            108,
-            114,
-            120,
-            126,
-            132,
-            138,
-            144,
-            150,
-            156,
-            162,
-            168,
-            174,
-            180,
-            186,
-            192,
-            198,
-            204,
-            210,
-            216,
-            222,
-            228,
-            234,
-            240,
-            246,
-            252,
-            258,
-            264,
-            270,
-            276,
-            282,
-            288,
-            294,
-            300,
-            306,
-            312,
-            318,
-            324,
-            330,
-            336,
-            342,
-            348,
-            354,
-        ]
-    )
-    toco_el = np.array(
-        [
-            0.47322,
-            1.94546,
-            5.34882,
-            7.6002,
-            10.038,
-            12.86298,
-            15.07134,
-            14.8658,
-            11.57238,
-            9.86114,
-            12.27982,
-            12.09818,
-            8.83822,
-            7.4329,
-            6.79716,
-            5.88896,
-            5.38706,
-            5.05724,
-            3.43682,
-            3.42726,
-            4.8278,
-            4.8278,
-            3.69494,
-            1.90722,
-            1.47702,
-            1.66344,
-            1.95024,
-            2.09842,
-            2.21314,
-            0.84606,
-            0.44932,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            -0.44932,
-            -0.33938,
-            -0.5019,
-            -0.42542,
-            -0.44454,
-            -0.60228,
-            -0.8365,
-            -1.41488,
-            -1.673,
-            -2.00282,
-            -2.03628,
-            -2.03628,
-            -1.97892,
-            -1.3384,
-            -1.94546,
-            1.94546,
-            1.19978,
-            2.19402,
-            0.55926,
-            1.82118,
-            1.49136,
-            0.0,
-        ]
-    )
-
-    lat_az = 169  # https://docs.google.com/presentation/d/1XVWdp08v30p7zvJQtMD_piv6gAXbO6VMjkdIMFuSHX8/edit?slide=id.g334ac71e4d3_0_0#slide=id.g334ac71e4d3_0_0
-    lat_el = 5  # Cerro Toco is at an angle of 15 deg and the top of the LAT is at an angle of 5 deg which is different than what I reported. email from Lyman
+    # LAT position and top-of-LAT elevation as seen from the SATs (deg).
+    lat_az = 169
+    lat_el = 5
 
     nominal_minazs = [48.6, 110, 207, 268]
     nominal_maxazs = [91, 153, 250, 313]
@@ -1180,27 +830,22 @@ def az_circle_plotter(
     if debug:
         logger.info(azidx)
 
-    setpoints = {
-        "satp1": 75,
-        "satp2": 100,
-        "satp3": 62,
-    }
+    setpoint = PLATFORM_SETTINGS[platform]["setpoint"]
 
     # Number of points trimmed off each end of a turnaround trace before
     # drawing its direction arrow (avoids drawing the arrow through the
     # noisy edge of the trace).
     edge_trim = 50
-    DEG = np.pi / 180
     colors = {
-    "purple": "#9400D3",
-    "blue": "#0066FF",
-    "orange": "#FF8800",
-    "red": "#FF2200",
-    "green": "#00CC44",
-    "yellow": "#FFD500",
-    "cyan": "#00D5FF",
-    "lime": "#A6E22E",
-    "teal": "#00C2A8",
+        "purple": "#9400D3",
+        "blue": "#0066FF",
+        "orange": "#FF8800",
+        "red": "#FF2200",
+        "green": "#00CC44",
+        "yellow": "#FFD500",
+        "cyan": "#00D5FF",
+        "lime": "#A6E22E",
+        "teal": "#00C2A8",
     }
 
     for i, imask in enumerate([dfm["az1"], dfm["az2"], dfm["az3"], dfm["az4"]]):
@@ -1223,7 +868,7 @@ def az_circle_plotter(
         irfl = ~np.isnan(iraz.values)
         raz = iaz.values[irfl]
         if raz.size > 0:
-            rrad = ((iraz.values[irfl] - setpoints[platform]) + offset + roff) * magnify
+            rrad = ((iraz.values[irfl] - setpoint) + offset + roff) * magnify
             irx = rrad * np.cos(raz * DEG)
             iry = rrad * np.sin(raz * DEG)
             ax.plot(irx, iry, color=colors["red"])
@@ -1260,7 +905,7 @@ def az_circle_plotter(
         ilfl = ~np.isnan(ilaz.values)
         laz = iaz.values[ilfl]
         if laz.size > 0:
-            lrad = ((ilaz.values[ilfl] - setpoints[platform]) + offset + loff) * magnify
+            lrad = ((ilaz.values[ilfl] - setpoint) + offset + loff) * magnify
             ilx = lrad * np.cos(laz * DEG)
             ily = lrad * np.sin(laz * DEG)
             ax.plot(ilx, ily, color=colors["blue"])
@@ -1291,11 +936,6 @@ def az_circle_plotter(
                 )
         elif debug:
             logger.info(f"az_circle_plotter: no valid left-turnaround data in az bin {i}")
-
-        # arc = patches.Arc(center, 2*radius + 0.02, 2*radius + 0.02, angle=0, theta1=np.min(iaz), theta2=np.max(iaz), color='blue', linewidth=2)
-        # ax.add_patch(arc)
-        # arc = patches.Arc(center, 2*radius - 0.02, 2*radius - 0.02, angle=0, theta1=np.min(iaz), theta2=np.max(iaz), color='red', linewidth=2)
-        # ax.add_patch(arc)
 
     azimuths = np.arange(0, 360, 30)
     for az in azimuths:
@@ -1332,8 +972,8 @@ def az_circle_plotter(
 
     ifac = 4e-3
     ampoff = 200
-    toco_rx = (toco_el + ampoff) * np.cos((toco_az + angle_offset) * DEG) * ifac
-    toco_ry = (toco_el + ampoff) * np.sin((toco_az + angle_offset) * DEG) * ifac
+    toco_rx = (TOCO_EL + ampoff) * np.cos((TOCO_AZ + angle_offset) * DEG) * ifac
+    toco_ry = (TOCO_EL + ampoff) * np.sin((TOCO_AZ + angle_offset) * DEG) * ifac
     ax.plot(toco_rx, toco_ry, c=colors["orange"])
     lat_rx = (lat_el + ampoff) * np.cos((lat_az + angle_offset) * DEG) * ifac
     lat_ry = (lat_el + ampoff) * np.sin((lat_az + angle_offset) * DEG) * ifac
@@ -1341,7 +981,7 @@ def az_circle_plotter(
     ax.text(
         -0.3,
         0.8,
-        f"Orange: Horizon\nMax(EL of TOCO) is {np.max(toco_el):.01f} at Az = {toco_az[np.argmax(toco_el)]:.01f} deg",
+        f"Orange: Horizon\nMax(EL of TOCO) is {np.max(TOCO_EL):.01f} at Az = {TOCO_AZ[np.argmax(TOCO_EL)]:.01f} deg",
         color=colors["orange"],
         fontsize=13,
     )
@@ -1359,7 +999,6 @@ def az_circle_plotter(
 
     for i in range(4):
         obslen = len(np.where(df["azidx"] == i)[0])
-        # print(minazs[i], obslen)
         ax.text(
             obsx[i],
             obsy[i],
@@ -1381,57 +1020,30 @@ def az_circle_plotter(
     fig.suptitle(f"{platform}, {ms}/{ds} - {me}/{de}", y=0.93)
     if show:
         plt.show()
-    if save_path != None:
+    if save_path is not None:
         fig.savefig(os.path.join(save_path, f"{me}_{de}_circle_plot.png"))
 
 
-# Per-platform context config key and FPA temperature setpoint (mK).
-PLATFORM_SETTINGS = {
-    "satp1": {"ctx_key": "ctx_path1", "setpoint": 75},
-    "satp2": {"ctx_key": "ctx_path2", "setpoint": 100},
-    "satp3": {"ctx_key": "ctx_path3", "setpoint": 62},
-}
-
-def ensure_dir(path):
-    """Create a directory if it doesn't already exist, logging the outcome.
-
-    Unlike a bare ``os.makedirs(path, exist_ok=True)``, this prints a message
-    distinguishing "created" from "already exists" (matching the previous
-    behavior of this script), and reports permission errors without raising.
-
-    Args:
-        path (str): Directory path to create.
-
-    Returns:
-        str: ``path``, unchanged, for convenient chaining.
-    """
-    if os.path.isdir(path):
-        logger.info(f"Directory '{path}' already exists.")
-        return path
-    try:
-        os.makedirs(path)
-        logger.info(f"Directory '{path}' created.")
-    except PermissionError:
-        logger.error(f"Permission Denied: unable to create directory '{path}'.")
-    except Exception:
-        logger.error(f"An error occurred creating directory '{path}':")
-        traceback.print_exc()
-    return path
-
 def get_parser(parser=None):
-    """Parse command-line arguments for the FPA metrics pipeline.
+    """Build the argument parser for the FPA metrics pipeline.
 
     Args:
-        argv (list[str], optional): Argument list to parse instead of
-            ``sys.argv``. Defaults to None.
+        parser (argparse.ArgumentParser, optional): Parser to add arguments
+            to. A new one is created if None.
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        argparse.ArgumentParser: The parser with FPA metrics arguments added.
     """
     if parser is None:
         parser = argparse.ArgumentParser()
-        
+
     parser.add_argument("config", help="Configuration yaml file.")
+    parser.add_argument(
+        "--verbose",
+        default=2,
+        type=int,
+        help="Increase output verbosity. 0: Error, 1: Warning, 2: Info(default), 3: Debug",
+    )
     parser.add_argument("--ys", type=int, default=date.year, help="Start year.")
     parser.add_argument("--ms", type=int, default=date.month, help="Start month.")
     parser.add_argument("--ds", type=int, default=1, help="Start day.")
@@ -1455,11 +1067,17 @@ def get_parser(parser=None):
         choices=sorted(PLATFORM_SETTINGS),
         help="Telescope platform.",
     )
+    parser.add_argument(
+        "--circle_plt_save_path",
+        type=str,
+        default=None,
+        help="Directory in which to save the az circle summary plot.",
+    )
     return parser
 
 
 def main(
-    config: str, 
+    config: str,
     verbose: Optional[int] = 2,
     ys: Optional[int] = date.year,
     ms: Optional[int] = date.month,
@@ -1475,8 +1093,24 @@ def main(
     """Run the full FPA metrics pipeline: bin, compute metrics, flag, and plot.
 
     Args:
-        argv (list[str], optional): Argument list to parse instead of
-            ``sys.argv`` (useful for testing). Defaults to None.
+        config (str): Path to the configuration yaml file. Must contain
+            ``contexts.ctx_path1/2/3`` entries giving the context file for
+            each platform, and an ``hk`` block (see :func:`load_az_temp`).
+        verbose (int, optional): Logging verbosity. 0: Error, 1: Warning,
+            2: Info, 3: Debug. Defaults to 2.
+        ys (int, optional): Start year. Defaults to the current year.
+        ms (int, optional): Start month. Defaults to the current month.
+        ds (int, optional): Start day. Defaults to 1.
+        ye (int, optional): End year. Defaults to the current year.
+        me (int, optional): End month. Defaults to the current month.
+        de (int, optional): End day. Defaults to the current day.
+        tag (str, optional): Observation tag filter. Defaults to None.
+        circle_plt_save_path (str, optional): Directory in which to save the
+            az circle summary plot. Defaults to None.
+        scan_type (str, optional): Observation subtype to select. Defaults
+            to "cmb".
+        platform (str, optional): Telescope platform ("satp1", "satp2" or
+            "satp3"). Defaults to "satp1".
     """
     # Set verbose
     if verbose == 0:
@@ -1487,14 +1121,16 @@ def main(
         logger.setLevel(logging.INFO)
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
-    
-    configs = yaml.safe_load(open(config, "r"))
+
+    with open(config) as f:
+        configs = yaml.safe_load(f)
 
     settings = PLATFORM_SETTINGS[platform]
     ctx = core.Context(configs["contexts"][settings["ctx_key"]])
     setpoint = settings["setpoint"]
     dfm, df = dataframe_maker(
         ctx,
+        hk_cfg=configs["hk"],
         ys=ys,
         ms=ms,
         ds=ds,
@@ -1507,9 +1143,8 @@ def main(
     )
     logger.info("Made dataframes")
 
-    df_ids = df["obsids"]
-    # Get metrics from pkl files
-    if not df_ids:
+    has_obs = not df.empty
+    if not has_obs:
         logger.info(
             f"No observations found for {platform} between "
             f"{ys}/{ms}/{ds} and {ye}/{me}/{de}."
@@ -1520,8 +1155,8 @@ def main(
 
     logger.info("trying to analyze metrics")
     cnt_ret = metric_analyzer(metric_dict, save_path=None, platform=platform)
-    
-    if df_ids:
+
+    if has_obs:
         logger.info("trying to save circle plot")
         az_circle_plotter(
             cnt_dict=cnt_ret,
