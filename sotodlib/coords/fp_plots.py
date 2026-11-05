@@ -237,11 +237,7 @@ def plot_ufm(
     ax1.legend()
 
     # Plot histogram of residuals.
-    dist = 3600 * np.rad2deg(
-        (focal_plane.transformed.xyz - focal_plane.template.xyz)[
-            np.isnan(focal_plane.weights)
-        ]
-    )
+    dist = 3600 * np.linalg.norm(np.rad2deg( (focal_plane.transformed.xyz - focal_plane.data.xyz)[np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2]), axis=1)
     if len(dist) > 0:
         dist_thresh = np.percentile(dist, 97)
         bins = max(int(len(dist) / 20), 10)

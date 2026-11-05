@@ -47,9 +47,11 @@ default_config = {
     "obs_whitelist": [],
     "obs_blacklist": [],
     "weight_factor": 1000,
-    "min_frac_dets": 0.25,
+    "min_frac_dets": 0.1,
     "max_dscale": 0.1,
     "max_shear": 0.05,
+    "min_hits": 3,
+    "min_r2": .3,
 }
 
 
@@ -61,6 +63,7 @@ class ErrCode(Enum):
     HIGH_SCALE = 4
     HIGH_SHEAR = 5
     PLOT = 6
+    FPINIT = 7
 
 
 def _get_jobdict_po(jdb):
@@ -70,24 +73,19 @@ def _get_jobdict_po(jdb):
     }
 
 
-def _get_jobit_po(jdb, obslist, ctx):
+def _get_jobit_po(jdb, obslist, system):
     _ = jdb
     jobit = []
     for obs in obslist:
-        det_info = ctx.get_det_info(obs["obs_id"])
-        ws = det_info["wafer_slot"]
-        if "wafer.wafer_slot" in det_info.keys:
-            ws = np.array(
-                [
-                    ws1 if ws1 != "ws." else ws2
-                    for ws1, ws2 in zip(
-                        det_info["wafer_slot"], det_info["wafer.wafer_slot"]
-                    )
-                ]
-            )
-        wsufms = np.unique(np.column_stack([ws, det_info["wafer.array"]]), axis=0)
-        for ws, arr in wsufms:
-            jobit += [(obs, ws, arr)]
+        try:
+            rx = system.search("receivers", obs["timestamp"])
+            if rx is None:
+                continue
+            ot = rx[obs["tube_slot"]]
+        except IndexError:
+            continue
+        for ws, fp in zip(ot.wafer_slots, ot.focal_planes):
+            jobit += [(obs, ws, fp.name)]
     return jobit
 
 
@@ -96,13 +94,14 @@ def _get_jobstr_po(info):
     return f"{obs['obs_id']}+{wafer_slot}+{array}"
 
 
-def _get_tags_po(obs):
+def _get_tags_po(info):
+    obs, wafer_slot, array = info
     return {
         "obs_id": obs["obs_id"],
         "ot": obs["tube_slot"],
         "timestamp": obs["timestamp"],
-        "array": "",
-        "wafer_slot": "",
+        "array": array, 
+        "wafer_slot": wafer_slot,
         "errcode": 0,
         "message": "",
     }
@@ -166,7 +165,7 @@ def _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_
                     system.state_meta["zemax_hash"]
                     == old_system.state_meta["zemax_hash"]
                 )
-    if check_old:
+    if check_old is False:
         logger.info("Old system has incompatible optics config")
     epc_dict = {epoch.name: epoch for epoch in system.era.epochs}
     for rx in system.receivers:
@@ -320,6 +319,7 @@ def _get_obslist(ctx, cfg, system):
     if "obs:obs_id" not in cols:
         raise ValueError("Pointing metadata not indexed on obsdb!")
     obsids = np.unique(np.array([entry["obs:obs_id"] for entry in point_db.inspect()]))
+    obsids = ["obs_1782128967_lati1_111"]
 
     # Validate against black and whitelist
     if len(cfg.obs_whitelist) > 0:
@@ -332,37 +332,20 @@ def _get_obslist(ctx, cfg, system):
     obslist = [
         obs
         for obs in obslist
-        if system.search("receiver", obs["timestamp"]) is not None
+        if system.search("receivers", obs["timestamp"]) is not None
     ]
 
     return obslist
 
 
-def _load_obs(obs, array, ctx, system, cfg):
-    rx = system.search("receiver", obs["timestamp"])
-    pm = system.search("pointing_model", obs["timestamp"])
-    loaded = []
-    aman = ctx.get_meta(obs, dets={"wafer.array": array})
+def _load_obs(aman, obs_id, array, ctx, system, cfg):
+    obs = ctx.obsdb.get(obs_id)
+    rx = system.search("receivers", obs["timestamp"])
+    pm = system.search("pointing_models", obs["timestamp"])
     fp = rx.find_fpc(obs["tube_slot"], array)
     if fp is None:
         raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
-    loaded += [
-        (
-            obs["tube_slot"],
-            fpc.FocalPlane.from_aman(
-                fp.name,
-                obs["obs_id"],
-                aman,
-                fp.template,
-                fp.template_fp,
-                fp.template_ot,
-                pm,
-                fp.autofreeze,
-                fp.fake_gamma,
-                cfg.weight_factor,
-            ),
-        )
-    ]
+    loaded = fpc.FocalPlane.from_aman( fp.name, obs["obs_id"], aman, fp.template, fp.template_fp, fp.template_ot, pm, fp.autofreeze, fp.fake_gamma, cfg.weight_factor)
 
     # Not adding to the system so that we can leave ourselves open to parallelism
     return loaded
@@ -470,7 +453,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         jdb_path,
         "per_obs",
         _get_jobdict_po,
-        partial(_get_jobit_po, obslist=obslist, ctx=ctx),
+        partial(_get_jobit_po, obslist=obslist, system=system),
         _get_jobstr_po,
         _get_tags_po,
         [],
@@ -492,6 +475,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         njobs,
         len(done_jobs),
     )
+    open_jobs += [None]
     for i, j in enumerate(open_jobs):
         if job is not None:
             logger.debug("Writing to db")
@@ -514,10 +498,40 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
         # Load
         try:
-            ot, meas = _load_obs(obs_id, array, ctx, system, cfg)
+            aman = ctx.get_meta(obs_id, dets={"wafer.array": array})
         except Exception as e:
             msg = f"Failed to load with error: {e}"
             ju.fail(job, ErrCode.LOADER, msg, logger)
+            continue
+
+        # Locate
+        # TODO: I must be able to cache/hash somehow for this
+        rx = system.search("receivers", float(job.tags["timestamp"]))
+        if rx is None:
+            raise ValueError(f"Somehow found no receiver for {jstr}")
+        fp = rx.find_fpc(job.tags["ot"], array)
+        if fp is None:
+            raise ValueError(f"Somehow found no focal plane for {jstr}")
+
+
+        # Cuts
+        if "hits" in aman.focal_plane:
+            aman.restrict( "dets", aman.focal_plane.hits >= cfg.min_hits )
+        if "R2" in aman.focal_plane:
+            aman.restrict("dets", aman.focal_plane.R2 > cfg.min_r2)
+        dfrac = aman.dets.count / len(fp.template.xyz)
+        if dfrac < cfg.min_frac_dets:
+            msg = f"Only {100*np.round(dfrac, 2)}% of dets uncut"
+            ju.fail(job, ErrCode.MIN_DETS, msg, logger)
+            continue
+
+        # Init the fp
+        meas = _load_obs(aman, obs_id, array, ctx, system, cfg)
+        try:
+            meas = _load_obs(aman, obs_id, array, ctx, system, cfg)
+        except Exception as e:
+            msg = f"Failed to build focal plane with error: {e}"
+            ju.fail(job, ErrCode.FPINIT, msg, logger)
             continue
 
         # Check min dets
@@ -543,17 +557,8 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             ju.fail(job, ErrCode.HIGH_SHEAR, msg, logger)
             continue
 
-        # Locate
-        # TODO: I must be able to cache/hash somehow for this
-        rx = system.search("receivers", job.tags["timestamp"])
-        if rx is None:
-            raise ValueError(f"Somehow found no receiver for {jstr}")
-        fp = rx.find_fpc(ot, array)
-        if fp is None:
-            raise ValueError(f"Somehow found no focal plane for {jstr}")
-
         # Plot
-        pdir = os.path.join(plot_dir, rx.epoch, "per-obs")
+        pdir = os.path.join(plot_dir, rx.epoch, "per-obs", str(job.tags["timestamp"])[:5])
         os.makedirs(pdir, exist_ok=True)
         try:
             fpp.plot_ufm(meas, pdir)

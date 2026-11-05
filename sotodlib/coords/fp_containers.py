@@ -14,7 +14,7 @@ from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property, reduce
-from typing import Any, Iterable, Literal, Optional, Self, cast, overload
+from typing import Any, Iterable, Literal, Optional, Self, cast, overload, ClassVar, TypeVar, Generic
 
 import h5py
 import megham.transform as mt
@@ -22,6 +22,7 @@ import megham.utils as mu
 import numpy as np
 from jaxtyping import Float, Integer, Shaped
 from scipy.optimize import minimize
+from scipy.cluster import vq
 from so3g.proj import quat
 from sotodlib.coords.pointing_model import apply_pointing_model, param_defaults
 from sotodlib.core import AxisManager, IndexAxis, metadata
@@ -37,6 +38,8 @@ _COORDSYS_COLUMNS = {
 }
 
 logger = logging.getLogger("solve_static_pointing")
+
+T = TypeVar("T")
 
 
 def _add_attrs(dset, attrs):
@@ -91,9 +94,11 @@ def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str):
     to_ret.xyz = mt.apply_transform(
         self.template.xyz, self.transform.affine, self.transform.shift
     )
-    to_ret.center = mt.apply_transform(
-        self.template.center, self.transform.affine, self.transform.shift
-    )
+    to_ret.center = None
+    if self.template.center is not None:
+        to_ret.center = mt.apply_transform(
+            np.atleast_2d(self.template.center), self.transform.affine, self.transform.shift
+        ).ravel()
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
     return to_ret
@@ -103,7 +108,7 @@ def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name:
     affine, shift = mt.get_affine_two_stage(
         self.template.xyz[:, :2],
         getattr(self, data_name).xyz[:, :2],
-        self.weights[:, 0],
+        self.weights,
     )
     to_ret = Transform.identity()
     to_ret.shift[:2] = shift
@@ -117,7 +122,7 @@ def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name:
     return to_ret
 
 
-class StaticOrCached:
+class StaticOrCached(Generic[T]):
     """
     Wrapper that will get either:
 
@@ -133,7 +138,13 @@ class StaticOrCached:
     def __set_name__(self, owner, attr_name):
         self.attr_name = attr_name
 
-    def __get__(self, obj, owner):
+    @overload
+    def __get__( self, obj: None, owner: type) -> "StaticOrCached[T]": ...
+
+    @overload
+    def __get__( self, obj: Any, owner: type | None = None) -> T: ...
+
+    def __get__( self, obj: Any, owner: type | None = None) -> T | "StaticOrCached[T]":
         if obj is None:
             return self
 
@@ -674,13 +685,11 @@ class FocalPlane:
     static: bool
     autofreeze: bool
     fake_gamma: bool
-    data_pm: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("data_pm"))
-    transform: Transform = cast(Transform, StaticOrCached("transform"))
-    transformed: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("transformed"))
-    pm_transform: Transform = cast(Transform, StaticOrCached("pm_transform"))
-    pm_transformed: DetectorOffsets = cast(
-        DetectorOffsets, StaticOrCached("pm_transformed")
-    )
+    data_pm: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data_pm")
+    transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
+    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
+    pm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("pm_transform")
+    pm_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("pm_transformed")
     _data_pm_stat: DetectorOffsets = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
@@ -742,11 +751,16 @@ class FocalPlane:
             Note that this will have `static = False`.
         """
         # Figure out mapping
-        _, msk, template_msk = np.intersect1d(
-            np.array(aman.det_info.det_id), template.det_id, return_indices=True
-        )
-        mapping = np.argsort(np.argsort(template.det_id[template_msk]))
-        srt = np.argsort(np.array(aman.det_info.det_id[msk]))
+        aman_det_ids = np.asarray(aman.det_info.det_id)
+        template_det_ids = np.asarray(template.det_id)
+        _, aman_idx, template_idx = np.intersect1d( aman_det_ids, template_det_ids, return_indices=True)
+        order = np.argsort(template_idx)
+        aman_idx = aman_idx[order]
+        template_idx = template_idx[order]
+        template_msk = np.zeros(len(template.xyz), dtype=bool)
+        template_msk[template_idx] = True
+        valid_template = np.all(np.isfinite(template.xyz), axis=1)
+        valid_msk = template_msk * valid_template
 
         # Setup data
         data = deepcopy(template)
@@ -757,7 +771,7 @@ class FocalPlane:
             if not fake_gamma
             else np.nan * np.ones_like(xi)
         )
-        data.xyz[template_msk] = np.column_stack((xi, eta, gamma))[msk][srt][mapping]
+        data.xyz[template_idx] = np.column_stack((xi, eta, gamma))[aman_idx]
         data.xyz[~template_msk] = np.nan
 
         # Setup enc
@@ -778,34 +792,61 @@ class FocalPlane:
             if "roll" in aman.focal_plane
             else np.deg2rad(np.array(aman.obs_info.roll_center)) * np.ones_like(xi)
         )
-        enc.xyz[template_msk] = np.column_stack((az, el, roll))[msk][srt][mapping]
+        enc.xyz[template_idx] = np.column_stack((az, el, roll))[aman_idx]
         enc.xyz[~template_msk] = np.nan
 
+        # Use kmeans to kill any ghosts
+        fp_white = vq.whiten(data.xyz[valid_msk, :2])
+        codebook, _ = vq.kmeans(fp_white, 2)
+        codes, _ = vq.vq(fp_white, codebook)
+        c0 = codes == 0
+        c1 = codes == 1
+        m0 = np.median(data.xyz[valid_msk, :2][c0], axis=0)
+        m1 = np.median(data.xyz[valid_msk, :2][c1], axis=0)
+        dist = np.linalg.norm(m0 - m1)
+        # If centroids are too far from each other use the bigger one
+        cent = template.center
+        if cent is None:
+            cent = np.nanmean(template.xyz, axis=0)
+        rad_thresh = 1.1 * np.nanmax( np.linalg.norm( template.xyz[:, :2] - cent[:2], axis=1))
+        if dist < rad_thresh:
+            cluster = c0 + c1
+        elif np.sum(c0) >= np.sum(c1):
+            cluster = c0
+        else:
+            cluster = c1
+        # Flag anything too far away from the center
+        cent = np.median(data.xyz[valid_msk, :2][cluster], axis=0)
+        r = np.linalg.norm(data.xyz[valid_msk, :2] - cent, axis=1)
+        valid_msk[valid_msk] *= cluster * (r <= rad_thresh)
+
         # Compute weights
-        aff, sft = mt.get_rigid(data.xyz[:, :2], template.xyz[template_msk, :2])
+        aff, sft = mt.get_rigid(data.xyz[valid_msk, :2], template.xyz[valid_msk, :2])
         aligned = mt.apply_transform(data.xyz[:, :2], aff, sft)
-        xieta_spacing = mu.estimate_spacing(template.xyz[:, :2])
+        xieta_spacing = mu.estimate_spacing(template.xyz[valid_msk, :2])
         # For gamma rather than the spacing in real space we want the difference between bins
         # This is a rough estimate but good enough for us
-        gamma_spacing = np.percentile(np.diff(np.sort(template.xyz[:, 2])), 99.9)
+        gamma_sorted = np.sort(template.xyz[valid_msk, 2])
+        gamma_spacing = np.percentile(np.diff(gamma_sorted), 99.9)
         spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
+        weights = np.zeros(len(aligned))
         if not fake_gamma:
-            gscale, gsft = gamma_fit(data.xyz[:, 2], template.xyz[template_msk, 2])
-            weights = mu.gen_weights(
-                np.column_stack((aligned, gscale * data.xyz[:, 2] + gsft)),
-                template.xyz[template_msk],
+            gscale, gsft = gamma_fit(data.xyz[:, 2], template.xyz[:, 2])
+            weights[valid_msk] = mu.gen_weights(
+                np.column_stack((aligned[valid_msk], gscale * data.xyz[:, 2] + gsft)),
+                template.xyz[valid_msk],
                 spacing.ravel() / weight_factor,
             )
         else:
-            weights = mu.gen_weights(
-                aligned,
-                template.xyz[template_msk, :2],
+            weights[valid_msk] = mu.gen_weights(
+                aligned[valid_msk],
+                template.xyz[valid_msk, :2],
                 spacing[:2].ravel() / weight_factor,
             )
 
         # ~1 sigma cut
-        weights[weights < 0.61] = np.nan
+        weights[weights < 0.61] = 0
 
         return cls(
             name,
@@ -1078,12 +1119,10 @@ class FocalPlaneCollection:
     autofreeze: bool
     pad: bool
     fake_gamma: bool
-    data: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("data"))
-    weights: Float[np.ndarray, "ndet"] = cast(
-        Float[np.ndarray, "ndet"], StaticOrCached("weights")
-    )
-    transform: Transform = cast(Transform, StaticOrCached("transform"))
-    transformed: DetectorOffsets = cast(DetectorOffsets, StaticOrCached("transformed"))
+    data: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data")
+    weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached("weights")
+    transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
+    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
     _data_stat: DetectorOffsets = field(init=False)
     _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
     _transform_stat: Transform = field(init=False)
@@ -1345,7 +1384,7 @@ class OpticsTube:
     wafer_slots: list[str]
     static: bool
     autofreeze: bool
-    cm_transform: Transform = cast(Transform, StaticOrCached("cm_transform"))
+    cm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform")
     cm_transform_norx: Transform = field(init=False)
     _cm_transform_stat: Transform = field(init=False)
 
@@ -1559,7 +1598,7 @@ class Receiver:
     optics_tubes: list[OpticsTube]
     static: bool
     autofreeze: bool
-    cm_transform: Transform = cast(Transform, StaticOrCached("cm_transform"))
+    cm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform")
     _cm_transform_stat: Transform = field(init=False)
 
     def __getitem__(self, key):
@@ -1773,7 +1812,7 @@ class PointingSystem:
         static : bool
             The value to set `static` to for all relevent children.
         """
-        for rx in receivers:
+        for rx in self.receivers:
             rx.static = static
             for ot in rx.optics_tubes:
                 ot.static = static
