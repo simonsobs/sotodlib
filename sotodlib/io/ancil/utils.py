@@ -134,7 +134,7 @@ class AncilEngine:
         if friend not in self.friends:
             raise RuntimeError(f'Friend not configured: "{friend}"')
         if isinstance(self.friends[friend], dict):
-            return get_engine(friend, self.friends[friend])
+            self.friends[friend] = get_engine(friend, self.friends[friend])
         return self.friends[friend]
 
     @property
@@ -351,18 +351,21 @@ class LowResTable(AncilEngine):
         return rows
 
     def _load(self, time_range):
-        # If you don't cache, the dataset reads can be very
-        # inefficient, especially when looping over a bunch of obs
-        # from the same time period.
-        @functools.lru_cache(maxsize=4)
-        def _get_dataset(filename, dataset):
-            if not os.path.exists(filename):
-                return None
-            return metadata.read_dataset(filename, dataset)
+        if not hasattr(self, '_dataset_cacher'):
+            # If you don't cache, the dataset reads can be very
+            # inefficient, especially when looping over a bunch of obs
+            # from the same time period.
+            @functools.lru_cache(maxsize=4)
+            def _func(filename, dataset):
+                print('GET', filename, dataset)
+                if not os.path.exists(filename):
+                    return None
+                return metadata.read_dataset(filename, dataset)
+            self._dataset_cacher = _func
 
         rs = None
         for t0, t1, filename in self._get_filenames(time_range):
-            _rs = _get_dataset(filename, self.cfg.dataset_name)
+            _rs = self._dataset_cacher(filename, self.cfg.dataset_name)
             if _rs is not None:
                 if rs is None:
                     rs = _rs
