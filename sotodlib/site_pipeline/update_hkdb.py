@@ -39,7 +39,7 @@ def get_parser(parser=None):
                         "unindexed, which will cause them to be rescanned. "
                         "Use --pattern to restrict to a subset.")
     sp.add_argument('--pattern', '-p', help=
-                    "sql pattern to match with (e.g. '%_17244_%')")
+                    "sql pattern to match with (e.g. '%%_17244_%%')")
 
     return parser
 

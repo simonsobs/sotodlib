@@ -232,9 +232,19 @@ class SimMuMUXCrosstalk(Operator):
                 # We are computing properties for every detector
                 self.detector_pointing.apply(data, detectors=[det])
                 _, detel, _ = qa.to_lonlat_angles(
-                    obs.detdata[self.detector_pointing.quats][det]
+                    obs.detdata[self.detector_pointing.quats][det][good]
                 )
-                elevation = np.degrees(np.median(detel[good]))
+                good_el = np.logical_not(np.isnan(detel))
+                if np.count_nonzero(good_el) == 0:
+                    # We have no good elevation values.  This probably means that
+                    # the detector was actually cut or the focalplane offset is
+                    # all NaN.
+                    msg = f"{obs.name}, det {det} has no good pointing, cutting"
+                    log.debug(msg)
+                    obs.detdata[self.det_flags][det] |= self.det_flag_mask
+                    obs.update_local_detector_flags({det: self.det_mask})
+                    continue
+                elevation = np.degrees(np.median(detel[good_el]))
                 jsim = load_sim(jbolo_model)
                 jsim["sources"]["atmosphere"]["elevation"] = elevation  # Degrees
                 jsim["sources"]["atmosphere"]["pwv"] = int(pwv)  # Microns
@@ -277,6 +287,8 @@ class SimMuMUXCrosstalk(Operator):
             dPhidPhi0 = 2 * np.pi
             dPhi0dT[det] = dPdT * dIdP * dPhi0dI * dPhidPhi0  # K_CMB -> [rad]
 
+        if use_det_el:
+            toast.ops.Delete(detdata=[self.detector_pointing.quats]).apply(data)
         return dPhi0dT
 
     @function_timer
@@ -386,6 +398,9 @@ class SimMuMUXCrosstalk(Operator):
             #     Get crosstalk strength, chi
             #     Generate output data by mixing input data
             for det_target in good_dets:
+                if det_target not in dPhi0dT:
+                    # Detector was cut
+                    continue
                 crosstalk = np.zeros_like(input_data[det_target])
                 target_squid_phase = self._temperature_to_squid_phase(
                     input_data[det_target],
@@ -398,6 +413,9 @@ class SimMuMUXCrosstalk(Operator):
                 det_msg += f"(phi0={Phi0[det_target]:0.2e}, "
                 det_msg += f"dphi0dT={dPhi0dT[det_target]:0.2e})"
                 for det_source in good_dets:
+                    if det_source not in dPhi0dT:
+                        # Detector was cut
+                        continue
                     if (det_target, det_source) in chis:
                         chi = chis[(det_target, det_source)]
                     else:
@@ -448,6 +466,11 @@ class SimMuMUXCrosstalk(Operator):
                 proc_rows,
                 times=self.times,
                 override_sample_sets=obs.dist.sample_sets,
+            )
+
+            # Recompute valid detectors, since some may have been flagged.
+            good_dets = temp_obs.select_local_detectors(
+                selection=detectors, flagmask=self.det_mask
             )
 
             # Copy data to original observation
