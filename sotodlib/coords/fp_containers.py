@@ -6,6 +6,7 @@ calculations or as static attributes for loading saved results.
 """
 
 # TODO: Reprs
+# TODO: Implement roll dep stuff, need to be careful about the correct direction. Should be REMOVING it from the data I think
 
 from __future__ import annotations
 
@@ -172,11 +173,14 @@ class PointingModel:
     force_zero_roll : bool
         If True, ignore the encoder roll angle when applying the pointing
         model and assume a zero-roll boresight solution.
+    pad : bool, default: False
+        If True, this model is excluded from fitting.
     """
 
     epoch: str
     parameters: dict
     force_zero_roll: bool
+    pad: bool = False
 
     def apply_det(
         self,
@@ -264,7 +268,7 @@ class PointingModel:
         """
         group = _create_group(f, path, overwrite)
         _add_attrs(
-            group, {"epoch": self.epoch, "force_zero_roll": self.force_zero_roll}
+                group, {"epoch": self.epoch, "force_zero_roll": self.force_zero_roll, "pad": self.pad}
         )
 
         parameters = AxisManager()
@@ -297,6 +301,7 @@ class PointingModel:
             epoch=cast(str, group.attrs["epoch"]),
             parameters=parameters,
             force_zero_roll=cast(bool, group.attrs["force_zero_roll"]),
+            pad=cast(bool, group.attrs["pad"]),
         )
 
 
@@ -1409,10 +1414,10 @@ class OpticsTube:
         self.static = static
 
     @property
-    def allpad(self):
+    def allpad(self) -> bool:
         if len(self.focal_planes) == 0:
             return True
-        return np.all([fp.pad for fp in self.focal_planes])
+        return bool(np.all([fp.pad for fp in self.focal_planes]))
 
     @property
     def _cm_transform_dyn(self) -> Transform:
@@ -1588,6 +1593,9 @@ class Receiver:
     autofreeze : bool
         If True, cache dynamically computed quantities into their
         corresponding static fields.
+    allpad : bool
+        Flag indicating whether all optics tube are padded
+        and should therefore be excluded from fitting. 
     cm_transform : Transform
         Receiver-level common-mode transform derived from the common-mode
         transforms of all optics tubes containing valid data.
@@ -1639,6 +1647,12 @@ class Receiver:
         """
         self._cm_transform_stat = self._cm_transform_dyn
         self.static = static
+
+    @property
+    def allpad(self) -> bool:
+        if len(self.optics_tubes) == 0:
+            return True
+        return bool(np.all([ot.allpad for ot in self.optics_tubes]))
 
     @property
     def _cm_transform_dyn(self) -> Transform:
@@ -1921,6 +1935,31 @@ class PointingSystem:
             return None
         return hits[0]
 
+    def set_pad(self, pad_epochs: list[str], pad_empty: bool):
+        """
+        Set the padding status of pointing models and focal planes.
+
+        Padding is enabled for pointing models and receiver associated
+        with epochs specified in `pad_epochs`.
+        If `pad_empty`` is True empty focal planes are also padded,
+        regardless of their receiver's epoch.
+
+        Parameters
+        ----------
+        pad_epochs : list of str
+            Epoch identifiers for which padding should be enabled.
+        pad_empty : bool
+            If True, enable padding for focal planes collections that
+            contain no focal planes.
+        """
+        for pm in self.pointing_models:
+            pm.pad = pm.epoch in pad_epochs
+        for rx in self.receivers:
+            pad = rx.epoch in pad_epochs
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    fp.pad = bool(pad + bool(pad_empty * (len(fp.focal_planes) == 0)))
+
     def load_pm_from_mdb(self, mdb: ManifestDb):
         """
         Load pointing model parameters from a ManifestDb into the current era.
@@ -2027,7 +2066,7 @@ class PointingSystem:
         rxs = []
         pms = []
         for epoch in era.epochs:
-            pms += [PointingModel(epoch.name, {}, cfg.force_zero_roll)]
+            pms += [PointingModel(epoch.name, {}, cfg.force_zero_roll, False)]
             ws_map = epoch.covers[0].data["ws_mapping"]
             ots = []
             for ot, arrays in ws_map.items():

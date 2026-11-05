@@ -38,6 +38,7 @@ default_config = {
     "force_zero_roll": False,
     "rx_groups": [],
     "pm_groups": [],
+    "pad_epochs": [],
     "pm_ver_override": {},
     "par_groups": {},
     "root_dir": "~",
@@ -52,6 +53,7 @@ default_config = {
     "max_shear": 0.05,
     "min_hits": 3,
     "min_r2": .3,
+    "pad_empty": True,
 }
 
 
@@ -441,7 +443,8 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
 
-    # TODO: Mark pad epochs as pad
+    # Mark pad epochs as pad
+    system.set_pad(cfg.pad_epochs, False)
 
     # Get obs list
     obslist = _get_obslist(ctx, cfg, system)
@@ -571,6 +574,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         fp.focal_planes += [meas]
         job.jstate = cast(sqy.Column[str], jobdb.JState.done)
     logger.info("Done with per-obs mode!")
+
+    # Pad empty if needed 
+    if cfg.pad_empty:
+        system.set_pad(cfg.pad_epochs, True)
 
     # Save our per-obs results
     system.set_static(True)
