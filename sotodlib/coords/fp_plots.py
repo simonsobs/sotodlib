@@ -192,6 +192,7 @@ def plot_ufm(
     focal_plane: FocalPlane | FocalPlaneCollection,
     output_dir: str,
     figsize: tuple[float, float] = (12, 6),
+    with_pm: bool = True
 ):
     """
     Plot the UFM focal-plane fit and residual distribution.
@@ -202,10 +203,18 @@ def plot_ufm(
         Focal-plane object for a specefic observation.
     output_dir : str
         Directory in which to save the plot.
-    figsize : tuple[float, float], default=(12, 6)
+    figsize : tuple[float, float], default: (12, 6)
         Figure dimensions in inches.
+    with_pm : bool, default: True
+        If True then use `data_pm` if `False` use `data`.
+        Only matters for `FocalPlane`.
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
+    data = focal_plane.data
+    transformed = focal_plane.transformed
+    if isinstance(focal_plane, FocalPlane) and with_pm:
+        data = focal_plane.data_pm
+        transformed = focal_plane.pm_transformed
 
     # Plot focal-plane pointing.
     plot_detector_offsets(
@@ -218,7 +227,7 @@ def plot_ufm(
     )
     plot_detector_offsets(
         ax1,
-        focal_plane.transformed,
+        transformed,
         color="black",
         alpha=0.4,
         label="transformed",
@@ -226,7 +235,7 @@ def plot_ufm(
     )
     plot_detector_offsets(
         ax1,
-        focal_plane.data,
+        data,
         color="orange",
         alpha=0.4,
         label="measured",
@@ -237,7 +246,7 @@ def plot_ufm(
     ax1.legend()
 
     # Plot histogram of residuals.
-    dist = 3600 * np.linalg.norm(np.rad2deg( (focal_plane.transformed.xyz - focal_plane.data.xyz)[np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2]), axis=1)
+    dist = 3600 * np.linalg.norm(np.rad2deg( (transformed.xyz - data.xyz)[np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2]), axis=1)
     if len(dist) > 0:
         dist_thresh = np.percentile(dist, 97)
         bins = max(int(len(dist) / 20), 10)
