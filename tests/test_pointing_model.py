@@ -179,6 +179,7 @@ class CoordsUtilsTest(unittest.TestCase):
         pm.apply_pointing_model(tod)
         np.testing.assert_array_equal(fp1.xi, tod.focal_plane.xi)
 
+
     def test_sat_v1(self):
         # Test model_sat_v1 general behaviors.
         az, el, roll = full_vectors(az=np.linspace(-90, 90, 100),
@@ -186,13 +187,20 @@ class CoordsUtilsTest(unittest.TestCase):
         params = core.AxisManager()
         params.wrap('version', 'sat_v1')
         az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
+        np.testing.assert_allclose(az1, az)
+
         params0 = {'version': 'sat_v1'}
-        az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
+        az1, el1, roll1 = to_deg(*pm.model_sat_v1(params0, *to_rad(az, el, roll))[0])
+        np.testing.assert_allclose(az, az1)
 
         params = dict(params0)
         params['enc_offset_az'] = 1. * DEG
+        params['enc_offset_el'] = 1. * DEG
+        params['enc_offset_boresight'] = -1. * DEG
         az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
         assert np.all(center_branch(az1 - az) > 0)
+        assert np.all(center_branch(el1 - el) > 0)
+        assert np.all(center_branch(roll1 - roll) > 0)
 
         def tpoint_base_tilt(an, aw, az, el):
             c, s = np.cos(az * DEG), np.sin(az * DEG)
