@@ -41,19 +41,25 @@ Wrapping a pipeline script
 Pipeline Elements
 =================
 
-update-g3tsmurf-db
--------------------
+Data packaging
+--------------
 
-This script set up to create and maintain g3tsmurf databases. :ref:`See details
-here<g3tsmurf-update-section>`.
+Six elements make up the Level 2 to Level 3 "data packaging" pipeline:
+``update_g3thk_database``, ``update_g3tsmurf_db``, ``update_book_plan``,
+``make_book``, ``update_librarian`` and ``cleanup_level2``.  They share the
+G3tSmurf, G3tHk and Imprinter databases of a DAQ node and must be run in that
+order; at the site they run as Prefect deployments rather than from the
+command line.  They are documented together on the
+:ref:`Data Packaging <data-packaging>` page, which covers the Book model,
+the shared configuration files, the command line arguments for each script,
+how the pipeline is deployed, and how to recover from failed Books.
 
-update-book-plan
-----------------
-
-This script is designed to help with the bookbinding. It will search a given
-Level 2 G3tSmurf database for observations that overlap in time. The different
-optional arguments will let us pass information from something like the sorunlib
-database to further filter the observations. 
+Quick links: :ref:`update_g3thk_database <dpkg-update-g3thk-database>` |
+:ref:`update_g3tsmurf_db <dpkg-update-g3tsmurf-db>` |
+:ref:`update_book_plan <dpkg-update-book-plan>` |
+:ref:`make_book <dpkg-make-book>` |
+:ref:`update_librarian <dpkg-update-librarian>` |
+:ref:`cleanup_level2 <dpkg-cleanup-level2>`
 
 check-book
 ----------

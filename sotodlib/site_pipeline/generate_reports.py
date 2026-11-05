@@ -120,6 +120,7 @@ class GenerateReportConfig:
         overwrite_data: bool = False,
         skip_html: bool = False,
         template_dir: Optional[str] = None,
+        make_html_index: bool = False
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.site_url: str = site_url
@@ -147,6 +148,7 @@ class GenerateReportConfig:
         self.template_dir = template_dir
         self.data_config = data_config
         self.skip_html = skip_html
+        self.make_html_index = make_html_index
 
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         if self.report_interval == "range":
@@ -325,20 +327,20 @@ def _main(
 
     platforms = ["satp1", "satp2", "satp3", "lat"]
 
-    template = env.get_template("platform_index.html")
-    with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
-        output_file.write(
-            template.render(
-                platform=cfg.platform,
-                platforms=platforms,
-                reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
+    if not cfg.skip_html or cfg.overwrite_html:
+        template = env.get_template("platform_index.html")
+        with open(os.path.join(cfg.output_root, "index.html"), "w", encoding="utf-8") as output_file:
+            output_file.write(
+                template.render(
+                    platform=cfg.platform,
+                    platforms=platforms,
+                    reports=json.load(open(os.path.join(cfg.output_root, "manifest.json"))),
+                )
             )
-        )
-
-    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html")):
-        template = env.get_template("index.html")
-        with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
-            output_file.write(template.render(platforms=platforms))
+        if cfg.make_html_index:
+            template = env.get_template("index.html")
+            with open(os.path.join(os.path.dirname(os.path.dirname(cfg.output_root)), "index.html"), "w", encoding="utf-8") as output_file:
+                output_file.write(template.render(platforms=platforms))
 
     if n_failed > 0:
         raise RuntimeError(f"{n_failed} reports failed to generate")
