@@ -37,8 +37,9 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
-        self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
-    def process(self, aman, proc_aman, sim=False):
+        self.skip_on_sim = step_cfgs.get("skip_on_sim")
+        self.use_data_aman = step_cfgs.get("use_data_aman", False)
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
         any configuration information under the ``process`` key of the
@@ -56,6 +57,9 @@ class _Preprocess(object):
         sim: Bool
             False by default when analyzing data. Should be True when doing 
             Transfer Function simulations and determining which steps should be run.
+        data_aman: AxisManager (Optional)
+            An AxisManager containing the preprocessed data to be used by
+            this process.
         """
         if self.process_cfgs is None:
             return aman, proc_aman
@@ -435,8 +439,16 @@ class Pipeline(list):
             super().extend( [self._check_item(item) for item in other])
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
+    def __getitem__(self, index):
+        result = super().__getitem__(index)
+        if isinstance(index, slice):
+            return Pipeline(result)
+        else:
+            return result
     
-    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
+
+    def run(self, aman, proc_aman=None, full_aman=None, select=True,
+            sim=False, update_plot=False, data_amans=None):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -460,6 +472,12 @@ class Pipeline(list):
             returned this preprocess axismanager. In this case, calls to
             ``process.calc_and_save()`` are skipped as the information is
             expected to be present in this AxisManager.
+        full_aman: AxisManager (Optional)
+            A preprocess axismanager.  This axis manager stores the outputs of
+            preprocessing functions (proc_aman) but without any of the detector
+            or samps restrictions applied, thus maintaining its original shape.
+            This is returned at the end of the pipeline.  If not passed it is
+            instantiated with the same number of dets and samps as aman.
         select: boolean (Optional)
             if True, the aman detector axis is restricted as described in
             each preprocess module. Most pipelines are developed with 
@@ -472,21 +490,30 @@ class Pipeline(list):
             given ``proc_aman`` is ``aman.preprocess``. This assumes
             ``process.calc_and_save()`` has been run on this aman before and
             has injested flags and other information into ``proc_aman``.
+        data_amans: dict (Optional)
+            A dictionary of AxisManagers with keys (step, process.name)
+            filled with AxisManager processed up to step-1. This is used
+            to pre-load all data AxisManager which could be required when
+            processing simulations (e.g. to provide a T2P template)
 
         Returns
         -------
-        proc_aman: AxisManager
+        full_aman: AxisManager
             A preprocess axismanager that contains all data products calculated
-            throughout the running of the pipeline
-        
+            throughout the running of the pipeline.
+        success: str
+            A string that stores the name of the last process step that the pipeline
+            completed.  If the pipeline successfully finishes all steps, success = 'end'.
         """
         if proc_aman is None:
             if 'preprocess' in aman:
                 proc_aman = aman.preprocess.copy()
-                full = aman.preprocess.copy()
+                if full_aman is None:
+                    full_aman = aman.preprocess.copy()
             else:
                 proc_aman = core.AxisManager(aman.dets, aman.samps)
-                full = core.AxisManager( aman.dets, aman.samps)
+                if full_aman is None:
+                    full_aman = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
             update_plot = False
         else:
@@ -495,7 +522,8 @@ class Pipeline(list):
                 det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
                 aman.restrict('dets', det_list)
                 proc_aman.restrict('dets', det_list)
-            full = proc_aman.copy()
+            if full_aman is None:
+                full_aman = proc_aman.copy()
             run_calc = False
 
         if 'frequency_cutoffs' not in proc_aman:
@@ -520,14 +548,25 @@ class Pipeline(list):
 
         success = 'end'
         for step, process in enumerate(self):
+            if sim and (process.skip_on_sim is None):
+                raise ValueError(f"Process {process.name} missing required field `skip_on_sim`")
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            aman, proc_aman = process.process(aman, proc_aman, sim)
+            if (data_amans is not None) and process.use_data_aman:
+                try:
+                    data_aman = data_amans[step, process.name]
+                except KeyError:
+                    raise KeyError(f"Requested to use data AxisManager for process {process.name} but not found in data_amans")
+            else:
+                if process.use_data_aman and sim:
+                    raise ValueError(f"Process {process.name} requested to use data_aman but none was provided to Pipeline.run()")
+                data_aman = None
+            process.process(aman, proc_aman, sim, data_aman)
             if run_calc:
                 aman, proc_aman = process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
-                update_full_aman( proc_aman, full, self.wrap_valid)
+                update_full_aman( proc_aman, full_aman, self.wrap_valid)
             if update_plot:
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
             plt.close()
@@ -535,22 +574,22 @@ class Pipeline(list):
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
             self.logger.debug(f"{proc_aman.dets.count} detectors remaining")
-            
+
             if aman.dets.count == 0:
                 success = process.name
                 break
 
         if run_calc:
-           _wrap_valid_ranges(proc_aman, full, valid_name='valid_data',
+           _wrap_valid_ranges(proc_aman, full_aman, valid_name='valid_data',
                               wrap_name='valid_data')
 
-        # copy updated frequency cutoffs to full
-        if "frequency_cutoffs" in full:
-            full.move("frequency_cutoffs", None)
-        full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+        # copy updated frequency cutoffs to full_aman
+        if "frequency_cutoffs" in full_aman:
+            full_aman.move("frequency_cutoffs", None)
+        full_aman.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
 
-        return full, success
-        
+        return full_aman, success
+
 
 class _FracFlaggedMixIn(object):
 

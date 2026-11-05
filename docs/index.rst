@@ -16,8 +16,10 @@ Welcome to SOTODLib's documentation!
    flagman.rst
    context.rst
    g3tsmurf.rst
+   data_packaging.rst
    hwp.rst
    hkdb.rst
+   io_ancil.rst
    tod_ops.rst
    obs_ops.rst
    coords.rst
@@ -25,6 +27,7 @@ Welcome to SOTODLib's documentation!
    preprocess.rst
    det_match.rst
    site_pipeline.rst
+   profiling.rst
    calibration.rst
    reference.rst
    dev.rst

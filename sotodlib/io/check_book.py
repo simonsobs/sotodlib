@@ -13,6 +13,7 @@ import os
 import fnmatch
 import glob
 import logging
+import traceback
 import yaml
 
 import numpy as np
@@ -106,7 +107,8 @@ class BookScanner:
             self.check_meta()
             self.gapfill_meta()
         except Exception as e:
-            self.logger.error('Failed in section 1!')
+            etext = traceback.format_exc()
+            self.logger.error(f'Failed in section 1! Traceback: {etext}')
             self.report()
             raise e
 
@@ -114,7 +116,8 @@ class BookScanner:
         try:
             self.check_file_presence()
         except Exception as e:
-            self.logger.error('Failed in section 2!')
+            etext = traceback.format_exc()
+            self.logger.error(f'Failed in section 2! Traceback: {etext}')
             self.report()
             raise e
 
@@ -122,7 +125,8 @@ class BookScanner:
             # 3. Check sample range, timestamp alignment, etc.
             self.check_frames()
         except Exception as e:
-            self.logger.error('Failed in section 3!')
+            etext = traceback.format_exc()
+            self.logger.error(f'Failed in section 3! Traceback: {etext}')
             self.report()
             raise e
 
@@ -367,7 +371,7 @@ class BookScanner:
             # obsfiledb detsets.
             dets = [d for d in det_lists[stream_id] if "NONE" not in d]
             n_fixed_tone = len(det_lists[stream_id]) - len(dets)
-            if not self.config['ignore_fixed_tones']:
+            if n_fixed_tone > 0 and not self.config['ignore_fixed_tones']:
                 # Yes, "ignore" just means don't even talk about it.
                 self.logger.warn(f'Suppressing {n_fixed_tone} fixed tones '
                                  f'in {stream_id}')
@@ -391,12 +395,22 @@ class BookScanner:
 
         return detset_rows, file_rows
 
-    def report(self):
+    def report(self, concise=False):
         """Print a summary of warning and error messages."""
-        self.logger.info('Warnings:')
-        for err in self.results['warnings']:
-            self.logger.info(err)
-        self.logger.info('Errors:')
-        for err in self.results['errors']:
-            self.logger.info(err)
+        ws, es = self.results['warnings'], self.results['errors']
+        if concise and (len(ws) == 0 or len(es) == 0):
+            if len(ws) > 0:
+                _subreport(ws, 'No errors, but warnings are', self.logger.info)
+            elif len(es) > 0:
+                _subreport(es, 'No warnings, but errors are', self.logger.info)
+            else:
+                self.logger.info('No warnings and no errors.')
+        else:
+            _subreport(ws, 'Warnings', self.logger.info)
+            _subreport(es, 'Errors', self.logger.info)
 
+
+def _subreport(results, header_text, print_func):
+    print_func(f'{header_text}:')
+    for err in results:
+        print_func(err)

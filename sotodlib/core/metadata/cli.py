@@ -58,6 +58,7 @@ def get_parser():
     sp.add_argument('db_file', help='Path to sqlite3 obsdb.')
     sp.add_argument('upstream_db')
     sp.add_argument('--patch', action='store_true')
+    sp.add_argument('-v', '--verbose', action='store_true')
 
     # obsfiledb
     sp = sps.add_parser('obsfiledb', description=
@@ -182,13 +183,15 @@ def main(args=None):
         print(f'Comparing to {args.upstream_db} ...')
         db = ObsDb(args.db_file)
         db_right = ObsDb(args.upstream_db)
-        report = obsdb.diff_obsdbs(db, db_right)
+        report = obsdb.diff_obsdbs(db, db_right, return_detail=args.verbose)
         if not report['different']:
             print(' ... databases are in sync.')
         elif report['patchable']:
             print(' ... upstream is different, but the target db can be patched to match.')
         else:
             print(' ... upstream and target have irreconcilable differences.')
+            if args.verbose:
+                print(report)
             parser.exit(1)
 
         if args.patch and report['different']:

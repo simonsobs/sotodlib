@@ -177,9 +177,6 @@ class PreprocessValidDets(PreprocessQA):
     thresh : float
         The threshold for the fraction of valid samples above which a detector is
         deemed good (default 0.75)
-    process_name : str
-        The process from which to read the valid dataset. (default 'glitches')
-
     """
 
     _influx_meas = "preprocesstod"
@@ -196,7 +193,6 @@ class PreprocessValidDets(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", {})
         self._thresh = process_args.get("thresh", 0.75)
-        self._key = process_args.get("process_name", "glitches")
 
     def _process(self, meta):
 
@@ -229,7 +225,7 @@ class PreprocessValidDets(PreprocessQA):
                     # Compute the number of samples that are valid
                     frac_valid = np.array([
                         np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
-                        for r in meta.preprocess[self._key].valid[subset]
+                        for r in meta.preprocess.valid_data.valid_data[subset]
                     ])
 
                     # Count detectors with fraction valid above threshold
@@ -255,8 +251,9 @@ class PreprocessValidDets(PreprocessQA):
 
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessArrayNET(PreprocessQA):
-    """Generate a QA metric for array NET values for each wafer slot and bandpass.
+class PreprocessArrayNoise(PreprocessQA):
+    """Generate a QA metric for array Noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -273,7 +270,7 @@ class PreprocessArrayNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "array_net"
+    _influx_field = "array_noise"
 
     def __init__(
         self,
@@ -335,9 +332,9 @@ class PreprocessArrayNET(PreprocessQA):
         }
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessDetNET(PreprocessQA):
-    """Generate a QA metric for per detector NET values for each wafer slot
-    and bandpass.
+class PreprocessDetNoise(PreprocessQA):
+    """Generate a QA metric for per detector noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -354,7 +351,7 @@ class PreprocessDetNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "det_net"
+    _influx_field = "det_noise"
 
     def __init__(
         self,

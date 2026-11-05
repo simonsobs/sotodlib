@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from collections import OrderedDict as odict
 
@@ -11,6 +12,8 @@ except ImportError:
 import so3g
 
 from .util import get_coindices
+
+logger = logging.getLogger(__name__)
 
 
 class AxisInterface:
@@ -635,7 +638,7 @@ class AxisManager:
     # Add and remove data while maintaining internal consistency.
 
     def wrap(self, name, data, axis_map=None,
-             overwrite=False, restrict_in_place=False):
+             overwrite=False, restrict_in_place=False, on_mismatch=None):
         """Add data into the AxisManager.
 
         Arguments:
@@ -661,6 +664,12 @@ class AxisManager:
             AxisManager may be modified and added, without a copy
             first.  This can be much faster, if there's no need to
             preserve the wrapped item.
+
+          on_mismatch: Policy when an axis of the new data
+            has the same name as, but different coverage than, an
+            existing axis. Defaults to None (intersect). 'warn'
+            (intersect, but log a warning) or 'error' (raise ValueError,
+            before modifying anything).
 
         """
         if overwrite and (name in self._fields):
@@ -704,7 +713,8 @@ class AxisManager:
                 assign[index] = axis.name
         helper._fields[name] = data
         helper._assignments[name] = assign
-        return self.merge(helper, restrict_in_place=restrict_in_place)
+        return self.merge(helper, restrict_in_place=restrict_in_place,
+                          on_mismatch=on_mismatch)
 
     def wrap_new(self, name, shape=None, cls=None, **kwargs):
         """Create a new object and wrap it, with axes mapped.  The shape can
@@ -820,21 +830,21 @@ class AxisManager:
         data array that is found assigned to an axis
         matching the specified axis.
 
-        Args:
-            axis (str): The name of the axis in the aman to reindex.
-            indexes (int array): an array of ints with length
-                equal to the length of the new array
-                and values equal to the idxs of the
-                values in the data to be reindexed.
-                Indexes that should be left as nan in
-                the new array should be set to -1 or nan.
+        For example, with data = [1,3,5] and indexes = [0, -1, 2, 1],
+        the result is new_data = [1, nan, 5, 3].
 
-            For example:
-                data = [1,3,5], indexes = [0, -1, 2, 1]
-                would result in new_data = [1, nan, 5, 3]
-            
-            in_place (bool): If in_place == True, the intersection is
-            applied to self.  Otherwise, a new object is returned,
+        Args:
+
+          axis (str): The name of the axis in the aman to reindex.
+
+          indexes (int array): an array of ints with length equal to
+            the length of the new array and values equal to the idxs
+            of the values in the data to be reindexed. Indexes that
+            should be left as nan in the new array should be set to
+            -1 or nan.
+
+          in_place (bool): If in_place == True, the intersection is
+            applied to self. Otherwise, a new object is returned,
             with data copied out.
         """
         # Check if axis even exists first
@@ -1042,9 +1052,12 @@ class AxisManager:
                         ax, False)
         return axes_out
 
-    def merge(self, *amans, restrict_in_place=False):
+    def merge(self, *amans, restrict_in_place=False, on_mismatch=None):
         """Merge the data from other AxisMangers into this one.  Axes with the
-        same name will be intersected.
+        same name will be intersected. The on_mismatch argument sets the policy
+        for axes that must be truncated (intersected) because amans share an
+        axis name but not its coverage: 'warn' (log a warning) or 'error'
+        (raise ValueError before modifying anything).
 
         If restrict_in_place=True, then the amans may be modified as
         they are added to the output objcet.  When that arg is False,
@@ -1064,6 +1077,27 @@ class AxisManager:
 
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
+
+        # Apply the axis-mismatch policy before modifying anything.
+        if on_mismatch is None:
+            on_mismatch = 'intersect'
+        assert on_mismatch in ('intersect', 'warn', 'error')
+        if on_mismatch in ('warn', 'error'):
+            report = []
+            for name, ax in axes_out.items():
+                for src, aman in [('self', self)] + [
+                    ('merged[%i]' % i, a) for i, a in enumerate(amans)]:
+                    if (name in aman._axes) and (aman._axes[name] != ax):
+                        report.append(
+                            "axis '%s' of %s changes %s -> %s." % (
+                                name, src, repr(aman._axes[name]), repr(ax)))
+            if report:
+                msg = ('Axis mismatch on merge/wrap causes truncation: '
+                       + '; '.join(report))
+                if on_mismatch == 'error':
+                    raise ValueError(msg)
+                logger.warning(msg)
+
         # Reduce the data in self, update our axes.
         self.restrict_axes(axes_out)
         # Import the other ones.

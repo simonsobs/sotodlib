@@ -21,6 +21,7 @@ import argparse
 from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
+from sotodlib.io import load_book as lb
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
@@ -50,19 +51,6 @@ if not logger.hasHandlers():
     sp_init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context, obs_id:str) -> str:
-    "Get root data directory based on context file"
-    c = ctx.obsfiledb.conn.execute("select name from files limit 1")
-    res = [r[0] for r in c][0]
-    # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(5):
-        res = os.path.dirname(res)
-    # add telescope str to path
-    tel_str = obs_id.split(('_'))[2]
-    res = os.path.join(res, tel_str)
-    return res
-
-
 @dataclass
 class DetCalCfg:
     """
@@ -77,9 +65,15 @@ class DetCalCfg:
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
         Defaults to False.
+    fit_tau: bool
+        If True, re-fit the biasstep tau. Defaults to False.
     apply_cal_correction: bool
         If True, apply the RP calibration correction, and use corrected results
         for Rtes, Si, Pj, and loopgain when successful. Defaults to True.
+    hwpss_subtraction: bool
+        If True, reanalyze biasstep with hwpss subtraction. Defaults to False.
+    metadata_list: str or List of str
+        List of metadata labels to load. Defaults to 'all'.
     index_path: str
         Path to the index file to use for the det_cal database. Defaults to
         "det_cal.sqlite".
@@ -123,6 +117,7 @@ class DetCalCfg:
         context_path: str,
         *,
         raise_exceptions: bool = False,
+        fit_tau: bool = False,
         apply_cal_correction: bool = True,
         hwpss_subtraction: bool = False,
         metadata_list: Union[str, List[str]] = 'all',
@@ -144,6 +139,7 @@ class DetCalCfg:
         self.context_path = os.path.expandvars(context_path)
         self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
+        self.fit_tau = fit_tau
         self.apply_cal_correction = apply_cal_correction
         self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
@@ -390,16 +386,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bsa_files = {}
         for dset, oid in iv_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
-                for f in os.listdir(zsmurf_dir):
-                    if "iv" in f:
-                        iva_files[dset] = os.path.join(zsmurf_dir, f)
-                        break
-                else:
-                    raise ValueError(f"IV data not found for in cal obs {oid}")
+                iva_files[dset] = lb.load_smurf_npy_data(ctx, oid, "iv_analysis", path_only=True)
             else:
                 logger.debug("missing IV data for %s", dset)
 
@@ -410,17 +397,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
         for dset, oid in bias_step_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
-                for f in os.listdir(zsmurf_dir):
-                    if "bias_step" in f:
-                        bs_file = os.path.join(zsmurf_dir, f)
-                        bsa_files[dset] = bs_file
-                        break
-                else:
-                    raise ValueError(f"Bias step data not found for in cal obs {oid}")
+                bsa_files[dset] = lb.load_smurf_npy_data(ctx, oid, "bias_step_analysis", path_only=True)
             else:
                 logger.debug("missing bias step data for %s", dset)
 
@@ -587,6 +564,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
 
+        if cfg.fit_tau:
+            for dset, bsa in bsas.items():
+                bsa._fit_tau_effs()
+
         if cfg.hwpss_subtraction:
             # Reanalyze biasstep with hwpss subtraction
             ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
@@ -614,7 +595,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                 continue
 
             ridx = np.where((iva.bands == band) & (iva.channels == chan))[0]
-            if not ridx:  # Channel doesn't exist in IV analysis
+            if ridx.size == 0:  # Channel doesn't exist in IV analysis
                 continue
 
             ridx = ridx[0]
@@ -692,7 +673,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                 continue
 
             ridx = np.where((bsa.bands == band) & (bsa.channels == chan))[0]
-            if not ridx:  # Channel doesn't exist in bias step analysis
+            if ridx.size == 0:  # Channel doesn't exist in bias step analysis
                 continue
 
             if cfg.apply_cal_correction:
@@ -787,6 +768,17 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
 def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str) -> None:
     if "KeyboardInterrupt" in msg:  # Don't cache keyboard interrupts
         return
+    # Transient errors of metadata loading.
+    # These can happen when hwpss_subtraction is True, but we can retry.
+    transient_errors = [
+        'sotodlib.core.metadata.loader.LoaderError',
+        'BlockingIOError',
+    ]
+    for err in transient_errors:
+        if err in msg:
+            logger.error(f"obs_id {obs_id} failed to load metadata {err}."
+                         " Try again later")
+            return
 
     if cfg.cache_failed_obsids:
         logger.info(f"Adding {obs_id} to failed_file_cache")
@@ -813,10 +805,6 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
-        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
-            logger.error(f"obs_id {obs_id} failed due to medatada loader "
-                         "error, try again later")
-            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 

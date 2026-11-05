@@ -13,8 +13,11 @@ from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
-                                   count_cuts, flag_cut_select,
+                                   count_cuts, has_ratio_cuts,
+                                   flag_cut_select,
                                    sparse_to_ranges_matrix)
+
+from ..qa.metrics import _get_tag, _has_tag
 
 from sotodlib.preprocess import preprocess_util as pp_util
 
@@ -28,10 +31,25 @@ class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
 
+    Example config block::
+
+      - name: "fft_trim"
+        process:
+          axis: "samps"
+          prefer: "right"
+
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
     name = "fft_trim"
-    def process(self, aman, proc_aman, sim=False):
+
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         start_stop = tod_ops.fft_trim(aman, **self.process_cfgs)
         proc_aman.restrict(self.process_cfgs.get('axis', 'samps'), (start_stop))
 
@@ -40,16 +58,26 @@ class FFTTrim(_Preprocess):
 class Detrend(_Preprocess):
     """Detrend the signal. All processing configs go to `detrend_tod`
 
+    Example config block::
+
+      - name: "detrend"
+        signal: "signal" # optional
+        process:
+          method: "linear"
+
     .. autofunction:: sotodlib.tod_ops.detrend_tod
     """
     name = "detrend"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = None
 
         super().__init__(step_cfgs)
-    
-    def process(self, aman, proc_aman, sim=False):
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
         return aman, proc_aman
@@ -57,12 +85,29 @@ class Detrend(_Preprocess):
 class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
-    in proc_aman under the "det_bias_cuts" field. 
+    in proc_aman under the "det_bias_flags" field.
+
+    Data selection cuts detectors flagged by any of the bias-range checks
+    (see ``get_det_bias_flags`` below for what each checks).
+
+    Example config block::
+
+      - name: "det_bias_flags"
+        calc:
+          rfrac_range: [0.2, 0.8]
+          # psat_range: [0.1, 10]  # optional, required if plot: True
+        save: True
+        select: True
+        plot: True
 
     .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
     """
     name = "det_bias_flags"
     _influx_field = "det_bias_flags_frac"
+    def __init__(self, step_cfgs):
+        self.save_name = "det_bias_flags"
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
@@ -71,13 +116,13 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dbc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("det_bias_flags", dbc_aman)
+            proc_aman.wrap(self.save_name, dbc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -128,6 +173,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = "trends"
 
         super().__init__(step_cfgs)
     def calc_and_save(self, aman, proc_aman):
@@ -140,13 +186,13 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, trend_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("trends", trend_aman)
+            proc_aman.wrap(self.save_name, trend_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -177,15 +223,16 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
-    go to `get_glitch_flags` 
+    go to `get_glitch_flags`
 
-    Saves retsults in proc_aman under the "glitches" field.
+    Saves results in proc_aman under the "glitches" field.
 
-    Data section should define a glitch significant "sig_glitch" and a maximum
-    number of glitches "max_n_glitch."
+    Data selection should define a glitch significance "sig_glitch", a maximum
+    number of glitches "max_n_glitch", and a maximum fraction of TOD samples
+    "max_t_frac" that is allowed to be flagged by glitches.
 
     Example configuration block::
-        
+
       - name: "glitches"
         glitch_name: "my_glitches"
         calc:
@@ -201,6 +248,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         select:
           max_n_glitch: 10
           sig_glitch: 10
+          max_t_frac: 0.1
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
@@ -209,34 +257,44 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
 
     def __init__(self, step_cfgs):
         self.glitch_name = step_cfgs.get('glitch_name', 'glitches')
+        self.save_name = self.glitch_name
+
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
-        ) 
+        )
         aman.wrap(self.glitch_name, glitch_aman)
         self.save(proc_aman, glitch_aman)
         if self.calc_cfgs.get('save_plot', False):
             flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
         return aman, proc_aman
-    
+
     def save(self, proc_aman, glitch_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.glitch_name, glitch_aman)
- 
+            proc_aman.wrap(self.save_name, glitch_aman)
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
+
+        # cut on number of glitches above S/N threshold
         flag = sparse_to_ranges_matrix(
             proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
+
+        # cut on fraction of TOD flagged
+        keep = keep & flag_cut_select(
+            proc_aman[self.glitch_name].glitch_flags,
+            self.select_cfgs.get("max_t_frac", 1.0),
+        )
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -273,10 +331,13 @@ class FixJumps(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         field = self.process_cfgs['jumps_aman']
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
             aman[self.signal], proc_aman[field].jump_flag.mask(),
@@ -317,6 +378,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = 'jumps' if isinstance(step_cfgs.get('save'), bool) else step_cfgs.get('save', {}).get('jumps_name', 'jumps')
 
         super().__init__(step_cfgs)
 
@@ -342,14 +404,13 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, jump_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            name = self.save_cfgs.get('jumps_name', 'jumps')
-            proc_aman.wrap(name, jump_aman)
+            proc_aman.wrap(self.save_name, jump_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -402,10 +463,13 @@ class PSDCalc(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         full_output = self.process_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
@@ -459,26 +523,27 @@ class NoiseRatio(_Preprocess):
 
     Example config block::
 
-    - name: "noise_ratio"
-      psd: "psdQ"
-      wrap: "noise_ratio_Q"
-      subscan: False
-      calc:
-        f_sel: [0.04, 0.14]
-        f_wn: [0.6, 1.0]
-      save: True
-      select:
-        r_max: 1.19
-        select_per_detector: True
+      - name: "noise_ratio"
+        psd: "psdQ"
+        wrap: "noise_ratio_Q"
+        subscan: False
+        calc:
+          f_sel: [0.04, 0.14]
+          f_wn: [0.6, 1.0]
+        save: True
+        select:
+          r_max: 1.19
+          select_per_detector: True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
-"""
+    """
     name = "noise_ratio"
 
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.wrap = step_cfgs.get('wrap', 'noise_ratio')
         self.subscan = step_cfgs.get('subscan', False)
+        self.save_name = self.wrap
 
         super().__init__(step_cfgs)
 
@@ -496,13 +561,13 @@ class NoiseRatio(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, calc_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         else:
-            proc_aman.wrap(self.wrap, calc_aman)
+            proc_aman.wrap(self.save_name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -548,6 +613,7 @@ class GetStats(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'tod_stats')
+        self.save_name = self.wrap
 
         super().__init__(step_cfgs)
 
@@ -576,7 +642,7 @@ class GetStats(_Preprocess):
 
     def save(self, proc_aman, stats_aman):
         if not(self.save_cfgs is None):
-            proc_aman.wrap(self.wrap, stats_aman)
+            proc_aman.wrap(self.save_name, stats_aman)
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -610,8 +676,13 @@ class CutBadDistribution(_Preprocess):
     """
     name = "cut_bad_dist"
 
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -640,7 +711,10 @@ class Noise(_Preprocess):
 
     Saves the results into the "noise" field of proc_aman.
 
-    Can run data selection of a "max_noise" value.
+    Can select detectors on the minimum and maximum white noise (``min_noise``
+    and ``max_noise`` respectively) and with a maximum allowed fknee value
+    (``max_fknee``; only if fitting).  These may be passed as scalars or as a
+    dictionary where the keys are the bandpass names.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
     axis manager containing an array named ``white_noise``. If not specified,
@@ -660,12 +734,16 @@ class Noise(_Preprocess):
             wn_est: noise
             fixed_param: 'wn'
             binning: True
-            fit_method: log_curve_fit #or likelihood 
+            fit_method: log_curve_fit # or likelihood
             curve_fit_kwargs:
                 maxfev: 20000
           save: True
           select:
-            max_noise: 2000
+            min_noise:
+               f090: 18e-6
+               f150: 18e-6
+            max_noise: 80e-6
+            max_fknee: 7
             require_finite_fit: True
 
     Set ``select.require_finite_fit`` to ``True`` to drop detectors whose fit
@@ -687,7 +765,7 @@ class Noise(_Preprocess):
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
     :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
-    
+
     """
     name = "noise"
     _influx_field = "median_white_noise"
@@ -696,6 +774,7 @@ class Noise(_Preprocess):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
         self.subscan = step_cfgs.get('subscan', False)
+        self.save_name = 'noise' if isinstance(step_cfgs.get('save'), bool) else step_cfgs.get('save', {}).get('wrap_name', 'noise')
 
         super().__init__(step_cfgs)
 
@@ -715,8 +794,8 @@ class Noise(_Preprocess):
             if 'hwp_angle' in aman and frequency_cutoff is not None:
                 hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                              (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-                if fmax >= frequency_cutoff:
-                    logger.warning(f"Upper freq={fmax} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+                if fmax > frequency_cutoff:
+                    logger.warning(f"Upper freq={fmax} > hwp freq cutoff={frequency_cutoff:.2f}. Limiting to hwp freq cutoff.")
                     fmax = frequency_cutoff
             if fmin is not None and fmin >= fmax:
                 raise ValueError(f"lower freq={fmin} >= upper freq={fmax}")
@@ -793,21 +872,13 @@ class Noise(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, noise):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
-
-        if isinstance(self.save_cfgs, bool):
-            if self.save_cfgs:
-                proc_aman.wrap("noise", noise)
-                return
-
-        if self.save_cfgs['wrap_name'] is None:
-            proc_aman.wrap("noise", noise)
-        else:
-            proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
+        if self.save_cfgs:
+            proc_aman.wrap(self.save_name, noise)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
 
         if proc_aman is None:
@@ -832,13 +903,61 @@ class Noise(_Preprocess):
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
             if fk is not None:
                 fk = np.nanmean(fk, axis=-1) # Mean over subscans
+
         keep = np.ones_like(wn, dtype=bool)
-        if "max_noise" in self.select_cfgs.keys():
-            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+
+        if _has_tag(meta.det_info, "wafer.bandpass"):
+            bandpasses = meta.det_info.wafer.bandpass
+        elif _has_tag(meta, "det_cal.bandpass"):
+            bandpasses = meta.det_cal.bandpass
+        else:
+            bandpasses = None
+
         if "min_noise" in self.select_cfgs.keys():
-            keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            if isinstance(self.select_cfgs["min_noise"], (int, float, str)):
+                keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+            elif isinstance(self.select_cfgs["min_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for min_noise dict"
+                    )
+                for k, v in self.select_cfgs["min_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] >= np.float64(v))
+            else:
+                raise TypeError("invalid type for min_noise")
+
+        if "max_noise" in self.select_cfgs.keys():
+            if isinstance(self.select_cfgs["max_noise"], (int, float, str)):
+                keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+            elif isinstance(self.select_cfgs["max_noise"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_noise dict"
+                    )
+                for k, v in self.select_cfgs["max_noise"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (wn[mask] <= np.float64(v))
+            else:
+                raise TypeError("invalid type for max_noise")
+
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
-            keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            if isinstance(self.select_cfgs["max_fknee"], (int, float, str)):
+                keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+            elif isinstance(self.select_cfgs["max_fknee"], dict):
+                if bandpasses is None:
+                    raise ValueError(
+                        "det_cal.bandpass or wafer.bandpass "
+                        "required for max_fknee dict"
+                    )
+                for k, v in self.select_cfgs["max_fknee"].items():
+                    mask = (bandpasses == k)
+                    keep[mask] &= (fk[mask] <= np.float64(v))
+            else:
+                raise TypeError("invalid type for max_fknee")
+
         if self.fit and self.select_cfgs.get("require_finite_fit", False):
             fit_vals = np.asarray(noise_aman.fit)
             fit_flat = fit_vals.reshape(fit_vals.shape[0], -1)
@@ -883,10 +1002,13 @@ class Calibrate(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
                 aman[self.signal] /= self.process_cfgs["val"]
@@ -910,7 +1032,7 @@ class Calibrate(_Preprocess):
         return aman, proc_aman
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         keep = meta[self.select_cfgs['cut_array']] == 0
         if in_place:
@@ -938,6 +1060,11 @@ class EstimateHWPSS(_Preprocess):
     _influx_field = "hwpss_coeffs"
     _influx_percentiles = [0, 50, 75, 90, 95, 100]
 
+    def __init__(self, step_cfgs):
+        self.save_name = step_cfgs.get('calc', {}).get("hwpss_stats_name")
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
@@ -945,10 +1072,10 @@ class EstimateHWPSS(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, hwpss_stats):
-        if self.save_cfgs is None:
-            return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
+            proc_aman.wrap(self.save_name, hwpss_stats)
+        else:
+            return
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -982,7 +1109,6 @@ class EstimateHWPSS(_Preprocess):
         """
         # record one metric per wafer_slot per bandpass
         # add specified tags
-        from ..qa.metrics import _get_tag, _has_tag
         tag_keys = {
             "wafer_slot": "wafer_slot",
             "tel_tube": "tel_tube",
@@ -1070,10 +1196,13 @@ class SubtractHWPSS(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.hwpss_stats = step_cfgs.get('hwpss_stats', 'hwpss_stats')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if not(proc_aman[self.hwpss_stats] is None):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
             if sim:
@@ -1098,6 +1227,7 @@ class A2Stats(_Preprocess):
     Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
 
     Takes the following ``calc`` config options:
+
     :stat_names: (*list*) List of strings identifying which statistics to calculate.
         Refer to ``sotodlib.tod_ops.flags.get_stats`` (below) for available stats.
         Default is ``["mean", "median", "var", "ptp"]``.
@@ -1116,6 +1246,11 @@ class A2Stats(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_stats
     """
     name = "a2_stats"
+
+    def __init__(self, step_cfgs):
+        self.save_name = 'a2_stats'
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         # Get A2 signal using the demod_tod function
@@ -1137,19 +1272,37 @@ class A2Stats(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, a2_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("a2_stats", a2_stats)
+            proc_aman.wrap(self.save_name, a2_stats)
 
 class Apodize(_Preprocess):
-    """Apodize the edges of a signal. All process configs go to `apodize_cosine`
+    """Apodize the edges of a signal. All process configs go to `apodize_cosine`.
+    If flags is provided, apodize based on it; otherwise, apodize the edge of
+    the timestream.
+
+    Example config block::
+
+      - name: "apodize"
+        process:
+          signal_name: signal
+          apodize_samps: 2000
+          flags: glitch_flags
+          apo_type: C1
 
     .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """
     name = "apodize"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
         return aman, proc_aman
 
@@ -1183,7 +1336,14 @@ class Demodulate(_Preprocess):
 
     name = "demodulate"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
@@ -1241,7 +1401,7 @@ class AzSS(_Preprocess):
           subtract: True
 
     If we estimate and subtract azss in left going scans only,
-    make union of glitch_flags and scan_flags first
+    make union of glitch_flags and scan_flags first::
 
       - name : "union_flags"
         process:
@@ -1266,6 +1426,11 @@ class AzSS(_Preprocess):
     """
     name = "azss"
 
+    def __init__(self, step_cfgs):
+        self.save_name = step_cfgs.get('calc', {}).get("azss_stats_name")
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         if self.process_cfgs:
             self.save(proc_aman, aman[self.calc_cfgs['azss_stats_name']])
@@ -1276,12 +1441,14 @@ class AzSS(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, azss_stats):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+            proc_aman.wrap(self.save_name, azss_stats)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if 'subtract_in_place' in self.calc_cfgs:
             raise ValueError('calc_cfgs.subtract_in_place is not allowed use process_cfgs.subtract')
         if self.process_cfgs is None:
@@ -1308,15 +1475,17 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
-    
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
-        if 'bad_dets' in meta[self.azss_stats_name]:
-            keep = ~meta[self.azss_stats_name]['bad_dets']
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if 'bad_dets' in proc_aman[self.save_name]:
+            keep = ~proc_aman[self.save_name]['bad_dets']
         else:
-            keep = np.ones(aman.dets.count, dtype=bool)
-        
+            keep = np.ones(meta.dets.count, dtype=bool)
+
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -1344,7 +1513,14 @@ class SubtractAzSSTemplate(_Preprocess):
     """
     name = "subtract_azss_template"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         process_cfgs = copy.deepcopy(self.process_cfgs)
         if sim:
             process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
@@ -1377,10 +1553,13 @@ class GlitchFill(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.flags = step_cfgs.get('flags')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if self.flags is not None:
             glitch_flags=proc_aman.get(self.flags)
             tod_ops.gapfill.fill_glitches(
@@ -1398,55 +1577,129 @@ class FlagTurnarounds(_Preprocess):
         All process configs go to ``get_turnaround_flags``. If the ``method`` key
         is not included in the preprocess config file calc configs then it will
         default to 'scanspeed'.
+
+    Saves results in proc_aman under the "turnaround_flags" field, with
+    sub-fields ``turnarounds``, ``left_scan``, and ``right_scan``.
+    To save multiple turnaround definitions, use a distinct ``save.wrap_name``
+    for each definition instead of renaming saved fields with a ``move`` step.
+    ``save: True`` retains the default name ``turnaround_flags``.
+
+    The example block below includes optional arguments such as t_buffer, 
+    az_throw_threshold, and a min_ta. The az_throw_threshold and min_ta (minimum number
+    of turnarounds) values as shown would cut stare observations.
     
+    Example config block::
+
+      - name: "flag_turnarounds"
+        skip_on_sim: False
+        process:
+          method: "scanspeed"
+          t_buffer: 4.
+          az_throw_threshold: 1.
+        calc:
+          method: "scanspeed"
+          t_buffer: 4.
+          az_throw_threshold: 1.
+        save:
+          wrap_name: turnaround_flags
+        select:
+          min_ta: 1.
+
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
+    def __init__(self, step_cfgs):
+        save_cfgs = step_cfgs.get('save')
+        self.save_name = (save_cfgs.get('wrap_name', 'turnaround_flags')
+                          if isinstance(save_cfgs, dict) else 'turnaround_flags')
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
             self.calc_cfgs['method'] = 'scanspeed'
-        elif not('method' in self.calc_cfgs):
+        elif 'method' not in self.calc_cfgs:
             self.calc_cfgs['method'] = 'scanspeed'
 
-        if self.calc_cfgs['method'] == 'scanspeed':
-            ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            calc_aman = core.AxisManager(aman.dets, aman.samps)
-            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
-            calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-
-        if self.calc_cfgs['method'] == 'az':
-            ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            calc_aman = core.AxisManager(aman.dets, aman.samps)
-            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+        ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+        calc_aman = core.AxisManager(aman.dets, aman.samps)
+        calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+        calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+        calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
-            calc_aman.wrap('subscan_info', aman.subscan_info)
+            if hasattr(aman, 'subscan_info'):
+                calc_aman.wrap('subscan_info', aman.subscan_info)
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
 
     def save(self, proc_aman, turn_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("turnaround_flags", turn_aman)
+            proc_aman.wrap(self.save_name, turn_aman)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         return aman, proc_aman
+    
+    def select(self, meta, proc_aman=None, in_place=True):
+        if not self.select_cfgs:
+            return meta
+        
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+    
+        ta = proc_aman[self.save_name].turnarounds
+        
+        # allows for a minimum number of turnarounds
+        min_ta = 0
+        if isinstance(self.select_cfgs, dict):
+            min_ta = self.select_cfgs.get('min_ta', 0)
+        cut = False
+        if min_ta > 0:
+            cut = np.all(count_cuts(ta) < min_ta)
+        
+        if cut:
+            keep = np.zeros(meta.dets.count, dtype=bool)
+        else:
+            keep = np.ones(meta.dets.count, dtype=bool)
+    
+        if in_place:
+            if cut:
+                meta.restrict('dets', meta.dets.vals[:0])
+            return meta
+        else:
+            return keep
 
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
         All process configs go to `sotodlib.tod_ops.sub_polyf`.
-    
+
+    Example config block::
+
+      - name: "sub_polyf"
+        process:
+          degree: 0
+          method: "polyfit"
+          in_place: True
+
     .. autofunction:: sotodlib.tod_ops.subscan_polyfilter
     """
     name = 'sub_polyf'
-    
-    def process(self, aman, proc_aman, sim=False):
+
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
         return aman, proc_aman
 
@@ -1529,6 +1782,11 @@ class SSOFootprint(_Preprocess):
     """
     name = 'sso_footprint'
 
+    def __init__(self, step_cfgs):
+        self.save_name = "sso_footprint"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs.get("source_list", None):
             ssos = self.calc_cfgs["source_list"]
@@ -1583,10 +1841,10 @@ class SSOFootprint(_Preprocess):
         return aman, proc_aman
         
     def save(self, proc_aman, sso_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("sso_footprint", sso_aman)
+            proc_aman.wrap(self.save_name, sso_aman)
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -1616,6 +1874,11 @@ class DarkDets(_Preprocess):
     """
     name = "dark_dets"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "darks"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
         
@@ -1625,13 +1888,13 @@ class DarkDets(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, dark_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("darks", dark_aman)
+            proc_aman.wrap(self.save_name, dark_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1669,6 +1932,8 @@ class LoadPremadeFlags(_Preprocess):
     name = "load_premade_flags"
     def __init__(self, step_cfgs):
         self.premade_flags_name = step_cfgs.get('load_premade_flag_name', 'premade_flags')
+        self.save_name = self.premade_flags_name
+
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
@@ -1686,13 +1951,13 @@ class LoadPremadeFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.premade_flags_name, source_aman)            
+            proc_aman.wrap(self.save_name, source_aman)            
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -1738,6 +2003,8 @@ class SourceFlags(_Preprocess):
     name = "source_flags"
     def __init__(self, step_cfgs):
         self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
+        self.save_name = self.source_flags_name
+
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
@@ -1789,18 +2056,18 @@ class SourceFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, source_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.source_flags_name, source_aman)
+            proc_aman.wrap(self.save_name, source_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
         else:
-            source_flags = proc_aman[self.source_flags_name]
+            source_flags = proc_aman[self.save_name]
 
         if isinstance(self.select_cfgs, bool):
             if self.select_cfgs:
@@ -1845,7 +2112,6 @@ class SourceFlags(_Preprocess):
 
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep_all])
-            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
             return meta
         else:
             return keep_all
@@ -1867,14 +2133,25 @@ class HWPAngleModel(_Preprocess):
     """
     name = "hwp_angle_model"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = "hwp_angle"
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
                       [(0, 'samps')])
+        else:
+            hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+
         return aman, proc_aman
 
     def calc_and_save(self, aman, proc_aman):
-        hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+        if (not 'hwp_angle' in aman._fields):
+            hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
         hwp_angle_aman = core.AxisManager(aman.samps)
         hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
         self.save(proc_aman, hwp_angle_aman)
@@ -1882,10 +2159,10 @@ class HWPAngleModel(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, hwp_angle_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("hwp_angle", hwp_angle_aman)
+            proc_aman.wrap(self.save_name, hwp_angle_aman)
 
 class FourierFilter(_Preprocess):
     """
@@ -1948,10 +2225,13 @@ class FourierFilter(_Preprocess):
         self.signal_name = step_cfgs.get('signal_name', 'signal')
         # By default signal is overwritted by the filtered signal
         self.wrap_name = step_cfgs.get('wrap_name', 'signal')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
             noise_fit = proc_aman[field]
@@ -2000,26 +2280,51 @@ class DetcalNanCuts(_Preprocess):
     Example config file entry::
 
       - name: "detcal_nan_cuts"
-        select:
+        calc:
             fields: [tau_eff, phase_to_pW]
+        save: True
+        select: True
     """
     name = 'detcal_nan_cuts'
 
+    def __init__(self, step_cfgs):
+        self.save_name = "det_cal_nan_flags"
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            return aman, proc_aman
+        msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(aman, **self.calc_cfgs)
+        det_cal_aman = core.AxisManager(aman.dets, aman.samps)
+        det_cal_aman.wrap('det_cal_nans', msk_det_cal, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, det_cal_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, det_cal_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.save_name, det_cal_aman)
+
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-
-        select_fields = self.select_cfgs.get("fields")
-
-        keep = np.ones(meta.dets.count, dtype=bool)
-        for field in select_fields:
-            keep &= ~np.isnan(meta.det_cal[field])
-        if in_place:
-            meta.restrict('dets', meta.dets.vals[keep])
+        if self.save_name in proc_aman:
+            keep = ~has_all_cut(proc_aman[self.save_name].det_cal_nans)
+        # backwards compatibility
         else:
-            return keep
+            fields = self.select_cfgs.get("fields")
+            msk_det_cal = tod_ops.flags.get_det_cal_nan_flags(
+                meta, fields=fields, merge=False, overwrite=False)
+            keep = ~has_all_cut(msk_det_cal)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
+
 
 class PCARelCal(_Preprocess):
     """
@@ -2053,6 +2358,7 @@ class PCARelCal(_Preprocess):
         self.run = step_cfgs.get('pca_run', 'run1')
         self.bandpass = step_cfgs.get('bandpass_key', 'wafer.bandpass')
         self.run_name = f'{self.signal}_{self.run}'
+        self.save_name = self.run_name
 
         super().__init__(step_cfgs)
 
@@ -2114,13 +2420,13 @@ class PCARelCal(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, pca_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.run_name, pca_aman)
+            proc_aman.wrap(self.save_name, pca_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2180,10 +2486,13 @@ class PCAFilter(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.model_signal = step_cfgs.get('model_signal', None)
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         if self.model_signal:
@@ -2196,6 +2505,162 @@ class PCAFilter(_Preprocess):
         model = tod_ops.pca.get_pca_model(aman, signal=model_signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
+
+
+class JointQUNmatModel(_Preprocess):
+    """Fit a joint demodulated Q/U Fourier Nmat operator.
+
+    The Q and U detector streams are whitened and analyzed together. Modes
+    inconsistent with independent noise according to a Marchenko--Pastur plus
+    Tracy--Widom threshold are identified, and the whitened noise model
+    ``N(f) = D(f) + V E(f) V.T`` is stored in ``proc_aman``.
+
+    This is calculated from real data only (``skip_on_sim: True``) so that
+    ``joint_qu_nmat_filter`` can reload it when running on simulations,
+    following the same pattern as ``noise`` and ``fourier_filter``.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_model"
+        skip_on_sim: True
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        calc:
+          fmin: 0.0015
+          fmax: 0.2
+          noise_band: [0.5, 1.75]
+          bin_width_hz: 0.2
+          mp_significance: 0.999
+          n_modes_max: 18
+          singleness_max: 0.55
+          profile_n_bins: 40
+          profile_min_nfreq: 20
+          profile_diagonal_floor: 0.05
+        save:
+          wrap_name: "nmat_qu"
+
+    See sotodlib.tod_ops.nmat_filter.fit_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_model"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = (step_cfgs.get("save") or {}).get("wrap_name", "nmat_qu")
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        calc_cfgs = dict(self.calc_cfgs or {})
+        # Check whitening band sits below the demodulation low-pass.
+        noise_band = calc_cfgs.get("noise_band")
+        if noise_band is not None and "frequency_cutoffs" in proc_aman:
+            fcs = proc_aman["frequency_cutoffs"]
+            cutoff = fcs[self.signal_Q] if self.signal_Q in fcs else None
+            if cutoff is not None and noise_band[1] > cutoff:
+                logger.warning(
+                    "joint_qu_nmat_model: noise_band upper edge %.3g Hz is above "
+                    "the demodulation low-pass cutoff %.3g Hz; the whitening "
+                    "scale will be biased low by the filtered-out band.",
+                    noise_band[1], cutoff,
+                )
+        operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+            aman,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            **calc_cfgs,
+        )
+        logger.info(
+            "Joint Q/U Nmat model: selected %s modes per bin "
+            "(above threshold %s, singleness-vetoed %s, capped %s)",
+            np.asarray(operator.n_selected).tolist(),
+            np.asarray(operator.n_above_threshold).tolist(),
+            np.asarray(operator.n_failed_singleness).tolist(),
+            np.asarray(operator.n_capped_by_max).tolist(),
+        )
+        self.save(proc_aman, operator)
+        return aman, proc_aman
+
+    def save(self, proc_aman, operator):
+        if self.save_cfgs is None:
+            return
+        proc_aman.wrap(self.save_name, operator)
+
+
+class JointQUNmatFilter(_Preprocess):
+    """Apply a stored joint demodulated Q/U Fourier Nmat operator.
+
+    Reads the operator fit by ``joint_qu_nmat_model`` from ``proc_aman`` and
+    applies it, so simulations reuse the operator derived from real data rather
+    than refitting it on signal-only timestreams.
+
+    Example configuration::
+
+      - name: "joint_qu_nmat_filter"
+        skip_on_sim: False
+        signal_Q: "demodQ"
+        signal_U: "demodU"
+        process:
+          nmat_model: "nmat_qu"
+          psd_scale: 1.0
+
+    Setting ``use_data_aman: True`` instead fits the operator directly from the
+    supplied real-data AxisManager rather than reloading a stored one, with the
+    fit parameters given under ``process.fit``.
+
+    See sotodlib.tod_ops.nmat_filter.apply_joint_qu_nmat_operator.
+    """
+    name = "joint_qu_nmat_filter"
+
+    def __init__(self, step_cfgs):
+        self.signal_Q = step_cfgs.get("signal_Q", "demodQ")
+        self.signal_U = step_cfgs.get("signal_U", "demodU")
+        self.save_name = None
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        cfgs = dict(self.process_cfgs or {})
+        model_name = cfgs.pop("nmat_model", "nmat_qu")
+        fit_cfgs = cfgs.pop("fit", None)
+
+        if cfgs.get("in_place") is not None:
+            if cfgs["in_place"] is not True:
+                logger.warning(
+                    "joint_qu_nmat_filter: ignoring process.in_place config; "
+                    "the operator is always applied in place"
+                )
+        cfgs.pop("in_place", None)
+
+        if self.use_data_aman:
+            model_aman = data_aman if data_aman is not None else aman
+            logger.info(
+                "Fitting the Nmat operator from the supplied AxisManager "
+                "(%d detectors)", model_aman.dets.count
+            )
+            operator = tod_ops.nmat_filter.fit_joint_qu_nmat_operator(
+                model_aman,
+                signal_Q=self.signal_Q,
+                signal_U=self.signal_U,
+                **(fit_cfgs or {}),
+            )
+        else:
+            if model_name not in proc_aman:
+                raise KeyError(
+                    f"Nmat operator {model_name!r} not found in proc_aman; "
+                    "run joint_qu_nmat_model first, or point nmat_model at "
+                    "the name it was saved under"
+                )
+            operator = proc_aman[model_name]
+
+        tod_ops.nmat_filter.apply_joint_qu_nmat_operator(
+            aman,
+            operator,
+            signal_Q=self.signal_Q,
+            signal_U=self.signal_U,
+            in_place=True,
+            **cfgs,
+        )
+        return aman, proc_aman
+
 
 class GetCommonMode(_Preprocess):
     """
@@ -2219,6 +2684,7 @@ class GetCommonMode(_Preprocess):
     name = 'get_common_mode'
     def __init__(self, step_cfgs):
         self.wrap_name = step_cfgs.get('wrap_name', 'common_mode')
+        self.save_name = self.wrap_name
 
         super().__init__(step_cfgs)
 
@@ -2240,10 +2706,10 @@ class GetCommonMode(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, common_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.wrap_name, common_aman)
+            proc_aman.wrap(self.save_name, common_aman)
 
 class FilterForSources(_Preprocess):
     """
@@ -2259,6 +2725,7 @@ class FilterForSources(_Preprocess):
           source_flags: "source_flags"
           edge_guard: 10 # Number of samples to make the first and last flags False
           trim_samps: 100
+          pca_wrap: "pca_model" # optional, if provided, the PCA model is wrapped into aman under this key
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -2266,18 +2733,22 @@ class FilterForSources(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
         edge_guard = self.process_cfgs.get('edge_guard')
+        pca_wrap = self.process_cfgs.get('pca_wrap',None)
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard, pca_wrap=pca_wrap)
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
             proc_aman.restrict('samps', (aman.samps.offset + trim,
@@ -2304,6 +2775,11 @@ class PTPFlags(_Preprocess):
     """
     name = "ptp_flags"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "ptp_flags"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
 
@@ -2314,13 +2790,13 @@ class PTPFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, ptp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", ptp_aman)
+            proc_aman.wrap(self.save_name, ptp_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2349,6 +2825,11 @@ class InvVarFlags(_Preprocess):
     """
     name = "inv_var_flags"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "inv_var_flags"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         msk = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
 
@@ -2358,13 +2839,13 @@ class InvVarFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, inv_var_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("inv_var_flags", inv_var_aman)
+            proc_aman.wrap(self.save_name, inv_var_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2402,6 +2883,7 @@ class EstimateT2P(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.fit_in_freq = step_cfgs.get('fit_in_freq', False)
+        self.save_name = "t2p"
 
         super().__init__(step_cfgs)
 
@@ -2415,13 +2897,13 @@ class EstimateT2P(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, t2p_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("t2p", t2p_aman)
+            proc_aman.wrap(self.save_name, t2p_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2444,8 +2926,39 @@ class SubtractT2P(_Preprocess):
     """
     name = "subtract_t2p"
 
-    def process(self, aman, proc_aman, sim=False):
-        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'])
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if sim and data_aman is not None:
+
+            data_aman.restrict("dets", aman.dets.vals)
+            data_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
+            data_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
+
+            if self.process_cfgs.get("fit_in_freq"):
+                t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs_in_freq(
+                    data_aman,
+                    merge_stats=False,
+                    ML_fit=True
+                )
+            else:
+                t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(
+                    data_aman,
+                    merge_stats=False
+                )
+            tod_ops.t2pleakage.subtract_t2p(
+                aman,
+                t2p_aman,
+                T_signal=data_aman.dsT
+            )
+        else:
+            pcfg = copy.deepcopy(self.process_cfgs)
+            pcfg.pop("fit_in_freq", None)
+            tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
+                                            **pcfg)
         return aman, proc_aman
 
 class SplitFlags(_Preprocess):
@@ -2470,9 +2983,14 @@ class SplitFlags(_Preprocess):
             central_pixels: 0.071
           save: True
 
-    .. autofunction:: sotodlib.obs_ops.flags.get_split_flags
+    .. autofunction:: sotodlib.obs_ops.splits.get_split_flags
     """
     name = "split_flags"
+
+    def __init__(self, step_cfgs):
+        self.save_name = "split_flags"
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         split_flg_aman = obs_ops.splits.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
@@ -2481,14 +2999,19 @@ class SplitFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, split_flg_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("split_flags", split_flg_aman)
+            proc_aman.wrap(self.save_name, split_flg_aman)
 
 class UnionFlags(_Preprocess):
     """Do the union of relevant flags for mapping
     Typically you would include turnarounds, glitches, etc.
+
+    .. deprecated::
+        Use the more general ``CombineFlags`` instead. ``UnionFlags`` is kept
+        only so archives built with older process configs can still be
+        loaded; ``process()`` raises a deprecation warning when run.
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
@@ -2502,7 +3025,14 @@ class UnionFlags(_Preprocess):
     """
     name = "union_flags"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         warnings.warn("UnionFlags function is deprecated and only kept to allow loading of old process archives. Use generalized method CombineFlags")
 
         from so3g.proj import RangesMatrix
@@ -2521,8 +3051,8 @@ class UnionFlags(_Preprocess):
         return aman, proc_aman
 
 class CombineFlags(_Preprocess):
-    """Do the conbine of relevant flags for mapping
-    
+    """Do the combination of relevant flags for mapping
+
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
@@ -2532,24 +3062,33 @@ class CombineFlags(_Preprocess):
           process:
             flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
             total_flags_label: 'glitch_flags'
-            method: 'union' # You can select a method from ['union', '+', 'intersect', '*'].
-            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. Lentgh must match the length of flag_labels.
+            method: 'union' # You can select a method from ['union', '+', 'intersect', '*', 'except', '-'].
+            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. 
+               # Length of list must match the length of flag_labels.
+               # If a list, the first method must be '+', as if adding the first flag set to an empty flag set. 
+               # Operations are performed strictly from Left to Right, '*' are not performed first.
 
     """
     name = "combine_flags"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from so3g.proj import RangesMatrix
         if isinstance(self.process_cfgs['method'], list):
             if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
                 raise ValueError("The length of method does not match to the length of flag_labels")
-            elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
-                raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
-        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
+            elif any(method not in ['+', 'union', '*', 'intersect', '-', 'except'] for method in self.process_cfgs['method']):
+                raise ValueError("One or more methods in list are not valid")
+        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect', '-', 'except']:
             self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
-            raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
-        
+            raise ValueError("The method matches neither list nor the one of the valid operations")
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for i, (method, label) in enumerate(zip(self.process_cfgs['method'], self.process_cfgs['flag_labels'])):
             _label = attrgetter(label)
@@ -2562,6 +3101,8 @@ class CombineFlags(_Preprocess):
                     total_flags += _label(proc_aman) # The + operator is the union operator in this case
                 elif method in ['*', 'intersect']:
                     total_flags *= _label(proc_aman) # The * operator is the intersect operator in this case
+                elif method in ['-', 'except']:
+                    total_flags *= ~ _label(proc_aman) # The - operator is the except operator in this case
 
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager
@@ -2587,13 +3128,26 @@ class RotateFocalPlane(_Preprocess):
     """
     name = "rotate_focal_plane"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import demod
         demod.rotate_focal_plane(aman, **self.process_cfgs)
         return aman, proc_aman
 
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
+
+    ``sign: 1`` (the default) rotates each detector's demodQ/demodU out of
+    its own polarization-angle frame and into the shared telescope frame,
+    zeroing ``focal_plane.gamma`` when ``update_focal_plane: True``.
+    ``sign: -1`` undoes that, rotating back from the shared telescope frame
+    into each detector's own polarization-angle frame.
 
     Example config block::
 
@@ -2607,13 +3161,29 @@ class RotateQU(_Preprocess):
     """
     name = "rotate_qu"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import demod
         demod.rotate_demodQU(aman, **self.process_cfgs)
         return aman, proc_aman
 
 class SubtractQUCommonMode(_Preprocess):
     """Subtract Q and U common mode.
+
+    If ``calc`` is set, computes the median Q/U template and each detector's
+    coupling coefficient to it (via
+    :func:`sotodlib.tod_ops.deproject.get_qu_common_mode_coeffs`) and saves
+    them under the ``qu_common_mode_coeffs`` field of ``proc_aman``.
+    ``process`` then subtracts that scaled template from each detector's Q/U
+    signal. If ``calc`` was not run (or its result wasn't saved), ``process``
+    falls back to computing the template/coefficients on the fly from the
+    current ``aman`` instead of using a saved ``proc_aman`` archive.
 
     Example config block::
 
@@ -2624,28 +3194,33 @@ class SubtractQUCommonMode(_Preprocess):
           calc: True
           save: True
 
+    .. autofunction:: sotodlib.tod_ops.deproject.get_qu_common_mode_coeffs
     .. autofunction:: sotodlib.tod_ops.deproject.subtract_qu_common_mode
     """
     name = "subtract_qu_common_mode"
 
     def __init__(self, step_cfgs):
-        self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
-        self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
+        self.signal_name_Q = step_cfgs.get('signal_name_Q', 'demodQ')
+        self.signal_name_U = step_cfgs.get('signal_name_U', 'demodU')
+        self.save_name = "qu_common_mode_coeffs"
+
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        coeff_aman = get_qu_common_mode_coeffs(aman, Q_signal, U_signal, merge)
-        self.save(proc_aman, aman)
+        coeff_aman = tod_ops.deproject.get_qu_common_mode_coeffs(
+            aman, self.signal_name_Q, self.signal_name_U, merge=False)
+        self.save(proc_aman, coeff_aman)
 
         return aman, proc_aman
 
-    def save(self, proc_aman, aman):
-        if self.save_cfgs is None:
+    def save(self, proc_aman, coeff_aman):
+        if not self.save_cfgs:
             return
-        if self.save_cfgs:
-            proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
+        proc_aman.wrap(self.save_name, coeff_aman)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if 'qu_common_mode_coeffs' in proc_aman:
             tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
                                                       coeff_aman=proc_aman['qu_common_mode_coeffs'], 
@@ -2670,10 +3245,13 @@ class ScanFreqCut(_Preprocess):
     name = "scan_freq_cut"
 
     def __init__(self, step_cfgs):
+        self.save_name = None
         
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         scan_freq = tod_ops.utils.get_scan_freq(aman)
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
         filt = tod_ops.get_hpf(hpf_cfg)
@@ -2707,6 +3285,11 @@ class FocalplaneNanFlags(_Preprocess):
     """
     name = "fp_flags"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "fp_flags"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         mskfp = tod_ops.flags.get_focalplane_flags(aman, **self.calc_cfgs)
         fp_aman = core.AxisManager(aman.dets, aman.samps)
@@ -2715,13 +3298,13 @@ class FocalplaneNanFlags(_Preprocess):
         return aman, proc_aman
     
     def save(self, proc_aman, fp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("fp_flags", fp_aman)
+            proc_aman.wrap(self.save_name, fp_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2745,7 +3328,14 @@ class PointingModel(_Preprocess):
     """
     name = "pointing_model"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
@@ -2754,22 +3344,64 @@ class PointingModel(_Preprocess):
 class BadSubscanFlags(_Preprocess):
     """Identifies and flags bad subscans.
 
-      Example config block::
+    Saves results in proc_aman under the "noisy_subscan_flags" (valid
+    subscans, dets x samps) and "noisy_dets_flags" (valid detectors, dets)
+    fields. ``calc.subscan_stats`` must list signal names whose *last
+    character* (``T``/``Q``/``U``) selects a prior ``tod_stats`` result:
+    for each entry ``sig`` this looks up
+    ``proc_aman[stats_name + "_" + sig[-1]]``, so e.g. ``"demodQ"`` selects
+    ``proc_aman.tod_stats_Q``. This requires ``tod_stats`` (``GetStats``,
+    see above) to have already been run once per signal with a matching
+    ``wrap`` name (``tod_stats_T``/``tod_stats_Q``/``tod_stats_U`` for the
+    default ``stats_name: tod_stats``).
+
+    Example config block::
+
+        - name : "tod_stats"
+          signal: "dsT"
+          wrap: "tod_stats_T"
+          calc:
+            stat_names: ["std", "ptp"]
+            split_subscans: True
+          save: True
+
+        - name : "tod_stats"
+          signal: "demodQ"
+          wrap: "tod_stats_Q"
+          calc:
+            stat_names: ["median", "std", "skew", "kurtosis", "ptp"]
+            split_subscans: True
+          save: True
+
+        - name : "tod_stats"
+          signal: "demodU"
+          wrap: "tod_stats_U"
+          calc:
+            stat_names: ["median", "std", "skew", "kurtosis", "ptp"]
+            split_subscans: True
+          save: True
 
         - name : "noisy_subscan_flags"
-            stats_name: tod_stats # optional
-            calc: 
-                nstd_lim: 5.0 
-                merge: False
-            save: True
-            select: True
-    
-    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
+          stats_name: tod_stats # optional
+          calc:
+            subscan_stats: ["demodQ", "demodU", "dsT"]
+            nstd_lim: 3.0
+            ptp_lim: 0.8
+            kurt_lim: 0.5
+            skew_lim: 0.5
+            noisy_detector_lim: 0.5
+            merge: False
+          save: True
+          select: True
+
+    .. autofunction:: sotodlib.tod_ops.flags.get_noisy_subscan_flags
     """
     name = "noisy_subscan_flags"
 
     def __init__(self, step_cfgs):
         self.stats_name = step_cfgs.get('stats_name', 'tod_stats')
+        self.save_name = ["noisy_subscan_flags", "noisy_dets_flags"]
+
         super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
@@ -2794,13 +3426,13 @@ class BadSubscanFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, calc_aman, name): 
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
             proc_aman.wrap(name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
-        if self.select_cfgs is None:
+        if not self.select_cfgs:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
@@ -2824,7 +3456,14 @@ class CorrectIIRParams(_Preprocess):
     """
     name = "correct_iir_params"
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
@@ -2857,7 +3496,14 @@ class TrimFlagEdge(_Preprocess):
     """
     name = 'trim_flag_edge'
 
-    def process(self, aman, proc_aman, sim=False):
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         flags = aman.flags.get(self.process_cfgs.get('flags'))
         trimst, trimen = core.flagman.find_common_edge_idx(flags)
         aman.restrict('samps', (aman.samps.offset + trimst,
@@ -2884,6 +3530,11 @@ class AcuDropFlags(_Preprocess):
 
     name = "acu_drop_flags"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "acu_drops"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         if "acu_drops" in aman.flags:
             acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in range(aman.dets.count)])
@@ -2904,10 +3555,10 @@ class AcuDropFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("acu_drops", flag_aman)
+            proc_aman.wrap(self.save_name, flag_aman)
 
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
@@ -2927,6 +3578,11 @@ class SmurfGapsFlags(_Preprocess):
     """
     name = "smurfgaps_flags"
 
+    def __init__(self, step_cfgs):
+        self.save_name = "smurfgaps"
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         smurfgaps = tod_ops.flags.expand_smurfgaps_flags(aman, **self.calc_cfgs)
         flag_aman = core.AxisManager(aman.dets, aman.samps)
@@ -2936,10 +3592,10 @@ class SmurfGapsFlags(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, flag_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap("smurfgaps", flag_aman)
+            proc_aman.wrap(self.save_name, flag_aman)
 
 class GetTauHWP(_Preprocess):
     """Analyze observation with hwp spinning up or spinning down and
@@ -2964,23 +3620,30 @@ class GetTauHWP(_Preprocess):
     """
     name = "get_tau_hwp"
 
+    def __init__(self, step_cfgs):
+        self.save_name = step_cfgs.get('calc', {}).get('name')
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         tau_hwp_aman = hwp.get_tau_hwp(aman, **self.calc_cfgs)
         self.save(proc_aman, tau_hwp_aman)
 
     def save(self, proc_aman, tau_hwp_aman):
-        if self.save_cfgs is None:
+        if not self.save_cfgs:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
+            proc_aman.wrap(self.save_name, tau_hwp_aman)
 
 class Move(_Preprocess):
     """Rename or remove a data field.
     To delete the field, pass new_name=None.
+    If proc_aman is True, move a data field of proc_aman.
 
     Example config block::
 
         - name: "move"
+          proc_aman: False
           process:
             name: "name"
             new_name: "new_name"
@@ -2989,8 +3652,19 @@ class Move(_Preprocess):
     """
     name = 'move'
 
-    def process(self, aman, proc_aman, sim=False):
-        aman.move(**self.process_cfgs)
+    def __init__(self, step_cfgs):
+        self.save_name = None
+        self.proc_aman = step_cfgs.get('proc_aman', False)
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
+        if self.proc_aman:
+            proc_aman.move(**self.process_cfgs)
+        else:
+            aman.move(**self.process_cfgs)
         return aman, proc_aman
 
 _Preprocess.register(SplitFlags)
@@ -3000,6 +3674,8 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(JointQUNmatModel)
+_Preprocess.register(JointQUNmatFilter)
 _Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)

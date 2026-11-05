@@ -14,7 +14,11 @@ import fnmatch
 import hashlib
 
 import sqlalchemy as db
-from sqlalchemy.ext.declarative import declarative_base
+try:
+    from sqlalchemy.orm import declarative_base
+except ImportError:
+    # Deprecated since SQLAlchemy 2.0, keep for backwards compatibility
+    from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from typing import Union, List, Optional, Dict, Any
 import so3g

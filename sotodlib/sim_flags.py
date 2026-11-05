@@ -27,7 +27,7 @@ def add_random_glitches(tod, params={}, signal='glitches', flag='true_glitches',
     gparams.update(params)
     params=gparams
     
-    n_tot = int(np.abs(params['sig_n_glitch']*tod.dets.count*np.random.randn(1) 
+    n_tot = int(np.abs(params['sig_n_glitch']*tod.dets.count*np.random.randn(1)[0]
                        + params['n_glitch']*tod.dets.count))
     places = np.random.randint( tod.dets.count*tod.samps.count, size=(n_tot,))
     heights = np.random.randn( n_tot)*params['sig_h_glitch'] + params['h_glitch']

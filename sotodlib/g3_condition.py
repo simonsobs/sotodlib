@@ -105,8 +105,11 @@ class Decimate(DataG3Module):
         super().__init__(input, output)
 
     def process(self, data, det_name):
-        return signal.decimate(data, **self.decimate_params)
-
+        return np.ascontiguousarray(
+            signal.decimate(
+                data, **self.decimate_params
+            )
+        )
 class Resample(DataG3Module):
     """
     Module for resampling data. Uses scipy.signal.resample()
@@ -124,4 +127,8 @@ class Resample(DataG3Module):
         super().__init__(input, output)
 
     def process(self, data, det_name):
-        return signal.resample(data, **self.resample_params)
+        return np.ascontiguousarray(
+            signal.resample(
+                data, **self.resample_params
+            )
+        )
