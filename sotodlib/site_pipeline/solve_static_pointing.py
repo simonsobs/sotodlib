@@ -354,124 +354,7 @@ def _load_obs(aman, obs_id, array, ctx, system, cfg):
     return loaded
 
 
-def _check_jobs(system, jdb, done_jobs, open_jobs):
-    to_open = []
-    in_system = []
-    for rx in system.receivers:
-        for ot in rx.optics_tubes:
-            for fp in ot.focal_planes:
-                in_system += [f"{meas.meas_id}+{meas.name}" for meas in fp.focal_planes]
-    done_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in done_jobs]
-    open_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in open_jobs]
-    all_ids = done_ids + open_ids
-
-    # Check if there are any measurements without a job
-    not_in_jdb = np.setdiff1d(in_system, all_ids)
-    if len(not_in_jdb) > 0:
-        raise ValueError(
-            f"{len(not_in_jdb)} jobs in current system but not found in jdb!\n{not_in_jdb}"
-        )
-
-    # Check if there are any jobs marked done not in the system and reopen them
-    not_in_system = np.setdiff1d(done_ids, in_system)
-    to_open = np.array(done_jobs)[np.isin(done_ids, not_in_system)]
-    if len(not_in_system) > 0:
-        for job in to_open:
-            job.jstate = cast(sqy.Column[str], jobdb.JState.open)
-        logger.info("Opening %s old jobs", len(to_open))
-        jdb.update_jobs(to_open)
-        with jdb.session_scope() as session:
-            for job in to_open:  # updated_jobs:
-                jid = job.id
-                refreshed_job = session.get(jobdb.Job, jid)
-                session.expunge(refreshed_job)
-                open_jobs.append(refreshed_job)
-    done_jobs = [job for job, jid in zip(done_jobs, done_ids) if jid in not_in_system]
-
-    # Anything that is an open job needs to be removed from the system
-    open_ids += [f"{job.tags['obs_id']}+{job.tags['array']}" for job in to_open]
-    for rx in system.receivers:
-        for ot in rx.optics_tubes:
-            for fp in ot.focal_planes:
-                fp.focal_planes = [
-                    meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids
-                ]
-
-    return open_jobs, done_jobs
-
-
-def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
-    # Load config
-    require = (
-        "optics_config",
-        "calendar",
-        "era",
-        "context",
-    )  # Not bothering with things we have defaults for
-    cfg, cfg_str = load_config_namespace(config_path, default_config, None, require)
-    cal = epochs.Calendar.load(cfg.calendar)
-    ctx = Context(cfg.context)
-    with open(cfg.calendar) as f:
-        cal_str = f.read()
-    with open(cfg.context) as f:
-        ctx_str = f.read()
-
-    # Figure out paths
-    plot_dir, data_dir = _setup_paths(
-        cfg.root_dir, cfg.project_dir, cfg.tel, cfg.append
-    )
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(plot_dir, exist_ok=True)
-    outfile = os.path.join(data_dir, "static_pointing.h5")
-
-    # Setup output
-    old_system, old_cfg = _get_old(outfile, overwrite, backup)
-    system = fpc.PointingSystem.empty(cal.eras[cfg.era], cfg, cal_str)
-    system.state_meta["timestamp"] = timestamp
-    system.state_meta["config"] = cfg_str
-    system.state_meta["context"] = ctx_str
-    repo = git.Repo(
-        os.path.abspath(os.path.dirname(__file__)), search_parent_directories=True
-    )
-    system.state_meta["git_sha"] = (
-        f"{repo.head.object.hexsha}{'_dirty'*repo.is_dirty()}"
-    )
-
-    # Make templates and load old data if we can
-    _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
-
-    # Save our template
-    with h5py.File(outfile, "a") as f:
-        system.save(f, "/", True)
-
-    # Mark pad epochs as pad
-    system.set_pad(cfg.pad_epochs, False)
-
-    # Get obs list
-    obslist = _get_obslist(ctx, cfg, system)
-
-    # Set up per-obs jobs
-    jdb_path = os.path.join(data_dir, "jobdb.sqlite")
-    jdb, open_jobs = ju.setup_jobs(
-        None,
-        jdb_path,
-        "per_obs",
-        _get_jobdict_po,
-        partial(_get_jobit_po, obslist=obslist, system=system),
-        _get_jobstr_po,
-        _get_tags_po,
-        [],
-        overwrite,
-        False,
-        None,
-        0,
-        False,
-        logger,
-    )
-    done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
-    open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
-
-    # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
     job = None
     njobs = len(open_jobs)
     logger.info(
@@ -575,6 +458,128 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         fp.focal_planes += [meas]
         job.jstate = cast(sqy.Column[str], jobdb.JState.done)
     logger.info("Done with per-obs mode!")
+
+
+def _check_jobs(system, jdb, done_jobs, open_jobs):
+    to_open = []
+    in_system = []
+    for rx in system.receivers:
+        for ot in rx.optics_tubes:
+            for fp in ot.focal_planes:
+                in_system += [f"{meas.meas_id}+{meas.name}" for meas in fp.focal_planes]
+    done_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in done_jobs]
+    open_ids = [f"{job.tags['obs_id']}+{job.tags['array']}" for job in open_jobs]
+    all_ids = done_ids + open_ids
+
+    # Check if there are any measurements without a job
+    not_in_jdb = np.setdiff1d(in_system, all_ids)
+    if len(not_in_jdb) > 0:
+        raise ValueError(
+            f"{len(not_in_jdb)} jobs in current system but not found in jdb!\n{not_in_jdb}"
+        )
+
+    # Check if there are any jobs marked done not in the system and reopen them
+    not_in_system = np.setdiff1d(done_ids, in_system)
+    to_open = np.array(done_jobs)[np.isin(done_ids, not_in_system)]
+    if len(not_in_system) > 0:
+        for job in to_open:
+            job.jstate = cast(sqy.Column[str], jobdb.JState.open)
+        logger.info("Opening %s old jobs", len(to_open))
+        jdb.update_jobs(to_open)
+        with jdb.session_scope() as session:
+            for job in to_open:  # updated_jobs:
+                jid = job.id
+                refreshed_job = session.get(jobdb.Job, jid)
+                session.expunge(refreshed_job)
+                open_jobs.append(refreshed_job)
+    done_jobs = [job for job, jid in zip(done_jobs, done_ids) if jid in not_in_system]
+
+    # Anything that is an open job needs to be removed from the system
+    open_ids += [f"{job.tags['obs_id']}+{job.tags['array']}" for job in to_open]
+    for rx in system.receivers:
+        for ot in rx.optics_tubes:
+            for fp in ot.focal_planes:
+                fp.focal_planes = [
+                    meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids
+                ]
+
+    return open_jobs, done_jobs
+
+
+def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
+    # Load config
+    require = (
+        "optics_config",
+        "calendar",
+        "era",
+        "context",
+    )  # Not bothering with things we have defaults for
+    cfg, cfg_str = load_config_namespace(config_path, default_config, None, require)
+    cal = epochs.Calendar.load(cfg.calendar)
+    ctx = Context(cfg.context)
+    with open(cfg.calendar) as f:
+        cal_str = f.read()
+    with open(cfg.context) as f:
+        ctx_str = f.read()
+
+    # Figure out paths
+    plot_dir, data_dir = _setup_paths(
+        cfg.root_dir, cfg.project_dir, cfg.tel, cfg.append
+    )
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(plot_dir, exist_ok=True)
+    outfile = os.path.join(data_dir, "static_pointing.h5")
+
+    # Setup output
+    old_system, old_cfg = _get_old(outfile, overwrite, backup)
+    system = fpc.PointingSystem.empty(cal.eras[cfg.era], cfg, cal_str)
+    system.state_meta["timestamp"] = timestamp
+    system.state_meta["config"] = cfg_str
+    system.state_meta["context"] = ctx_str
+    repo = git.Repo(
+        os.path.abspath(os.path.dirname(__file__)), search_parent_directories=True
+    )
+    system.state_meta["git_sha"] = (
+        f"{repo.head.object.hexsha}{'_dirty'*repo.is_dirty()}"
+    )
+
+    # Make templates and load old data if we can
+    _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
+
+    # Save our template
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+
+    # Mark pad epochs as pad
+    system.set_pad(cfg.pad_epochs, False)
+
+    # Get obs list
+    obslist = _get_obslist(ctx, cfg, system)
+
+    # Set up per-obs jobs
+    logger.info("Setting up per-obs jobs")
+    jdb_path = os.path.join(data_dir, "jobdb.sqlite")
+    jdb, open_jobs = ju.setup_jobs(
+        None,
+        jdb_path,
+        "per_obs",
+        _get_jobdict_po,
+        partial(_get_jobit_po, obslist=obslist, system=system),
+        _get_jobstr_po,
+        _get_tags_po,
+        [],
+        overwrite,
+        False,
+        None,
+        0,
+        False,
+        logger,
+    )
+    done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
+    open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
+
+    # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+    _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir)
 
     # Pad empty if needed 
     if cfg.pad_empty:
