@@ -616,7 +616,9 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         )
 
         for filt_key in filt_keys:
-            ensure_wrapped(aman.stm_cal.coadd_data, filt_key, axis=core.AxisManager())
+            ensure_wrapped(aman.stm_cal.coadd_data, filt_key,
+                           axis=core.AxisManager(aman.dets,
+                                                 aman.stm_cal.coadd_data.stm_coadd_bins))
 
             for freq_key in freq_keys:
                 ensure_wrapped(
