@@ -2202,7 +2202,7 @@ class PointingSystem:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
             pars.update(cfg.pm_defaults_overrides[pm_ver])
-            par_names += list(pars.keys())
+            par_names += [name for name, val in pars.items() if isinstance(val, (int, float, np.number))]
             pars["version"] = pm_ver
             pm.parameters = pars
         par_names = np.unique(par_names).tolist()
