@@ -40,6 +40,7 @@ default_config = {
     "pm_groups": [],
     "pad_epochs": [],
     "pm_ver_override": {},
+    "pm_defaults_overrides": {},
     "par_groups": {},
     "root_dir": "~",
     "project_dir": "pointing",

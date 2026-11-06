@@ -219,6 +219,9 @@ class PointingModel:
             Telescope encoder values in the `horizon` coordinate system.
             These provide the boresight azimuth, elevation, and roll used to
             evaluate the pointing model.
+        weights : Float[np.ndarray, "ndet"]
+            Detector weights. Only used to mask out nan of 0 weight detectors during
+            the inversion calculation. The output will still include all dets.
         fake_gamma : bool
             If True, ignore detector polarization angles and propagate only
             detector position (`xi`, `eta`). If False, propagate the full
@@ -251,16 +254,15 @@ class PointingModel:
    
         # Start with the input detector coordinates
         msk = np.isfinite(weights) * (weights > 0)
-        estimate = det_off.xyz.copy()[msk]
-        fp_target = det_off.xyz[msk]
+        if not np.any(msk):
+            return deepcopy(det_off)
+        estimate = det_off.xyz[msk].copy()
         if fake_gamma:
             estimate = estimate[:, :2]
+        fp_target = det_off[msk]
         to_ret = deepcopy(det_off)
-        tmp = deepcopy(det_off)
-        tmp.xyz = tmp.xyz[msk]
-        fp = tmp.fp
-        det_enc_msk = deepcopy(det_enc)
-        det_enc_msk.xyz = det_enc_msk.xyz[msk]
+        fp = to_ret[msk].fp
+        det_enc_msk = det_enc[msk]
         ancil = det_enc_msk.ancil
 
         err = np.inf
@@ -287,20 +289,19 @@ class PointingModel:
             )
 
             if fp_corrected is None:
-                to_ret.xyz = np.column_stack((xi, eta, gamma))
+                to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
                 return to_ret
 
             # Estimate and remove focalplane distortion
             if fake_gamma:
                 distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta))
-                resid = np.column_stack((fp_corrected.xi - fp_target[:, 0], fp_corrected.eta - fp_target[:, 1]))
+                resid = np.column_stack((fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta))
             else:
                 distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta, fp_corrected.gamma - fp.gamma))
-                resid = np.column_stack((fp_corrected.xi - fp_target[:, 0], fp_corrected.eta - fp_target[:, 1], fp_corrected.gamma - fp_target[:, 2]))
+                resid = np.column_stack((fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta, fp_corrected.gamma - fp_target.gamma))
             err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1)**2))
 
             if err < tol:
-                to_ret = deepcopy(det_off)
                 to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
                 return to_ret
 
@@ -520,6 +521,15 @@ class DetectorOffsets:
         if name in ("xyz"):
             self.__dict__.pop("ancil", None)
         return super().__setattr__(name, value)
+
+    def __getitem__(self, key) -> DetectorOffsets:
+        return DetectorOffsets(
+            xyz=self.xyz[key],
+            det_id=self.det_id[key],
+            split=self.split[key],
+            center=self.center,
+            coordsys=self.coordsys,
+        )
 
     @classmethod
     def empty(cls, coordsys):
@@ -2191,6 +2201,7 @@ class PointingSystem:
         for pm in pms:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
+            pars.update(cfg.pm_defaults_overrides[pm_ver])
             par_names += list(pars.keys())
             pars["version"] = pm_ver
             pm.parameters = pars
