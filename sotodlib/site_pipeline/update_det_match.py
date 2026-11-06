@@ -16,14 +16,10 @@ from sotodlib import core
 from sotodlib.core.metadata import ManifestDb
 from sotodlib.io.metadata import write_dataset
 
+from sotodlib.site_pipeline.utils.logging import init_logger
 
-logger = logging.getLogger("update_det_match")
-if len(logger.handlers) == 0:
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s : %(message)s")
-    handler = logging.StreamHandler()
-    handler.setFormatter(fmt)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+
+logger = init_logger('update_det_match', 'update-det-match: ')
 
 
 def get_detset_time(detset: str) -> float:
