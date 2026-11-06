@@ -311,12 +311,11 @@ def _load_axisman(src, group=None, cls=None, fields=None):
 
     if isinstance(src, str):
         f = h5py.File(src, 'r')
-        if group is None:
-            src = f
-        else:
-            src = f[group]
+        src = f
     else:
         f = None
+    if group is not None:
+        src = src[group]
 
     info = json.loads(src.attrs['_axisman'])
     assert(info['version'] == 0)
