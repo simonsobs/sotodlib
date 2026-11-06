@@ -92,12 +92,12 @@ def run(
         return obs_id,  None, (type(e).__name__, str(e), traceback.format_exc())
 
 
-def _get_stm_h5_path(output_dir, obs_id):
+def _get_stm_h5_name(obs_id):
     oid_spl = obs_id.split('_')
     unix = oid_spl[1][:5]
     tube_slot = oid_spl[2]
 
-    return os.path.join(output_dir, f'stm_cal_{tube_slot}_{unix}.h5')
+    return f'stm_cal_{tube_slot}_{unix}.h5'
 
 
 def _open_stm_manifest_dbs(output_dir, logger):
@@ -126,8 +126,8 @@ def _get_latest_stm_times(available, stm_rows):
     return latest
 
 
-def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite):
-    h5_path = _get_stm_h5_path(output_dir, obs_id)
+def _publish_self(dbs, obs_id, obs_type, stm_cal, detset, overwrite):
+    h5_name = _get_stm_h5_name(obs_id)
 
     for product in _PRODUCTS[obs_type]:
         if product == 'gain' and 'stm_gain' not in stm_cal._fields:
@@ -139,7 +139,7 @@ def _publish_self(dbs, output_dir, obs_id, obs_type, stm_cal, detset, overwrite)
             {'obs:obs_id': obs_id,
              'dets:detset': detset,
              'dataset': obs_id},
-            filename=h5_path,
+            filename=h5_name,
             replace=overwrite,
         )
 
@@ -222,7 +222,7 @@ def _build_update_start_times(latest_stm_times, cal_index):
 
 
 def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, update_start_times,
-                          max_days_before, output_dir):
+                          max_days_before):
 
     for row in obs_rows:
         obs_id = row['obs_id']
@@ -255,7 +255,7 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, update_start_tim
                         'dets:detset': detset,
                         'dataset': stm_obs_id,
                     },
-                    filename=_get_stm_h5_path(output_dir, stm_obs_id),
+                    filename=_get_stm_h5_name(stm_obs_id),
                     replace=True,
                     commit=False,
                 )
@@ -293,6 +293,7 @@ def _main(
     obs_type_tags: Optional[List[str]] = None,
     obs_id: Optional[List[str]] = None,
     min_ctime: Optional[float] = None,
+    max_ctime: Optional[float] = None,
     n_split: Optional[int] = 1,
     nprocs: Optional[int] = 1,
     max_retry: Optional[int] = 3,
@@ -323,6 +324,8 @@ def _main(
         Explicit list of obs-ids to process; if None all matching obs are used.
     min_ctime : float (default None)
         Minimum ctime of obs to process; if None all matching obs are used.
+    max_ctime : float (default None)
+        Maximum ctime (exclusive) of obs to process; if None all matching obs are used.
     n_split : int (default 1)
         Number of detector chunks per observation (for memory management).
     nprocs : int (default 1)
@@ -352,9 +355,11 @@ def _main(
 
     # Collect (obs_id, obs_type) pairs to process
     stm_pairs = []
-    obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
+    obs_type_query = '(' + ' or '.join(f'`{tag}`=1' for tag in obs_type_tags) + ')'
     if min_ctime is not None:
         obs_type_query += f' and start_time >= {min_ctime}'
+    if max_ctime is not None:
+        obs_type_query += f' and start_time < {max_ctime}'
     stm_rows = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
                                sort=['start_time'])
 
@@ -445,11 +450,11 @@ def _main(
             if stm_cal is not None:
                 try:
                     logger.info(f'Saving {oid}...')
-                    h5_path = _get_stm_h5_path(output_dir, oid)
+                    h5_path = os.path.join(output_dir, _get_stm_h5_name(oid))
                     stm_cal.save(h5_path, overwrite=overwrite,
                                  compression='gzip', group=oid)
                     for detset in detsets:
-                        _publish_self(dbs, output_dir, oid, obs_type, stm_cal, detset, overwrite)
+                        _publish_self(dbs, oid, obs_type, stm_cal, detset, overwrite)
                     job.jstate = 'done'
                     continue
                 except Exception as e:
@@ -497,7 +502,7 @@ def _main(
                    
                 _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
                                       cal_index, update_start_times,
-                                      max_days_before, output_dir)
+                                      max_days_before)
 
 
 def main(pipeline_config, stm_config):
