@@ -292,6 +292,7 @@ def _main(
     overwrite: Optional[bool] = False,
     obs_type_tags: Optional[List[str]] = None,
     obs_id: Optional[List[str]] = None,
+    min_ctime: Optional[float] = None,
     n_split: Optional[int] = 1,
     nprocs: Optional[int] = 1,
     max_retry: Optional[int] = 3,
@@ -320,6 +321,8 @@ def _main(
         Subset of ('gain', 'time_constant', 'gain_and_timeconstant') to process.
     obs_id : list of str (default None)
         Explicit list of obs-ids to process; if None all matching obs are used.
+    min_ctime : float (default None)
+        Minimum ctime of obs to process; if None all matching obs are used.
     n_split : int (default 1)
         Number of detector chunks per observation (for memory management).
     nprocs : int (default 1)
@@ -350,6 +353,8 @@ def _main(
     # Collect (obs_id, obs_type) pairs to process
     stm_pairs = []
     obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
+    if min_ctime is not None:
+        obs_type_query += f' and start_time >= {min_ctime}'
     stm_rows = ctx.obsdb.query(obs_type_query, tags=list(_OBS_TYPES),
                                sort=['start_time'])
 
