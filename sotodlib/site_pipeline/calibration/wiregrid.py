@@ -10,6 +10,7 @@ from scipy.interpolate import interp1d
 # SO specific
 from so3g.hk import load_range
 from sotodlib import core
+from sotodlib.hwp import get_hwp_freq
 from sotodlib.io import hkdb
 from sotodlib.io import hk_utils
 from sotodlib.site_pipeline.utils.logging import init_logger
@@ -451,7 +452,7 @@ def find_operation_range(tod, steps_thresholds=(10, 300), ls_margin=2000, is_res
     return idx_steps_start, idx_steps_stop[1:]
 
 # Wrap the data specified from the operation range of the wire grid
-def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
+def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop, demod_cutoff=None):
     """
     Interpret the Q_cal, U_cal data from the wrapped calibration data.
     This method is based on both of demodQ and demodU, which are calculated by the HWP demodulation process.
@@ -465,6 +466,10 @@ def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
             sample index of the start of each step
         idx_steps_stop : np.ndarray
             sample index of the stop of each step
+        demod_cutoff : float or None (default, None)
+            cutoff frequency of the low-pass filter used in the HWP demodulation in hertz.
+            If None, 0.95*f_HWP for the default of hwp.demod_tod.
+            This is used for estimating Qerr and Uerr.
 
     Returns
     -------
@@ -474,10 +479,14 @@ def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
             - wg.cal_data.theta_wire_rad is the average direction of wires in each step
             - wg.cal_data.theta_wire_std is the standard deviation of the direction of wires in each step
             - wg.cal_data.ts_step_mid is the time stamps in the middle of each step
-            - wg.cal_data.Q, wg.cal_data.U : Q (and U) signal by wires
-            - wg.cal_data.Qerr, wg.cal_data.Uerr : the standard deviations of Q (and U) signal
+            - wg.cal_data.Q, wg.cal_data.U : average Q (and U) signal of each step
+            - wg.cal_data.Qerr, wg.cal_data.Uerr : the errors of Q (and U) signal
     """
     _theta_wire = tod.wg.instrument.enc_rad
+    _fs = 1. / np.median(np.diff(tod.timestamps))
+    if demod_cutoff is None:
+        # default low-pass cut off used in demod_tod
+        demod_cutoff = 0.95 * get_hwp_freq(tod.timestamps, tod.hwp_angle)
 
     ts_step_mid = []
     theta_wire_av = []
@@ -486,6 +495,7 @@ def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
     step_U = []
     step_Qerr = []
     step_Uerr = []
+    step_neff = []  # number of effective independent samples in each step
     for _i, _ in enumerate(idx_steps_start):
         _idx_frame = np.arange(tod.samps.count)
         instep = np.where(idx_steps_start[_i] < _idx_frame, True, False)
@@ -497,13 +507,15 @@ def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
         step_U.append(np.average(tod.demodU, axis=1, weights=instep))
         step_Qerr.append(np.std(tod.demodQ[:, instep == True], axis=1))
         step_Uerr.append(np.std(tod.demodU[:, instep == True], axis=1))
+        _nsamp = np.count_nonzero(instep)
+        step_neff.append(2 * demod_cutoff * _nsamp / _fs)
     ts_step_mid = np.array(ts_step_mid)
     theta_wire_av = np.array(theta_wire_av)
     theta_wire_std = np.array(theta_wire_std)
     step_Q = np.array(step_Q)
     step_U = np.array(step_U)
-    step_Qerr = np.array(step_Qerr)
-    step_Uerr = np.array(step_Uerr)
+    step_Qerr = np.array(step_Qerr) / np.sqrt(step_neff)[:, None]
+    step_Uerr = np.array(step_Uerr) / np.sqrt(step_neff)[:, None]
 
     # wrap the data for each step
     if 'cal_data' in tod.wg._fields.keys():
@@ -768,11 +780,13 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
         _det_angle.append(
             (0.5*(_atan_sig[:]) - _cd.theta_wire_rad[_i,np.newaxis]%(2*np.pi))
         )
+        # uniform error Qerr = Uerr, cx0_err = cy0_err is assumed
+        # error of theta_wire_rad is neglected
         _det_angle_err.append(
             np.sqrt(
                 (_cd.Uerr.T[:,_i]**2 + _cd.Qerr.T[:,_i]**2) * 0.5
-                + (_cfr.cy0_err[:]**2 + _cfr.cx0_err[:]**2) * 0.5 / _cfr.cr[:]
-            )
+                + (_cfr.cy0_err[:]**2 + _cfr.cx0_err[:]**2) * 0.5
+            ) / (2 * _cfr.cr[:])
         )
 
     _det_angle = np.unwrap(np.array(_det_angle).T, period=np.pi)
