@@ -55,6 +55,7 @@ default_config = {
     "min_hits": 3,
     "min_r2": .3,
     "pad_empty": True,
+    "parameters": {},
 }
 
 
@@ -586,15 +587,32 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         system.set_pad(cfg.pad_epochs, True)
 
     # Save our per-obs results
+    # TODO: Setup databases!
     system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
+
+    # Setup fit params
+    params = system.parameters.copy()
+    bounds = [(-np.inf, np.inf)]*len(params)
+    for name, par in cfg.parameters:
+        if name not in system.parameter_names:
+            logger.warning("Unknown paramter %s", name)
+            continue
+        idx = system.parameter_names.index(name)
+        params[idx] = par.get("init", params[idx])
+        if par.get("static", False):
+            bounds[idx] = (params[idx], params[idx])
+            continue
+        bounds[idx] = tuple(par.get("bounds", bounds[idx])[:2])
+    system.update_parameters(params)
 
     # TODO: Fit for pointing model and focal planes
     system.set_static(False)
 
     # Save
     # TODO: Setup databases!
+    system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
 

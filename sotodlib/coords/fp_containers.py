@@ -1911,10 +1911,10 @@ class PointingSystem:
                         meas.static = static
 
     @property
-    def parameters(self) -> list:
-        return [ self.pointing_models[par_map[0]].parameters[par.split("(")[0]] for par, par_map in zip(self.parameter_names, self.parameter_map) ]
+    def parameters(self) -> Float[np.ndarray, "npar"]:
+        return np.array([self.pointing_models[par_map[0]].parameters[par.split("(")[0]] for par, par_map in zip(self.parameter_names, self.parameter_map)])
 
-    def update_parameters(self, new_pars: list):
+    def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
         for val, par, par_map in zip(
             new_pars, self.parameter_names, self.parameter_map
         ):
