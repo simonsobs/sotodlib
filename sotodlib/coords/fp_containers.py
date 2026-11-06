@@ -90,15 +90,15 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str):
+def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str, transform: Transform):
     to_ret = deepcopy(self.template)
     to_ret.xyz = mt.apply_transform(
-        self.template.xyz, self.transform.affine, self.transform.shift
+        self.template.xyz, transform.affine, transform.shift
     )
     to_ret.center = None
     if self.template.center is not None:
         to_ret.center = mt.apply_transform(
-            np.atleast_2d(self.template.center), self.transform.affine, self.transform.shift
+            np.atleast_2d(self.template.center), transform.affine, transform.shift
         ).ravel()
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
@@ -186,29 +186,35 @@ class PointingModel:
         self,
         det_off: DetectorOffsets,
         det_enc: DetectorOffsets,
+        weights: Float[np.ndarray, "ndet"],
         fake_gamma: bool,
+        tol: float = 1e-6,
+        max_iter: int = 5,
     ) -> DetectorOffsets:
         """
-        Apply the pointing model correction to a set of detector offsets.
-
+        Apply the inverse pointing model correction to a set of detector offsets.
+    
         The correction is computed from the supplied encoder values using
         `apply_pointing_model` and then propagated to each detector through
         quaternion rotations. The returned detector offsets remain in the
-        `xieta` coordinate system but are corrected for the boresight pointing
-        model specified by this instance.
-
+        `xieta` coordinate system but have the pointing model corrections
+        removed.
+    
+        Focal plane distortions are removed iteratively by applying the
+        forward pointing model, estimating the resulting distortion, and
+        subtracting it from the detector offsets until convergence.
+    
         If the pointing model contains no parameters, the input detector
         offsets are returned unchanged.
-
+    
         When `force_zero_roll=True`, the encoder roll angle is ignored during
         the correction and a zero-roll boresight solution is assumed.
-
+    
         Parameters
         ----------
         det_off : DetectorOffsets
             Detector offsets in the `xieta` coordinate system. These are the
-            detector positions to which the pointing correction will be
-            applied.
+            detector positions from which the pointing correction will be removed.
         det_enc : DetectorOffsets
             Telescope encoder values in the `horizon` coordinate system.
             These provide the boresight azimuth, elevation, and roll used to
@@ -217,41 +223,92 @@ class PointingModel:
             If True, ignore detector polarization angles and propagate only
             detector position (`xi`, `eta`). If False, propagate the full
             (`xi`, `eta`, `gamma`) coordinate set.
-
+        tol : float, default: 1e-6
+            RMS convergence tolerance for the iterative distortion removal, in radians.
+        max_iter : int, default: 5
+            Maximum number of iterations for the distortion removal.
+    
         Returns
         -------
         det_pm : DetectorOffsets
-            A copy of `det_off` with the pointing-model correction applied.
+            A copy of `det_off` with the pointing-model correction removed.
             The returned object has the same metadata and detector ordering
             as the input but contains corrected detector coordinates.
-
+    
         Raises
         ------
         ValueError
             If `det_off` and `det_enc` do not contain the same number of
             detectors.
+        RuntimeError
+            If the iterative distortion removal does not converge.
         """
         if len(self.parameters) == 0:
             return det_off
+    
         if len(det_enc.xyz) != len(det_off.xyz):
-            raise ValueError(
-                "Detector offsets and encoder values must have same shape!"
-            )
-        bs = apply_pointing_model(None, self.parameters, det_off.ancil, False)
+            raise ValueError( "Detector offsets and encoder values must have same shape!")
+   
+        # Start with the input detector coordinates
+        msk = np.isfinite(weights) * (weights > 0)
+        estimate = det_off.xyz.copy()[msk]
+        fp_target = det_off.xyz[msk]
         if fake_gamma:
-            q_fp = quat.rotation_xieta(det_off.xi, det_off.eta)
-        else:
-            q_fp = quat.rotation_xieta(det_off.xi, det_off.eta, det_off.gamma)  # type: ignore
+            estimate = estimate[:, :2]
         to_ret = deepcopy(det_off)
-        xi, eta, gamma = quat.decompose_xieta(
-            ~quat.euler(2, bs.roll)
-            * ~quat.rotation_lonlat(-1 * bs.az, bs.el)  # type: ignore
-            * quat.rotation_lonlat(-1 * det_enc.az, det_enc.el)
-            * quat.euler(2, (not self.force_zero_roll) * det_enc.roll)
-            * q_fp
-        )
-        to_ret.xyz = np.column_stack((xi, eta, gamma))
-        return to_ret
+        tmp = deepcopy(det_off)
+        tmp.xyz = tmp.xyz[msk]
+        fp = tmp.fp
+        det_enc_msk = deepcopy(det_enc)
+        det_enc_msk.xyz = det_enc_msk.xyz[msk]
+        ancil = det_enc_msk.ancil
+
+        err = np.inf
+        for _ in range(max_iter):
+            fp.xi =  estimate[:, 0]
+            fp.eta =  estimate[:, 1]
+            if fake_gamma:
+                q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1])
+            else:
+                q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1], estimate[:, 2]) # type: ignore[arg-type]
+                fp.gamma =  estimate[:, 2]
+
+            # Apply the pointing model
+            bs, fp_corrected = apply_pointing_model( None, self.parameters, ancil, fp)
+            bs = cast(AxisManager, bs)
+            xi, eta, gamma = quat.decompose_xieta(
+                ~quat.euler(2, bs.roll)
+                * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
+                * quat.rotation_lonlat(-1 * det_enc_msk.az, det_enc_msk.el)
+                * quat.euler(
+                    2, (not self.force_zero_roll) * det_enc_msk.roll
+                )
+                * q_fp
+            )
+
+            if fp_corrected is None:
+                to_ret.xyz = np.column_stack((xi, eta, gamma))
+                return to_ret
+
+            # Estimate and remove focalplane distortion
+            if fake_gamma:
+                distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta))
+                resid = np.column_stack((fp_corrected.xi - fp_target[:, 0], fp_corrected.eta - fp_target[:, 1]))
+            else:
+                distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta, fp_corrected.gamma - fp.gamma))
+                resid = np.column_stack((fp_corrected.xi - fp_target[:, 0], fp_corrected.eta - fp_target[:, 1], fp_corrected.gamma - fp_target[:, 2]))
+            err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1)**2))
+
+            if err < tol:
+                to_ret = deepcopy(det_off)
+                to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
+                return to_ret
+
+            # Update estimate of the undistorted fp
+            estimate -= distortion
+
+        raise RuntimeError(f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad).")
+
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -301,7 +358,7 @@ class PointingModel:
             epoch=cast(str, group.attrs["epoch"]),
             parameters=parameters,
             force_zero_roll=cast(bool, group.attrs["force_zero_roll"]),
-            pad=cast(bool, group.attrs["pad"]),
+            pad=cast(bool, group.attrs.get("pad", False)),
         )
 
 
@@ -516,6 +573,14 @@ class DetectorOffsets:
         ancil.wrap("roll_enc", np.rad2deg(self.roll))
         ancil.wrap("boresight_enc", -1 * np.rad2deg(self.roll))  # for SATs
         return ancil
+
+    @cached_property
+    def fp(self):
+        fp = AxisManager(IndexAxis("samps", len(self.xyz)))
+        fp.wrap("xi", self.xi)
+        fp.wrap("eta", self.eta)
+        fp.wrap("gamma", self.gamma)
+        return fp
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """Save detector offsets to an HDF5 ResultSet.
@@ -886,7 +951,7 @@ class FocalPlane:
 
     @property
     def _data_pm_dyn(self) -> DetectorOffsets:
-        to_ret = self.pointing_model.apply_det(self.data, self.enc, self.fake_gamma)
+        to_ret = self.pointing_model.apply_det(self.data, self.enc, self.weights, self.fake_gamma)
         if self.autofreeze:
             self._data_pm_stat = to_ret
         return to_ret
@@ -897,15 +962,15 @@ class FocalPlane:
 
     @property
     def _transformed_dyn(self) -> DetectorOffsets:
-        return _transformed(self, "_transformed_stat")
+        return _transformed(self, "_transformed_stat", self.transform)
 
     @property
     def _pm_transform_dyn(self) -> Transform:
-        return _get_aff(self, "pm_data", "_pm_transform_stat")
+        return _get_aff(self, "data_pm", "_pm_transform_stat")
 
     @property
     def _pm_transformed_dyn(self) -> DetectorOffsets:
-        return _transformed(self, "_pm_transformed_stat")
+        return _transformed(self, "_pm_transformed_stat", self.pm_transform)
 
     @property
     def resid(self):
@@ -1180,7 +1245,7 @@ class FocalPlaneCollection:
 
     @property
     def _transformed_dyn(self) -> DetectorOffsets:
-        return _transformed(self, "_transformed_stat")
+        return _transformed(self, "_transformed_stat", self.transform)
 
     @property
     def resid(self):
@@ -1836,15 +1901,10 @@ class PointingSystem:
                         meas.static = static
 
     @property
-    def parameters(self) -> Float[np.ndarray, "npar"]:
-        return np.array(
-            [
-                self.pointing_models[par_map[0]].parameters[par.split("(")[0]]
-                for par, par_map in zip(self.parameter_names, self.parameter_map)
-            ]
-        )
+    def parameters(self) -> list:
+        return [ self.pointing_models[par_map[0]].parameters[par.split("(")[0]] for par, par_map in zip(self.parameter_names, self.parameter_map) ]
 
-    def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
+    def update_parameters(self, new_pars: list):
         for val, par, par_map in zip(
             new_pars, self.parameter_names, self.parameter_map
         ):
