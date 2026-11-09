@@ -63,6 +63,7 @@ default_config = {
     "outlier_sigma": 3,
     "mcmc_steps": 0,
     "nwalkers": 32,
+    "save_every": 10,
 }
 
 
@@ -381,7 +382,7 @@ def _load_obs(aman, obs_id, array, ctx, system, cfg, job):
     return loaded, rx, fp
 
 
-def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
+def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile):
     job = None
     njobs = len(open_jobs)
     logger.info(
@@ -469,6 +470,10 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
         # Add to system
         fp.focal_planes += [meas]
         job.jstate = cast(sqy.Column[str], jobdb.JState.done)
+
+        if i > 0 and i % cfg.save_every == 10:
+            with h5py.File(outfile, "a") as f:
+                system.save(f, "/", True)
     logger.info("Done with per-obs mode!")
 
 
@@ -597,7 +602,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
 
     # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
-    _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir)
+    _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
 
     # Pad empty if needed
     if cfg.pad_empty:
