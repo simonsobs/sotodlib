@@ -14,15 +14,26 @@ from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property, reduce
-from typing import Any, Iterable, Literal, Optional, Self, cast, overload, ClassVar, TypeVar, Generic
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    Iterable,
+    Literal,
+    Optional,
+    Self,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import h5py
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
 from jaxtyping import Float, Integer, Shaped
-from scipy.optimize import minimize
 from scipy.cluster import vq
+from scipy.optimize import minimize
 from so3g.proj import quat
 from sotodlib.coords.pointing_model import apply_pointing_model, param_defaults
 from sotodlib.core import AxisManager, IndexAxis, metadata
@@ -89,7 +100,9 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str, transform: Transform):
+def _transformed(
+    self: FocalPlane | FocalPlaneCollection, attr_name: str, transform: Transform
+):
     to_ret = deepcopy(self.template)
     to_ret.xyz = mt.apply_transform(
         self.template.xyz, transform.affine, transform.shift
@@ -140,12 +153,12 @@ class StaticOrCached(Generic[T]):
         self.attr_name = attr_name
 
     @overload
-    def __get__( self, obj: None, owner: type) -> "StaticOrCached[T]": ...
+    def __get__(self, obj: None, owner: type) -> "StaticOrCached[T]": ...
 
     @overload
-    def __get__( self, obj: Any, owner: type | None = None) -> T: ...
+    def __get__(self, obj: Any, owner: type | None = None) -> T: ...
 
-    def __get__( self, obj: Any, owner: type | None = None) -> T | "StaticOrCached[T]":
+    def __get__(self, obj: Any, owner: type | None = None) -> T | "StaticOrCached[T]":
         if obj is None:
             return self
 
@@ -193,23 +206,23 @@ class PointingModel:
     ) -> DetectorOffsets:
         """
         Apply the inverse pointing model correction to a set of detector offsets.
-    
+
         The correction is computed from the supplied encoder values using
         `apply_pointing_model` and then propagated to each detector through
         quaternion rotations. The returned detector offsets remain in the
         `xieta` coordinate system but have the pointing model corrections
         removed.
-    
+
         Focal plane distortions are removed iteratively by applying the
         forward pointing model, estimating the resulting distortion, and
         subtracting it from the detector offsets until convergence.
-    
+
         If the pointing model contains no parameters, the input detector
         offsets are returned unchanged.
-    
+
         When `force_zero_roll=True`, the encoder roll angle is ignored during
         the correction and a zero-roll boresight solution is assumed.
-    
+
         Parameters
         ----------
         det_off : DetectorOffsets
@@ -230,14 +243,14 @@ class PointingModel:
             RMS convergence tolerance for the iterative distortion removal, in radians.
         max_iter : int, default: 5
             Maximum number of iterations for the distortion removal.
-    
+
         Returns
         -------
         det_pm : DetectorOffsets
             A copy of `det_off` with the pointing-model correction removed.
             The returned object has the same metadata and detector ordering
             as the input but contains corrected detector coordinates.
-    
+
         Raises
         ------
         ValueError
@@ -248,10 +261,12 @@ class PointingModel:
         """
         if len(self.parameters) == 0:
             return det_off
-    
+
         if len(det_enc.xyz) != len(det_off.xyz):
-            raise ValueError( "Detector offsets and encoder values must have same shape!")
-   
+            raise ValueError(
+                "Detector offsets and encoder values must have same shape!"
+            )
+
         # Start with the input detector coordinates
         msk = np.isfinite(weights) * (weights > 0)
         if not np.any(msk):
@@ -267,24 +282,22 @@ class PointingModel:
 
         err = np.inf
         for _ in range(max_iter):
-            fp.xi =  estimate[:, 0]
-            fp.eta =  estimate[:, 1]
+            fp.xi = estimate[:, 0]
+            fp.eta = estimate[:, 1]
             if fake_gamma:
                 q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1])
             else:
-                q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1], estimate[:, 2]) # type: ignore[arg-type]
-                fp.gamma =  estimate[:, 2]
+                q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1], estimate[:, 2])  # type: ignore[arg-type]
+                fp.gamma = estimate[:, 2]
 
             # Apply the pointing model
-            bs, fp_corrected = apply_pointing_model( None, self.parameters, ancil, fp)
+            bs, fp_corrected = apply_pointing_model(None, self.parameters, ancil, fp)
             bs = cast(AxisManager, bs)
             xi, eta, gamma = quat.decompose_xieta(
                 ~quat.euler(2, bs.roll)
                 * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
                 * quat.rotation_lonlat(-1 * det_enc_msk.az, det_enc_msk.el)
-                * quat.euler(
-                    2, (not self.force_zero_roll) * det_enc_msk.roll
-                )
+                * quat.euler(2, (not self.force_zero_roll) * det_enc_msk.roll)
                 * q_fp
             )
 
@@ -294,12 +307,28 @@ class PointingModel:
 
             # Estimate and remove focalplane distortion
             if fake_gamma:
-                distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta))
-                resid = np.column_stack((fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta))
+                distortion = np.column_stack(
+                    (fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta)
+                )
+                resid = np.column_stack(
+                    (fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta)
+                )
             else:
-                distortion = np.column_stack((fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta, fp_corrected.gamma - fp.gamma))
-                resid = np.column_stack((fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta, fp_corrected.gamma - fp_target.gamma))
-            err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1)**2))
+                distortion = np.column_stack(
+                    (
+                        fp_corrected.xi - fp.xi,
+                        fp_corrected.eta - fp.eta,
+                        fp_corrected.gamma - fp.gamma,
+                    )
+                )
+                resid = np.column_stack(
+                    (
+                        fp_corrected.xi - fp_target.xi,
+                        fp_corrected.eta - fp_target.eta,
+                        fp_corrected.gamma - fp_target.gamma,
+                    )
+                )
+            err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1) ** 2))
 
             if err < tol:
                 to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
@@ -308,8 +337,9 @@ class PointingModel:
             # Update estimate of the undistorted fp
             estimate -= distortion
 
-        raise RuntimeError(f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad).")
-
+        raise RuntimeError(
+            f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
+        )
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -326,7 +356,12 @@ class PointingModel:
         """
         group = _create_group(f, path, overwrite)
         _add_attrs(
-                group, {"epoch": self.epoch, "force_zero_roll": self.force_zero_roll, "pad": self.pad}
+            group,
+            {
+                "epoch": self.epoch,
+                "force_zero_roll": self.force_zero_roll,
+                "pad": self.pad,
+            },
         )
 
         parameters = AxisManager()
@@ -761,16 +796,22 @@ class FocalPlane:
     enc: DetectorOffsets
     weights: Float[np.ndarray, "ndet"]
     parent: FocalPlaneCollection
-    pointing_model : PointingModel
+    pointing_model: PointingModel
     static: bool
     autofreeze: bool
     fake_gamma: bool
     data_pm: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data_pm")
     transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
-    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
+    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
+        "transformed"
+    )
     pm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("pm_transform")
-    pm_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("pm_transformed")
-    fpc_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("fpc_transformed")
+    pm_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
+        "pm_transformed"
+    )
+    fpc_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
+        "fpc_transformed"
+    )
     _data_pm_stat: DetectorOffsets = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
@@ -797,7 +838,7 @@ class FocalPlane:
         meas_id: str,
         aman: AxisManager,
         parent: FocalPlaneCollection,
-        pointing_model : PointingModel,
+        pointing_model: PointingModel,
         autofreeze: bool = False,
         fake_gamma: bool = True,
         weight_factor: float = 1000.0,
@@ -842,7 +883,9 @@ class FocalPlane:
         template = parent.template
         aman_det_ids = np.asarray(aman.det_info.det_id)
         template_det_ids = np.asarray(template.det_id)
-        _, aman_idx, template_idx = np.intersect1d( aman_det_ids, template_det_ids, return_indices=True)
+        _, aman_idx, template_idx = np.intersect1d(
+            aman_det_ids, template_det_ids, return_indices=True
+        )
         order = np.argsort(template_idx)
         aman_idx = aman_idx[order]
         template_idx = template_idx[order]
@@ -897,7 +940,9 @@ class FocalPlane:
         cent = template.center
         if cent is None:
             cent = np.nanmean(template.xyz, axis=0)
-        rad_thresh = 1.1 * np.nanmax( np.linalg.norm( template.xyz[:, :2] - cent[:2], axis=1))
+        rad_thresh = 1.1 * np.nanmax(
+            np.linalg.norm(template.xyz[:, :2] - cent[:2], axis=1)
+        )
         if dist < rad_thresh:
             cluster = c0 + c1
         elif np.sum(c0) >= np.sum(c1):
@@ -968,7 +1013,9 @@ class FocalPlane:
 
     @property
     def _data_pm_dyn(self) -> DetectorOffsets:
-        to_ret = self.pointing_model.apply_det(self.data, self.enc, self.weights, self.fake_gamma)
+        to_ret = self.pointing_model.apply_det(
+            self.data, self.enc, self.weights, self.fake_gamma
+        )
         if self.autofreeze:
             self._data_pm_stat = to_ret
         return to_ret
@@ -1065,9 +1112,13 @@ class FocalPlane:
         if "_pm_transform_stat" in self.__dict__:
             self._pm_transform_stat.save(f, f"{path}/pm_transform", overwrite=overwrite)
         if "_pm_transformed_stat" in self.__dict__:
-            self._pm_transformed_stat.save( f, f"{path}/pm_transformed", overwrite=overwrite)
+            self._pm_transformed_stat.save(
+                f, f"{path}/pm_transformed", overwrite=overwrite
+            )
         if "_fpc_transformed_stat" in self.__dict__:
-            self._fpc_transformed_stat.save( f, f"{path}/fpc_transformed", overwrite=overwrite)
+            self._fpc_transformed_stat.save(
+                f, f"{path}/fpc_transformed", overwrite=overwrite
+            )
 
     @classmethod
     def load(
@@ -1131,7 +1182,9 @@ class FocalPlane:
         if "pm_transformed" in group:
             fp._pm_transformed_stat = DetectorOffsets.load(f, f"{path}/pm_transformed")
         if "fpc_transformed" in group:
-            fp._fpc_transformed_stat = DetectorOffsets.load(f, f"{path}/fpc_transformed")
+            fp._fpc_transformed_stat = DetectorOffsets.load(
+                f, f"{path}/fpc_transformed"
+            )
 
         return fp
 
@@ -1213,10 +1266,16 @@ class FocalPlaneCollection:
     pad: bool
     fake_gamma: bool
     data: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data")
-    weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached("weights")
-    scatter: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached("scatter")
+    weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached(
+        "weights"
+    )
+    scatter: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached(
+        "scatter"
+    )
     transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
-    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
+    transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
+        "transformed"
+    )
     _data_stat: DetectorOffsets = field(init=False)
     _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
     _scatter_stat: Float[np.ndarray, "ndet"] = field(init=False)
@@ -1267,10 +1326,16 @@ class FocalPlaneCollection:
 
     @property
     def _scatter_dyn(self) -> Float[np.ndarray, "ndet"]:
-        dat_full = np.array( [fp.data_pm.xyz for fp in self.focal_planes])
-        weights_full = np.array( [fp.weights for fp in self.focal_planes])
+        dat_full = np.array([fp.data_pm.xyz for fp in self.focal_planes])
+        weights_full = np.array([fp.weights for fp in self.focal_planes])
         mean = self.data.xyz
-        var = np.nansum( weights_full[..., None] * (dat_full - mean[None, ...])**2, axis=0,) / self.weights[..., None]
+        var = (
+            np.nansum(
+                weights_full[..., None] * (dat_full - mean[None, ...]) ** 2,
+                axis=0,
+            )
+            / self.weights[..., None]
+        )
         std = np.sqrt(var)
         to_ret = np.sqrt(np.nanmean(std**2, axis=0))
         return to_ret
@@ -1703,7 +1768,7 @@ class Receiver:
         corresponding static fields.
     allpad : bool
         Flag indicating whether all optics tube are padded
-        and should therefore be excluded from fitting. 
+        and should therefore be excluded from fitting.
     cm_transform : Transform
         Receiver-level common-mode transform derived from the common-mode
         transforms of all optics tubes containing valid data.
@@ -1925,7 +1990,7 @@ class PointingSystem:
         # Force consistancy
         self.update_parameters(self.parameters)
 
-    def set_static(self, static : bool):
+    def set_static(self, static: bool):
         """
         Set `static` for all relevent childen.
 
@@ -1945,7 +2010,12 @@ class PointingSystem:
 
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
-        return np.array([self.pointing_models[par_map[0]].parameters[par.split("(")[0]] for par, par_map in zip(self.parameter_names, self.parameter_map)])
+        return np.array(
+            [
+                self.pointing_models[par_map[0]].parameters[par.split("(")[0]]
+                for par, par_map in zip(self.parameter_names, self.parameter_map)
+            ]
+        )
 
     def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
         for val, par, par_map in zip(
@@ -1963,7 +2033,9 @@ class PointingSystem:
                 for fp in ot.focal_planes:
                     if fp.pad:
                         continue
-                    chisq += np.nansum(((fp.weights * fp.resid) ** 2)*fp.scatter).item()
+                    chisq += np.nansum(
+                        ((fp.weights * fp.resid) ** 2) * fp.scatter
+                    ).item()
         return chisq
 
     def chisq_cm_prior(
@@ -2002,7 +2074,7 @@ class PointingSystem:
         return self.chisq_cm_prior(**cm_priors)
 
     def log_prob(self, params, cm_priors):
-        return -.5*self.objective(params, cm_priors)
+        return -0.5 * self.objective(params, cm_priors)
 
     @overload
     def search(
@@ -2242,7 +2314,11 @@ class PointingSystem:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
             pars.update(cfg.pm_defaults_overrides[pm_ver])
-            par_names += [name for name, val in pars.items() if isinstance(val, (int, float, np.number))]
+            par_names += [
+                name
+                for name, val in pars.items()
+                if isinstance(val, (int, float, np.number))
+            ]
             pars["version"] = pm_ver
             pm.parameters = pars
         par_names = np.unique(par_names).tolist()

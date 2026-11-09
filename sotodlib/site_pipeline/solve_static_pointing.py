@@ -14,6 +14,7 @@ from enum import Enum
 from functools import partial
 from typing import cast
 
+import emcee
 import git
 import h5py
 import numpy as np
@@ -21,17 +22,16 @@ import pyinstrument
 import sotodlib.coords.fp_containers as fpc
 import sotodlib.coords.fp_plots as fpp
 import sotodlib.utils.jdb_utils as ju
+import sqlalchemy as sqy
 import yaml
+from scipy.optimize import minimize
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
 from sotodlib.io.metadata import read_dataset
+from sotodlib.site_pipeline import jobdb
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.utils import epochs
 from sotodlib.utils.config import load_config_namespace
-from sotodlib.site_pipeline import jobdb
-import sqlalchemy as sqy
-from scipy.optimize import minimize
-import emcee
 
 logger = init_logger(__name__, "solve_static_pointing: ")
 default_config = {
@@ -55,11 +55,11 @@ default_config = {
     "max_dscale": 0.1,
     "max_shear": 0.05,
     "min_hits": 3,
-    "min_r2": .3,
+    "min_r2": 0.3,
     "pad_empty": True,
     "parameters": {},
     "n_rounds": 3,
-    "cm_priors": {"sft_tol":1e-5, "rot_tol":1e4, "scl_tol":.1, "shr_tol":.01},
+    "cm_priors": {"sft_tol": 1e-5, "rot_tol": 1e4, "scl_tol": 0.1, "shr_tol": 0.01},
     "outlier_sigma": 3,
     "mcmc_steps": 0,
     "nwalkers": 32,
@@ -111,7 +111,7 @@ def _get_tags_po(info):
         "obs_id": obs["obs_id"],
         "ot": obs["tube_slot"],
         "timestamp": obs["timestamp"],
-        "array": array, 
+        "array": array,
         "wafer_slot": wafer_slot,
         "errcode": 0,
         "message": "",
@@ -358,7 +358,7 @@ def _load_obs(aman, obs_id, array, ctx, system, cfg, job):
         raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
     # Cuts
     if "hits" in aman.focal_plane:
-        aman.restrict( "dets", aman.focal_plane.hits >= cfg.min_hits )
+        aman.restrict("dets", aman.focal_plane.hits >= cfg.min_hits)
     if "R2" in aman.focal_plane:
         aman.restrict("dets", aman.focal_plane.R2 > cfg.min_r2)
     dfrac = aman.dets.count / len(fp.template.xyz)
@@ -366,7 +366,16 @@ def _load_obs(aman, obs_id, array, ctx, system, cfg, job):
         msg = f"Only {100*np.round(dfrac, 2)}% of dets uncut"
         ju.fail(job, ErrCode.MIN_DETS, msg, logger)
         return None, rx, fp
-    loaded = fpc.FocalPlane.from_aman( fp.name, obs["obs_id"], aman, fp, pm, fp.autofreeze, fp.fake_gamma, cfg.weight_factor)
+    loaded = fpc.FocalPlane.from_aman(
+        fp.name,
+        obs["obs_id"],
+        aman,
+        fp,
+        pm,
+        fp.autofreeze,
+        fp.fake_gamma,
+        cfg.weight_factor,
+    )
 
     # Not adding to the system so that we can leave ourselves open to parallelism
     return loaded, rx, fp
@@ -443,7 +452,9 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
             continue
 
         # Plot
-        pdir = os.path.join(plot_dir, rx.epoch, "per-obs", str(job.tags["timestamp"])[:5])
+        pdir = os.path.join(
+            plot_dir, rx.epoch, "per-obs", str(job.tags["timestamp"])[:5]
+        )
         os.makedirs(pdir, exist_ok=True)
         try:
             fpp.plot_ufm(meas, pdir)
@@ -579,7 +590,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
     _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir)
 
-    # Pad empty if needed 
+    # Pad empty if needed
     if cfg.pad_empty:
         system.set_pad(cfg.pad_epochs, True)
 
@@ -591,7 +602,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
     # Setup fit params
     params = system.parameters.copy()
-    bounds = [(-np.inf, np.inf)]*len(params)
+    bounds = [(-np.inf, np.inf)] * len(params)
     for name, par in cfg.parameters:
         if name not in system.parameter_names:
             logger.warning("Unknown paramter %s", name)
@@ -607,8 +618,14 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Fit for pointing model and focal planes
     system.set_static(False)
     for i in range(cfg.n_rounds):
-        logger.info("Starting fit round %d", i+1)
-        res = minimize(system.objective, system.parameters, bounds=bounds, args=(cfg.cm_priors,), method="Nelder-Mead")
+        logger.info("Starting fit round %d", i + 1)
+        res = minimize(
+            system.objective,
+            system.parameters,
+            bounds=bounds,
+            args=(cfg.cm_priors,),
+            method="Nelder-Mead",
+        )
         system.update_parameters(res.x)
 
         # Cut outliers
@@ -619,10 +636,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                     for meas in fp.focal_planes:
                         wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
                         if meas.fake_gamma:
-                            err = np.linalg.norm(meas.fpc_resid[:, :2], axis=1) 
+                            err = np.linalg.norm(meas.fpc_resid[:, :2], axis=1)
                         else:
-                            err = np.linalg.norm(meas.fpc_resid, axis=1) 
-                        mrmsk = err > cfg.outlier_sigma*np.std(err[wmsk])
+                            err = np.linalg.norm(meas.fpc_resid, axis=1)
+                        mrmsk = err > cfg.outlier_sigma * np.std(err[wmsk])
                         meas.weights[mrmsk] = 0
                         tot_cut += np.sum(mrmsk[wmsk])
         if tot_cut == 0:
@@ -631,9 +648,13 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
         ndim = len(system.parameters)
-        sampler = emcee.EnsembleSampler(cfg.nwalkers, ndim, system.log_prob, args=(cfg.cm_priors,))
+        sampler = emcee.EnsembleSampler(
+            cfg.nwalkers, ndim, system.log_prob, args=(cfg.cm_priors,)
+        )
         sampler.run_mcmc(system.parameters, cfg.mcmc_steps)
-        samples = np.array(sampler.get_chain(discard=int(.1*cfg.mcmc_steps), flat=True))
+        samples = np.array(
+            sampler.get_chain(discard=int(0.1 * cfg.mcmc_steps), flat=True)
+        )
         system.update_parameters(np.median(samples, axis=0))
         lower = np.percentile(samples, 16, axis=0)
         upper = np.percentile(samples, 84, axis=0)

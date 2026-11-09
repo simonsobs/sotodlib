@@ -192,7 +192,7 @@ def plot_ufm(
     focal_plane: FocalPlane | FocalPlaneCollection,
     output_dir: str,
     figsize: tuple[float, float] = (12, 6),
-    with_pm: bool = True
+    with_pm: bool = True,
 ):
     """
     Plot the UFM focal-plane fit and residual distribution.
@@ -246,7 +246,14 @@ def plot_ufm(
     ax1.legend()
 
     # Plot histogram of residuals.
-    dist = 3600 * np.linalg.norm(np.rad2deg( (transformed.xyz - data.xyz)[np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2]), axis=1)
+    dist = 3600 * np.linalg.norm(
+        np.rad2deg(
+            (transformed.xyz - data.xyz)[
+                np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2
+            ]
+        ),
+        axis=1,
+    )
     if len(dist) > 0:
         dist_thresh = np.percentile(dist, 97)
         bins = max(int(len(dist) / 20), 10)
