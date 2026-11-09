@@ -772,7 +772,7 @@ def main(config_path: str):
                 logger.info(f"{p}: {test_params[p].value}")
             #logger.info(test_params)
             full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
-            logger.info(f"for epoch {epoch["name"]}")
+            logger.info(f"for epoch {epoch['name']}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
             logger.info(f"ufm_rms: {full_aman.per_ufm_stats.rms:.3f} (arcmin) ")
