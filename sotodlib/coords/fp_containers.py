@@ -2034,7 +2034,7 @@ class PointingSystem:
                     if fp.pad:
                         continue
                     chisq += np.nansum(
-                        ((fp.weights * fp.resid) ** 2) * fp.scatter
+                        ((fp.weights * fp.resid) ** 2) * (1 + fp.scatter)
                     ).item()
         return chisq
 
