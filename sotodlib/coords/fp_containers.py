@@ -6,7 +6,6 @@ calculations or as static attributes for loading saved results.
 """
 
 # TODO: Reprs
-# TODO: Implement roll dep stuff, need to be careful about the correct direction. Should be REMOVING it from the data I think
 
 from __future__ import annotations
 
@@ -1215,10 +1214,12 @@ class FocalPlaneCollection:
     fake_gamma: bool
     data: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data")
     weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached("weights")
+    scatter: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached("scatter")
     transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
     transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
     _data_stat: DetectorOffsets = field(init=False)
     _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
+    _scatter_stat: Float[np.ndarray, "ndet"] = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
 
@@ -1239,6 +1240,7 @@ class FocalPlaneCollection:
         """
         self._data_stat = self._data_dyn
         self._weights_stat = self._weights_dyn
+        self._scatter_stat = self._scatter_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
         self.static = static
@@ -1261,6 +1263,16 @@ class FocalPlaneCollection:
         to_ret = np.nansum(weights_full, axis=-1)
         if self.autofreeze:
             self._weights_stat = to_ret
+        return to_ret
+
+    @property
+    def _scatter_dyn(self) -> Float[np.ndarray, "ndet"]:
+        dat_full = np.array( [fp.data_pm.xyz for fp in self.focal_planes])
+        weights_full = np.array( [fp.weights for fp in self.focal_planes])
+        mean = self.data.xyz
+        var = np.nansum( weights_full[..., None] * (dat_full - mean[None, ...])**2, axis=0,) / self.weights[..., None]
+        std = np.sqrt(var)
+        to_ret = np.sqrt(np.nanmean(std**2, axis=0))
         return to_ret
 
     @property
@@ -1331,6 +1343,13 @@ class FocalPlaneCollection:
                 else:
                     raise ValueError(f"{path}/weights already exists")
             f.create_dataset(f"{path}/weights", data=self._weights_stat)
+        if "_scatter_stat" in self.__dict__:
+            if f"{path}/scatter" in f:
+                if overwrite:
+                    del f[f"{path}/scatter"]
+                else:
+                    raise ValueError(f"{path}/scatter already exists")
+            f.create_dataset(f"{path}/scatter", data=self._scatter_stat)
         if "_transform_stat" in self.__dict__:
             self._transform_stat.save(f, f"{path}/transform")
         if "_transformed_stat" in self.__dict__:
@@ -1390,6 +1409,8 @@ class FocalPlaneCollection:
             )
         if "weights" in group:
             collection._weights_stat = np.asarray(f[f"{path}/weights"])
+        if "scatter" in group:
+            collection._scatter_stat = np.asarray(f[f"{path}/scatter"])
         if "transform" in group:
             collection._transform_stat = Transform.load(f, f"{path}/transform")
         if "transformed" in group:
@@ -1405,6 +1426,7 @@ class FocalPlaneCollection:
                 "template_ot",
                 "data",
                 "weights",
+                "scatter",
                 "transform",
                 "transformed",
             }:
@@ -1941,7 +1963,7 @@ class PointingSystem:
                 for fp in ot.focal_planes:
                     if fp.pad:
                         continue
-                    chisq += np.nansum((fp.weights * fp.resid) ** 2).item()
+                    chisq += np.nansum(((fp.weights * fp.resid) ** 2)*fp.scatter).item()
         return chisq
 
     def chisq_cm_prior(

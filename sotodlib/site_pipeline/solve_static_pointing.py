@@ -33,9 +33,6 @@ import sqlalchemy as sqy
 from scipy.optimize import minimize
 import emcee
 
-# TODO: Calculate a weighted per-det scatter
-# TODO: Include per-det scatter in chisq
-
 logger = init_logger(__name__, "solve_static_pointing: ")
 default_config = {
     "tel": "LAT",
