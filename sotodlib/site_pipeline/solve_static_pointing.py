@@ -30,6 +30,8 @@ from sotodlib.utils import epochs
 from sotodlib.utils.config import load_config_namespace
 from sotodlib.site_pipeline import jobdb
 import sqlalchemy as sqy
+from scipy.optimize import minimize
+import emcee
 
 logger = init_logger(__name__, "solve_static_pointing: ")
 default_config = {
@@ -56,6 +58,11 @@ default_config = {
     "min_r2": .3,
     "pad_empty": True,
     "parameters": {},
+    "n_rounds": 3,
+    "cm_priors": {"sft_tol":1e-5, "rot_tol":1e4, "scl_tol":.1, "shr_tol":.01},
+    "outlier_sigma": 3,
+    "mcmc_steps": 0,
+    "nwalkers": 32,
 }
 
 
@@ -607,8 +614,44 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         bounds[idx] = tuple(par.get("bounds", bounds[idx])[:2])
     system.update_parameters(params)
 
-    # TODO: Fit for pointing model and focal planes
+    # Fit for pointing model and focal planes
     system.set_static(False)
+    for i in range(cfg.n_rounds):
+        logger.info("Starting fit round %d", i+1)
+        res = minimize(system.objective, system.parameters, bounds=bounds, args=(cfg.cm_priors,), method="Nelder-Mead")
+        system.update_parameters(res.x)
+
+        # Cut outliers
+        tot_cut = 0
+        for rx in system.receivers:
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    for meas in fp.focal_planes:
+                        resid = meas.data_pm.xyz - meas.pm_transformed.xyz
+                        wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
+                        if meas.fake_gamma:
+                            err = np.linalg.norm(resid[:, :2], axis=1) 
+                        else:
+                            err = np.linalg.norm(resid, axis=1) 
+                        mrmsk = err > cfg.outlier_sigma*np.std(err[wmsk])
+                        meas.weights[mrmsk] = 0
+                        tot_cut += np.sum(mrmsk[wmsk])
+        if tot_cut == 0:
+            break
+
+    # Run MCMC if we want
+    if cfg.mcmc_steps > 0:
+        ndim = len(system.parameters)
+        sampler = emcee.EnsembleSampler(cfg.nwalkers, ndim, system.log_prob, args=(cfg.cm_priors,))
+        sampler.run_mcmc(system.parameters, cfg.mcmc_steps)
+        samples = np.array(sampler.get_chain(discard=int(.1*cfg.mcmc_steps), flat=True))
+        system.update_parameters(np.median(samples, axis=0))
+        lower = np.percentile(samples, 16, axis=0)
+        upper = np.percentile(samples, 84, axis=0)
+        _ = lower, upper
+        # TODO: Save the chain somewhere
+        # TODO: MCMC plots
+    # TODO: plots
 
     # Save
     # TODO: Setup databases!

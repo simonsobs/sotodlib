@@ -106,9 +106,10 @@ def _transformed(self: FocalPlane | FocalPlaneCollection, attr_name: str, transf
 
 
 def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name: str):
+    wmsk = (self.weights > 0) * np.isfinite(self.weights)
     affine, shift = mt.get_affine_two_stage(
-        self.template.xyz[:, :2],
-        getattr(self, data_name).xyz[:, :2],
+        self.template.xyz[wmsk, :2],
+        getattr(self, data_name).xyz[wmsk, :2],
         self.weights,
     )
     to_ret = Transform.identity()
@@ -116,7 +117,7 @@ def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name:
     to_ret.affine[:2, :2] = affine
     if not self.fake_gamma:
         to_ret.affine[-1, -1], to_ret.shift[-1] = gamma_fit(
-            self.template.xyz[:, 2], getattr(self, data_name).xyz[:, 2]
+            self.template.xyz[wmsk, 2], getattr(self, data_name).xyz[wmsk, 2]
         )
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
@@ -1963,6 +1964,13 @@ class PointingSystem:
             if np.any(rx.cm_transform.shear > shr_tol):
                 return np.inf
         return self.chisq
+
+    def objective(self, params, cm_priors):
+        self.update_parameters(params)
+        return self.chisq_cm_prior(**cm_priors)
+
+    def log_prob(self, params, cm_priors):
+        return -.5*self.objective(params, cm_priors)
 
     @overload
     def search(
