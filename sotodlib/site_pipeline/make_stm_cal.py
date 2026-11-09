@@ -38,6 +38,7 @@ def run(
     obs_id,
     obs_type,
     n_split,
+    max_chunk_size,
 ):
     """Process one stimulator observation.
 
@@ -53,7 +54,13 @@ def run(
 
         logger.info(f'Processing {obs_id} ({obs_type}), {meta.dets.count} dets')
 
-        nper = int(np.ceil(meta.dets.count / n_split))
+        n_samps = meta.obs_info.n_samples
+        if max_chunk_size is not None:
+            nper = max(1, int(max_chunk_size // n_samps))
+            n_split = int(np.ceil(meta.dets.count / nper))
+        else:
+            nper = int(np.ceil(meta.dets.count / n_split))
+
         hkdata = None
         stm_cal = None
 
@@ -296,6 +303,7 @@ def _main(
     max_ctime: Optional[float] = None,
     n_split: Optional[int] = 1,
     nprocs: Optional[int] = 1,
+    max_chunk_size: Optional[int] = None,
     max_retry: Optional[int] = 3,
     stale: Optional[float] = 60.,
     max_days_before: Optional[float] = 1.0,
@@ -330,6 +338,8 @@ def _main(
         Number of detector chunks per observation (for memory management).
     nprocs : int (default 1)
         Number of parallel worker processes.
+    max_chunk_size : int (default None)
+        Maximum number of (dets x samples) per chunk for memory management.
     max_retry : int (default 3)
         Maximum attempts before marking a job as failed.
     stale : float (default 60.)
