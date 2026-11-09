@@ -724,7 +724,7 @@ class FocalPlane:
     positions, encoder values, detector weights, and an optional pointing
     model. From these inputs it can derive several useful properties:
 
-    - Pointing model corrected detector positions (`data_pm`).
+    - Pointing model corrected detector positions (`pm_data`).
     - The affine transform mapping the template onto the measured data
       (`transform`).
     - The transformed template (`transformed`).
@@ -768,20 +768,20 @@ class FocalPlane:
     fake_gamma : bool
         If True, ignore gamma when fitting and applying transforms,
         effectively treating the focal plane as two-dimensional.
-    data_pm : DetectorOffsets
+    pm_data : DetectorOffsets
         Measured detector offsets after application of the pointing model.
     transform : Transform
         Best-fit affine transform mapping `template` to `data`.
     transformed : DetectorOffsets
         Template detector offsets after applying `transform`.
     pm_transform : Transform
-        Best-fit affine transform mapping `template` to `data_pm`.
+        Best-fit affine transform mapping `template` to `pm_data`.
     pm_transformed : DetectorOffsets
         Template detector offsets after applying `pm_transform`.
     resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data` and `transformed`.
     pm_resid : Float[np.ndarray, "ndet 3"]
-        Residuals between `data_pm` and `pm_transformed`.
+        Residuals between `pm_data` and `pm_transformed`.
     template : DetectorOffsets
         Reference detector layout used as the transform source on sky.
     template_fp : DetectorOffsets
@@ -800,7 +800,7 @@ class FocalPlane:
     static: bool
     autofreeze: bool
     fake_gamma: bool
-    data_pm: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data_pm")
+    pm_data: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("pm_data")
     transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
     transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
         "transformed"
@@ -812,7 +812,7 @@ class FocalPlane:
     fpc_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
         "fpc_transformed"
     )
-    _data_pm_stat: DetectorOffsets = field(init=False)
+    _pm_data_stat: DetectorOffsets = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
     _pm_transform_stat: Transform = field(init=False)
@@ -1004,7 +1004,7 @@ class FocalPlane:
         static : bool
             What to set `self.static` to after freezing.
         """
-        self._data_pm_stat = self._data_pm_dyn
+        self._pm_data_stat = self._pm_data_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
         self._pm_transform_stat = self._pm_transform_dyn
@@ -1012,12 +1012,12 @@ class FocalPlane:
         self.static = static
 
     @property
-    def _data_pm_dyn(self) -> DetectorOffsets:
+    def _pm_data_dyn(self) -> DetectorOffsets:
         to_ret = self.pointing_model.apply_det(
             self.data, self.enc, self.weights, self.fake_gamma
         )
         if self.autofreeze:
-            self._data_pm_stat = to_ret
+            self._pm_data_stat = to_ret
         return to_ret
 
     @property
@@ -1030,7 +1030,7 @@ class FocalPlane:
 
     @property
     def _pm_transform_dyn(self) -> Transform:
-        return _get_aff(self, "data_pm", "_pm_transform_stat")
+        return _get_aff(self, "pm_data", "_pm_transform_stat")
 
     @property
     def _pm_transformed_dyn(self) -> DetectorOffsets:
@@ -1046,11 +1046,11 @@ class FocalPlane:
 
     @property
     def pm_resid(self):
-        return self.data_pm.xyz - self.pm_transformed.xyz
+        return self.pm_data.xyz - self.pm_transformed.xyz
 
     @property
     def fpc_resid(self):
-        return self.data_pm.xyz - self.fpc_transformed.xyz
+        return self.pm_data.xyz - self.fpc_transformed.xyz
 
     def save(
         self,
@@ -1103,8 +1103,8 @@ class FocalPlane:
                 raise ValueError(f"{path}/weights already exists")
         f.create_dataset(f"{path}/weights", data=self.weights)
 
-        if "_data_pm_stat" in self.__dict__:
-            self._data_pm_stat.save(f, f"{path}/data_pm", overwrite=overwrite)
+        if "_pm_data_stat" in self.__dict__:
+            self._pm_data_stat.save(f, f"{path}/pm_data", overwrite=overwrite)
         if "_transform_stat" in self.__dict__:
             self._transform_stat.save(f, f"{path}/transform", overwrite=overwrite)
         if "_transformed_stat" in self.__dict__:
@@ -1171,8 +1171,8 @@ class FocalPlane:
             fake_gamma=cast(bool, group.attrs["fake_gamma"]),
         )
 
-        if "data_pm" in group:
-            fp._data_pm_stat = DetectorOffsets.load(f, f"{path}/data_pm")
+        if "pm_data" in group:
+            fp._pm_data_stat = DetectorOffsets.load(f, f"{path}/pm_data")
         if "transform" in group:
             fp._transform_stat = Transform.load(f, f"{path}/transform")
         if "transformed" in group:
@@ -1204,7 +1204,7 @@ class FocalPlaneCollection:
     against the reference template through a single affine transform.
 
     The collection operates on the pointing model corrected detector
-    positions (`FocalPlane.data_pm`) from each measurement.
+    positions (`FocalPlane.pm_data`) from each measurement.
     Detector locations and weights are combined on a per-detector
     basis, missing values should be filled with `nan`s.
 
@@ -1308,7 +1308,7 @@ class FocalPlaneCollection:
     def _data_dyn(self) -> DetectorOffsets:
         to_ret = deepcopy(self.template)
         dat_full = np.array(
-            [fp.data_pm.xyz * fp.weights[..., None] for fp in self.focal_planes]
+            [fp.pm_data.xyz * fp.weights[..., None] for fp in self.focal_planes]
         )
         to_ret.xyz = np.nansum(dat_full, axis=-1) / self.weights[..., None]
         to_ret.center = None
@@ -1326,7 +1326,7 @@ class FocalPlaneCollection:
 
     @property
     def _scatter_dyn(self) -> Float[np.ndarray, "ndet"]:
-        dat_full = np.array([fp.data_pm.xyz for fp in self.focal_planes])
+        dat_full = np.array([fp.pm_data.xyz for fp in self.focal_planes])
         weights_full = np.array([fp.weights for fp in self.focal_planes])
         mean = self.data.xyz
         var = (

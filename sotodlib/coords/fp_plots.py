@@ -10,7 +10,7 @@ from .fp_containers import DetectorOffsets, FocalPlane, FocalPlaneCollection, Re
 
 
 def plot_detector_offsets(
-    ax: mpl.axes._axes.Axes,
+        ax: mpl.axes._axes.Axes, # type: ignore
     offsets: DetectorOffsets,
     text: Optional[str] = None,
     fontsize: int = 16,
@@ -206,14 +206,14 @@ def plot_ufm(
     figsize : tuple[float, float], default: (12, 6)
         Figure dimensions in inches.
     with_pm : bool, default: True
-        If True then use `data_pm` if `False` use `data`.
+        If True then use `pm_data` if `False` use `data`.
         Only matters for `FocalPlane`.
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
     data = focal_plane.data
     transformed = focal_plane.transformed
     if isinstance(focal_plane, FocalPlane) and with_pm:
-        data = focal_plane.data_pm
+        data = focal_plane.pm_data
         transformed = focal_plane.pm_transformed
 
     # Plot focal-plane pointing.
