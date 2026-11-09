@@ -671,3 +671,1182 @@ def gather_axmgr():
     # communicate per-process signal pieces
 
     pass
+
+
+
+
+import copy
+import re
+from collections.abc import MutableMapping
+
+import numpy as np
+from astropy.table import Column
+
+import toast
+from toast.mpi import MPI
+from toast.timing import function_timer, Timer
+from toast.utils import Logger
+from toast.dist import distribute_uniform
+from toast.observation import default_values as defaults
+from toast.utils import replace_byte_arrays, byte_array_to_unicode
+
+
+from ..core.axisman import AxisManager, IndexAxis, LabelAxis
+
+
+demod_toast_prefixes = ["demod0", "demod4r", "demod4i"]
+
+demod_axman_names = ["dsT", "demodQ", "demodU"]
+
+
+def obs_is_demod(obs, signal=defaults.det_data):
+    """Determine if observation has demodulated data.
+
+    Args:
+        obs (Observation):  The observation.
+        signal (str):  The name of the signal to examine.
+
+    Returns:
+        (bool):  True if the data is demodulated.
+
+    """
+    local_dets = obs.select_local_detectors()
+    local_demod = 0
+
+    if len(local_dets) > 0 and local_dets[0].startswith("demod"):
+        local_demod = 1
+
+    if obs.comm.comm_group is not None:
+        use_demod = obs.comm.comm_group.allreduce(local_demod, op=MPI.LOR)
+    else:
+        use_demod = local_demod
+
+    if use_demod:
+        return True
+    else:
+        return False
+
+
+def axman_is_demod(axman, signal="demodQ"):
+    """Determine if an AxisManager has demodulated data.
+
+    Args:
+        axman (AxisManager):  The observation.
+        signal (str):  The name of the signal to examine.
+
+    Returns:
+        (list):  The demodulated data prefixes or None
+
+    """
+    if signal in axman:
+        return True
+    else:
+        return False
+
+
+def obs_sample_axis(obs, name="samps"):
+    """Given an Observation, return an Axis for the sample direction.
+
+
+    """
+    return IndexAxis(name, count=obs.n_all_samples)
+
+
+def obs_det_axis(obs, signal=defaults.det_data, name="dets"):
+    """Given an Observation, return an Axis for the detector direction.
+
+    If the data is demodulated, return a LabelAxis with the root detector
+    names.
+
+    Args:
+
+    Returns:
+
+
+    """
+    if obs_is_demod(obs, name=signal):
+        # We have demodulated data.  Get the root detector names.
+        detpat = re.compile(r"(demod[024ri]+)_(.*)")
+        detnames = set()
+        for det in obs.all_detectors:
+            mat = detpat.match(det)
+            if mat is None:
+                msg = f"Detector name '{det}' does not follow expected"
+                msg += " convention for demodulated detectors"
+                raise RuntimeError(msg)
+            detnames.add(mat.group(2))
+        return LabelAxis(name, vals=list(sorted(detnames)))
+    else:
+        return LabelAxis(name, vals=obs.all_detectors)
+
+
+def parse_session(session):
+    """Given an observing session with standard naming, return properties.
+
+    """
+    name_pat = re.compile(r"obs_(\d+)_(.*)_(\d+)")
+    name_mat = name_pat.match(session.name)
+    if name_mat is None:
+        msg = f"Session name '{session.name}' does not match expected format"
+        raise RuntimeError(msg)
+    time = int(name_mat.group(1))
+    tele = name_mat.group(2)
+    wafer_mask = [int(x) for x in list(name_mat.group(3))]
+    wafer_count = np.count_nonzero(wafer_mask)
+    return time, tele, wafer_count
+
+
+def extract_obs_info(data, obs_session_name):
+    """Extract the `obs_info` AxisManager.
+
+    The `obs_info` structure includes a combination of fields from the toast
+    Observation and its parent Session.  We pass in the full Data object and
+    specify the AxisManager observation (observing Session) we want to process.
+
+
+    """
+    # Get a reduced Data object with the desired session
+    selected = data.select(obs_session_name=obs_session_name)
+    first_ob = selected.obs[0]
+
+    # See if we already have the original obs_info in the metadata.  If so, just return
+    # that original thing
+    if "obs_info" in first_ob:
+        return first_ob["obs_info"]
+
+    # The "obs_id" is actually the Session name
+    obs_id = first_ob.session.name
+
+    # Toast does not track the list of wafer slots and stream IDs within the session.
+    # We also do not save separately the telescope tube slot and tube "flavor".  We
+    # reconstruct this information from the focalplane information for each observation.
+    bands_to_flavor = {
+        "f030": "lf",
+        "f040": "lf",
+        "f090": "mf",
+        "f150": "mf",
+        "f220": "uhf",
+        "f280": "uhf",
+    }
+    wafer_slots = set()
+    stream_ids = set()
+    tel_tubes = set()
+    det_bands = set()
+    for ob in selected.obs:
+        fp = ob.telescope.focalplane.detector_data
+        wafer_slots.add(np.unique(fp["det_info:wafer_slot"]))
+        stream_ids.add(np.unique(fp["det_info:stream_id"]))
+        tel_tubes.add(np.unique(fp["det_info:tel_tube"]))
+        det_bands.add(np.unique(fp["det_info:wafer:bandpass"]))
+    tube_flavors = {bands_to_flavor[x] for x in det_bands}
+    if len(tube_flavors) != 1:
+        msg = f"Observation session '{obs_session_name}' does not have"
+        msg += f" exactly one tube flavor ({tube_flavors})"
+        raise RuntimeError(msg)
+    tube_flavor = tube_flavors.pop()
+    if len(tel_tubes) != 1:
+        msg = f"Observation session '{obs_session_name}' does not have"
+        msg += f" exactly one tube slot ({tel_tubes})"
+        raise RuntimeError(msg)
+    tel_tube = tel_tubes.pop()
+    wafer_slots_list = sorted(wafer_slots)
+    stream_ids_list = sorted(stream_ids)
+
+    # These correspond to the session time range
+    timestamp = first_ob.session.start
+    start_time = first_ob.session.start
+    stop_time = first_ob.session.end
+    duration = stop_time - start_time
+
+    # The number of total samples in the observation
+    n_samples = first_ob.n_all_samples
+
+    # Extract info from the session name
+    int_start, tele_name, wafer_count = parse_session(first_ob.session)
+    tele_flavor = tele_name[:3]
+
+    # We are only concerned with converting science obs
+    obs_type = "obs"
+    obs_subtype = "cmb"
+
+    # To compute metadata about the boresight az / el / roll range, we look at the
+    # first observation in the session, since this is the same for all wafers.
+
+    az = np.unwrap(first_ob.shared[defaults.azimuth].data)
+    azmin = np.fmod(np.amin(az), 2 * np.pi)
+    azmax = np.fmod(np.amax(az), 2 * np.pi)
+    if azmax >= azmin:
+        az_throw = azmax - azmin
+        az_center = azmin + 0.5 * az_throw
+    else:
+        az_center =
+
+    elmin = np.amin(first_ob.shared[defaults.elevation].data)
+    elmax = np.amax(first_ob.shared[defaults.elevation].data)
+    el_throw = elmax - elmin
+    el_center = elmin + 0.5 * el_throw
+
+    rollmin = np.amin(first_ob.shared[defaults.roll].data)
+    rollmax = np.amax(first_ob.shared[defaults.roll].data)
+    roll_throw = rollmax - rollmin
+    roll_center = rollmin + 0.5 * roll_throw
+
+
+
+    return AxisManager(
+        obs_id,
+        timestamp,
+        start_time,
+        n_samples,
+        tele_name,
+        tele_flavor,
+        tel_tube,
+        tube_flavor,
+        obs_type,
+        obs_subtype,
+        wafer_count,
+        "tes",
+        az_center,
+        az_throw,
+        el_center,
+        el_throw,
+        stop_time,
+        duration,
+        roll_center,
+        roll_throw,
+        hwp_freq_mean,
+        hwp_freq_stdev,
+        wafer_slots_list,
+        stream_ids_list,
+    )
+
+# detector_flavor = tes
+# az_center = 131.4850210603187
+# az_throw = 20.175439737979595
+# el_center = 60.00031507893567
+# el_throw = 0.0023242157174401257
+# stop_time = 1729204428.3279438
+# duration = 3670.8600001335144
+# roll_center = -44.999996606804636
+# roll_throw = 6.0146181027675993e-05
+# hwp_freq_mean = 2.050985113367603
+# hwp_freq_stdev = 0.004403520945143054
+# wafer_slots_list = ws0,ws1,ws2,ws3,ws4,ws5,ws6
+# stream_ids_list = ufm_mv19,ufm_mv18,ufm_mv22,ufm_mv29,ufm_mv7,ufm_mv9,ufm_mv15
+
+# AxisManager(obs_id, timestamp, start_time, n_samples, telescope, telescope_flavor, tube_slot, tube_flavor, type, subtype, wafer_count, detector_flavor, az_center, az_throw, el_center, el_throw, stop_time, duration, roll_center, roll_throw, hwp_freq_mean, hwp_freq_stdev, wafer_slots_list, stream_ids_list)
+
+
+
+
+
+# def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_base):
+#     """Parse Context metadata.
+
+#     This is a recursive function which starts with the AxisManger returned
+#     by `Context.get_meta()` and splits meta data into "detector properties"
+#     which will be placed in the focalplane model and "other metadata" which
+#     will be stored in the Observation dictionary.
+
+#     For each element of the input AxisManager we do the following:
+
+#     - If the object has one axis and it is the detector axis,
+#       treat it as a column in the detector property table
+#     - If the object has one axis and it is the sample axis,
+#       it will be loaded later as shared data.
+#     - If the object has multiple axes, load it later
+#     - If the object has no axes, then treat it as observation
+#       metadata
+#     - If the object is a nested AxisManager, descend and apply
+#       the same steps as above.
+
+#     Args:
+#         axman (AxisManager):  The input axismanager.
+#         obs_meta (dict):  The working dictionary of observation metadata.
+#         fp_cols (dict):  Dictionary of table Columns of detector properties.
+#         path_sep (str):  The path separation char when building flattened names.
+#         det_axis (str):  The name of the detector axis.
+#         obs_base (str):  The current key in the nested observation metadata.
+#         fp_base (str):  The current key to use when appending focalplane columns.
+
+#     Returns:
+#         None
+
+#     """
+#     if obs_base is None:
+#         om = obs_meta
+#     else:
+#         obs_meta[obs_base] = dict()
+#         om = obs_meta[obs_base]
+#     for key in axman.keys():
+#         if fp_base is not None:
+#             fp_key = f"{fp_base}{path_sep}{key}"
+#         else:
+#             fp_key = key
+#         if isinstance(axman[key], AxisInterface):
+#             # This is one of the axes
+#             continue
+#         if isinstance(axman[key], AxisManager):
+#             # Descend
+#             parse_metadata(
+#                 axman[key], obs_meta, fp_cols, path_sep, det_axis, key, fp_key
+#             )
+#         else:
+#             # FIXME:  It would be nicer if this information was available
+#             # through a public member...
+#             field_axes = axman._assignments[key]
+#             if len(field_axes) == 0:
+#                 # This data is not associated with an axis.
+#                 om[key] = replace_byte_arrays(axman[key])
+#             elif len(field_axes) == 1 and field_axes[0] == det_axis:
+#                 # This is a detector property
+#                 if fp_key in fp_cols:
+#                     msg = f"Context meta key '{fp_key}' is duplicated in nested"
+#                     msg += " AxisManagers"
+#                     raise RuntimeError(msg)
+#                 fp_cols[fp_key] = Column(
+#                     name=fp_key, data=np.array(byte_array_to_unicode(axman[key]))
+#                 )
+#     if obs_base is not None and len(om) == 0:
+#         # There were no meta data keys- delete this dict
+#         del obs_meta[obs_base]
+
+
+# def _local_process_dets(obs, rank):
+#     """Get the list of local detectors for a specific rank."""
+#     # Full detector list
+#     det_names = obs.all_detectors
+#     # The range of full detector indices on this process.
+#     full_indices = obs.dist.det_indices[rank]
+#     # The same info, as a slice.
+#     full_slc = slice(full_indices.offset, full_indices.offset + full_indices.n_elem, 1)
+#     # The names of the detectors on this process.
+#     return det_names[full_slc]
+
+
+# def distribute_detector_props(obs, wafer_key):
+#     """Compute the communication patterns for detector data.
+
+#     This computes the range of local detector indices for each wafer on all
+#     processes, and also the corresponding range of indices in the wafer data
+#     on the reading process.  For example, imagine we have 2 wafers and 4
+#     processes:
+
+#     +====================+    +====================+
+#     |       Wafer 0      |    |     Process 0      |
+#     |                    |    |--------------------|
+#     |                    |    |     Process 1      |
+#     +====================+    |                    |
+#     |       Wafer 1      |    |--------------------|
+#     |                    |    |     Process 2      |
+#     |                    |    |--------------------|
+#     |                    |    |     Process 3      |
+#     +====================+    +--------------------+
+
+#     In this case, Process 0 will read Wafer 0 and Process 1 will read Wafer 1.
+#     The data from Wafer 0 needs to be sent to Processes 0 and 1, and the data
+#     from Wafer 1 needs to be sent to Processes 1, 2, and 3.
+
+#     Args:
+#         obs (Observation):  The observation.
+#         wafer_key (str):  The column of the focalplane table with the wafer name.
+
+#     Returns:
+#         (tuple):  The (wafer_dets, wafer_readers, wafer_proc_dets, proc_wafer_dets)
+
+#     """
+#     gcomm = obs.comm.comm_group
+#     rank = obs.comm.group_rank
+#     gsize = obs.comm.group_size
+
+#     det_table = obs.telescope.focalplane.detector_data
+
+#     # Wafer names for all detectors
+#     det_wafers = list(det_table[wafer_key])
+
+#     # For each process, this has a key for each wafer on that process.
+#     # The value for each wafer key is the destination local detector indices for
+#     # that wafer.
+#     proc_wafer_dets = dict()
+
+#     # For each wafer, this has a key for each destination process.  The value
+#     # for each process key is the range of detector indices in the wafer data
+#     # that should be sent to that process.
+#     wafer_proc_dets = dict()
+
+#     # For each wafer, the process that should do the reading.  This is the first
+#     # process rank that has any data from that wafer.
+#     wafer_readers = dict()
+
+#     # For each wafer, the list of local detector names within that wafer.
+#     wafer_dets = dict()
+
+#     wafer_off = 0
+#     cur_wafer = det_wafers[0]
+#     wafer_proc_dets[cur_wafer] = dict()
+#     wafer_readers[cur_wafer] = 0
+#     wafer_dets[cur_wafer] = list()
+#     for proc in range(gsize):
+#         proc_wafer_dets[proc] = dict()
+#         # The range of full detector indices on this process.
+#         full_indices = obs.dist.det_indices[proc]
+#         # The same info, as a slice.
+#         full_slc = slice(
+#             full_indices.offset, full_indices.offset + full_indices.n_elem, 1
+#         )
+#         # The names of the detectors on this process.
+#         local_det_names = _local_process_dets(obs, proc)
+#         # The wafer names of the detectors on this process.
+#         local_det_wafers = det_wafers[full_slc]
+
+#         if local_det_wafers[0] != cur_wafer:
+#             # This process starts on a new wafer
+#             cur_wafer = local_det_wafers[0]
+#             wafer_off = 0
+#         # Check for wafer transitions in this process's data
+#         wafer_change = [
+#             x
+#             for x, (y, z) in enumerate(zip(local_det_wafers[:-1], local_det_wafers[1:]))
+#             if y != z
+#         ]
+#         # Add the detector ranges to the mapping dictionaries
+#         wfirst = 0
+#         for wc in wafer_change:
+#             wlast = wc
+#             nwblock = wlast - wfirst + 1
+#             # Extend list of detectors for this wafer
+#             wafer_dets[cur_wafer].extend(local_det_names[wfirst : wlast + 1])
+#             # Detector indices for this wafer in the local data
+#             proc_wafer_dets[proc][cur_wafer] = (wfirst, wlast + 1)
+#             # Detector indices for this process's local data within the full
+#             # wafer data.
+#             wafer_proc_dets[cur_wafer][proc] = (wafer_off, wafer_off + nwblock)
+#             wfirst = wlast + 1
+#             # We are now on a new wafer.  Reset the wafer detector offset and
+#             # also assign the reading to this process.
+#             cur_wafer = local_det_wafers[wlast + 1]
+#             wafer_off = 0
+#             wafer_dets[cur_wafer] = list()
+#             wafer_readers[cur_wafer] = proc
+#             wafer_proc_dets[cur_wafer] = dict()
+#         # Handle final block
+#         wlast = len(local_det_wafers) - 1
+#         nwblock = wlast - wfirst + 1
+#         wafer_dets[cur_wafer].extend(local_det_names[wfirst : wlast + 1])
+#         proc_wafer_dets[proc][cur_wafer] = (wfirst, wlast + 1)
+#         wafer_proc_dets[cur_wafer][proc] = (wafer_off, wafer_off + nwblock)
+#         wafer_off += nwblock
+
+#     return (wafer_dets, wafer_readers, wafer_proc_dets, proc_wafer_dets)
+
+
+# @function_timer
+# def distribute_detector_data(
+#     obs,
+#     field,
+#     axwafers,
+#     axis_dets,
+#     axis_samples,
+#     axfield,
+#     axdtype,
+#     wafer_readers,
+#     wafer_proc_dets,
+#     proc_wafer_dets,
+#     path_sep,
+#     is_flag=False,
+#     flag_invert=False,
+#     flag_mask=None,
+#     daq_units=False,
+# ):
+#     """Communicate detector data from the reading processes to the destinations.
+
+#     Data for each wafer is loaded on exactly one process.  This function uses the
+#     pre-computed data communication pattern built by `distribute_detector_props()`.
+#     However, the loaded wafer data AxisManager may have been truncated with a
+#     symmetric sample buffer on either side and some detectors may have been removed.
+#     This function must account for this when copying data from the AxisManager into
+#     The full-size observation.
+
+#     The observation data is modified in-place.
+
+#     Args:
+#         obs (Observation):  The observation.
+#         field (str):  The detdata field in the Observation.
+#         axwafers (dict):  The dictionary of wafer data loaded on this process.
+#         axis_dets (str):  The name of the detector LabelAxis in the AxisManagers.
+#         axis_samples (str):  The name of the sample OffsetAxis in the AxisManagers.
+#         axfield (str):  The name of the data field in the AxisManagers.
+#         axdtype (np.dtype):  The dtype of the source buffer for sending the data
+#             from the AxisManager.
+#         wafer_readers (dict):  The reading process for each wafer.
+#         wafer_proc_dets (dict):  For each wafer, the dictionary of destination
+#             processes and the detector indices to send.
+#         proc_wafer_dets (dict):  For each process, the dictionary of wafer name to
+#             local detector indices to receive.
+#         path_sep (str):  The path separation char when building flattened names.
+#         is_flag (bool):  If True, this field is a flag.
+#         flag_invert (bool):  If True, invert the meaning of the flag values.
+#         flag_mask (np.uint8):  The flag mask (or None).
+#         daq_units (bool):  If True, convert AxisManager signal to DAQ units.
+
+#     Returns:
+#         None
+
+#     """
+#     log = Logger.get()
+#     gcomm = obs.comm.comm_group
+#     rank = obs.comm.group_rank
+#     gsize = obs.comm.group_size
+
+#     rescale_to_daq = float(2**15) / np.pi
+
+#     # If the blocks of detector data exceed 2^30 elements in total, they might hit
+#     # MPI limitations on the communication message sizes.  Work around that here.
+#     try:
+#         from mpi4py.util import pkl5
+
+#         if gcomm is not None:
+#             gcomm = pkl5.Intracomm(gcomm)
+#     except Exception:
+#         pass
+
+#     def _process_flag(mask, inbuf, detdata, det_begin, det_end, invert):
+#         n_det = det_end - det_begin
+#         temp = mask * np.ones_like(inbuf)
+#         if invert:
+#             temp[inbuf != 0] = 0
+#         else:
+#             temp[inbuf == 0] = 0
+#         for idet in range(n_det):
+#             detdata[idet + det_begin, :] |= temp[idet]
+
+#     # Keep a handle to our send buffers to ensure that any temporary objects
+#     # remain in existance until after all receives have happened.
+#     send_data = dict()
+#     send_req = list()
+#     recv_data = None
+
+#     # The tag value stride, to ensure unique tags for every sender / receiver / wafer
+#     # combination.
+#     tag_stride = 2000
+
+#     wf_index = {y: x for x, y in enumerate(wafer_readers.keys())}
+
+#     for wafer, reader in wafer_readers.items():
+#         if reader == rank:
+#             send_data[wafer] = dict()
+#             # The wafer axis manager may have a different set of detectors than
+#             # the full data, if some detectors have been cut.  It may also have
+#             # a symmetric buffer of samples cut on either side of the observation.
+#             # here we construct the mapping from full data into this restricted
+#             # axis manager.
+#             restricted_dets = axwafers[wafer][axis_dets].vals
+#             restricted_indices = {y: x for x, y in enumerate(restricted_dets)}
+
+#             # If the field is nested, descend
+#             field_path = axfield.split(path_sep)
+#             axroot = axwafers[wafer]
+#             axobject = axroot[field_path[0]]
+#             for ch in field_path[1:]:
+#                 axobject = axobject[ch]
+
+#             for receiver, send_dets in wafer_proc_dets[wafer].items():
+#                 # "send_dets" is the un-restricted range of wafer detectors.
+#                 # We will send a full-size (unrestricted) buffer to ease
+#                 # bookkeeping, and just copy un-cut detector data into that
+#                 # buffer.
+#                 n_send_det = send_dets[1] - send_dets[0]
+
+#                 # The names of the detectors on the receiving process.
+#                 local_det_names = _local_process_dets(obs, receiver)
+
+#                 # The receiving detector names and their relative indices
+#                 recv_dets = proc_wafer_dets[receiver][wafer]
+#                 n_recv_det = recv_dets[1] - recv_dets[0]
+#                 recv_det_names = local_det_names[recv_dets[0] : recv_dets[1]]
+#                 recv_det_indices = {y: x for x, y in enumerate(recv_det_names)}
+
+#                 # Build the mapping of restricted indices to send buffer indices
+#                 restrict_to_send = {
+#                     restricted_indices[x]: y
+#                     for x, y in recv_det_indices.items()
+#                     if x in restricted_indices
+#                 }
+
+#                 # The per-detector flags, so that detectors are cut properly on the
+#                 # receiver.
+#                 det_flags = np.ones(
+#                     n_send_det,
+#                     dtype=np.uint8,
+#                 )
+#                 for idet_ax, idet_send in restrict_to_send.items():
+#                     det_flags[idet_send] = 0
+
+#                 # Does the axis manager have a truncated number of samples?
+#                 restricted_samps = axwafers[wafer][axis_samples].count
+#                 if restricted_samps != obs.n_local_samples:
+#                     ax_shift = axwafers[wafer][axis_samples].offset
+#                 else:
+#                     ax_shift = 0
+
+#                 # flat-packed buffer size of send buffer
+#                 flat_size = n_send_det * obs.n_local_samples
+
+#                 # Is this some detector flag data using ranges instead of samples?
+#                 # If so, we construct a temporary buffer and build sample flags
+#                 # from the ranges.
+#                 if isinstance(axobject, so3g.proj.RangesMatrix):
+#                     # Yes, flagged ranges.  We may have restricted sample ranges
+#                     # for our flags, and so we initialize the full buffer to
+#                     # the invalid mask.
+#                     sdata = defaults.det_mask_invalid * np.ones(
+#                         flat_size,
+#                         dtype=np.uint8,
+#                     )
+#                     if flag_invert:
+#                         for idet_ax, idet_send in restrict_to_send.items():
+#                             # Set this detector's values to the mask, and then
+#                             # we will "unflag" the specified ranges.
+#                             off = idet_send * obs.n_local_samples + ax_shift
+#                             sdata[off : off + restricted_samps] = flag_mask
+#                             for rg in axobject[idet_ax].ranges():
+#                                 sdata[off + rg[0] : off + rg[1]] = 0
+#                     else:
+#                         for idet_ax, idet_send in restrict_to_send.items():
+#                             # Set this detector's values to good, and then
+#                             # we will flag the specified ranges.
+#                             off = idet_send * obs.n_local_samples + ax_shift
+#                             sdata[off : off + restricted_samps] = 0
+#                             for rg in axobject[idet_ax].ranges():
+#                                 sdata[off + rg[0] : off + rg[1]] = flag_mask
+#                 else:
+#                     # Either normal sample flags or signal data
+#                     if is_flag:
+#                         # We may have restricted sample ranges for our flags, and so
+#                         # we initialize the full buffer to the invalid mask.
+#                         sdata = defaults.det_mask_invalid * np.ones(
+#                             flat_size,
+#                             dtype=axdtype,
+#                         )
+#                     else:
+#                         # Signal data is initialized to zero.  Restricted / missing
+#                         # samples will be indicated by flags.
+#                         sdata = np.zeros(
+#                             flat_size,
+#                             dtype=axdtype,
+#                         )
+#                     for idet_ax, idet_send in restrict_to_send.items():
+#                         off = idet_send * obs.n_local_samples + ax_shift
+#                         sdata[off : off + restricted_samps] = axobject[idet_ax, :]
+
+#                 if receiver == rank:
+#                     # We just need to process the data locally
+#                     sdata_2d = sdata.reshape((n_send_det, -1))
+#                     if is_flag:
+#                         _process_flag(
+#                             flag_mask,
+#                             sdata_2d,
+#                             obs.detdata[field],
+#                             recv_dets[0],
+#                             recv_dets[1],
+#                             flag_invert,
+#                         )
+#                     else:
+#                         for idet in range(n_send_det):
+#                             if daq_units:
+#                                 nan_mask = np.isnan(sdata_2d[idet])
+#                                 if np.count_nonzero(nan_mask) > 0:
+#                                     det_flags[idet] = 1
+#                                 np.rint(
+#                                     rescale_to_daq * sdata_2d[idet],
+#                                     out=obs.detdata[field][idet + recv_dets[0], :],
+#                                     casting="unsafe",
+#                                 )
+#                             else:
+#                                 obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[
+#                                     idet
+#                                 ]
+#                     # Update per-detector flags
+#                     dflags = {
+#                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
+#                         for x in range(n_recv_det)
+#                         if det_flags[x] != 0
+#                     }
+#                     obs.update_local_detector_flags(dflags)
+#                 else:
+#                     # Send asynchronously.
+#                     tag = (rank * gsize + receiver) * tag_stride + 2 * wf_index[wafer]
+#                     flag_tag = tag + 1
+#                     req = gcomm.isend(sdata, dest=receiver, tag=tag)
+#                     req_flags = gcomm.isend(det_flags, dest=receiver, tag=flag_tag)
+#                     # Save a handle to this buffer while send operation is in progress
+#                     send_data[wafer][axfield] = sdata
+#                     send_data[wafer][f"{axfield}_flags"] = det_flags
+#                     send_req.append(req)
+#                     send_req.append(req_flags)
+
+#     my_wafer_dets = proc_wafer_dets[rank]
+#     for wafer, recv_dets in my_wafer_dets.items():
+#         n_recv_det = recv_dets[1] - recv_dets[0]
+#         sender = wafer_readers[wafer]
+#         if sender == rank:
+#             # This data was already copied locally above
+#             continue
+#         else:
+#             # Receive from sender.  We always allocate a contiguous temporary buffer.
+#             tag = (sender * gsize + rank) * tag_stride + 2 * wf_index[wafer]
+#             flag_tag = tag + 1
+#             recv_data = gcomm.recv(source=sender, tag=tag)
+#             recv_2d = recv_data.reshape((n_recv_det, -1))
+#             det_flags = gcomm.recv(source=sender, tag=flag_tag)
+#             if is_flag:
+#                 _process_flag(
+#                     flag_mask,
+#                     recv_2d,
+#                     obs.detdata[field],
+#                     recv_dets[0],
+#                     recv_dets[1],
+#                     flag_invert,
+#                 )
+#             else:
+#                 # Just assign
+#                 for idet in range(n_recv_det):
+#                     if daq_units:
+#                         nan_mask = np.isnan(recv_2d[idet])
+#                         if np.count_nonzero(nan_mask) > 0:
+#                             det_flags[idet] = 1
+#                         np.rint(
+#                             rescale_to_daq * recv_2d[idet],
+#                             out=obs.detdata[field][idet + recv_dets[0], :],
+#                             casting="unsafe",
+#                         )
+#                     else:
+#                         obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
+#             # Update per-detector flags
+#             dflags = {
+#                 obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
+#                 for x in range(n_recv_det)
+#                 if det_flags[x] != 0
+#             }
+#             obs.update_local_detector_flags(dflags)
+#             del recv_2d
+#             del recv_data
+#             del det_flags
+
+#     # Wait for communication
+#     for req in send_req:
+#         req.wait()
+#     if gcomm is not None:
+#         gcomm.barrier()
+
+#     # Now safe to delete our dictionary of isend buffer handles, which might include
+#     # temporary buffers of ranges flags.
+#     del send_data
+
+#     # Every process checks its local data for NaN values.  If any are found, a warning
+#     # is printed and the detector is cut.  If we are using DAQ units, those detectors
+#     # with NaNs were already cut during the float to int32 conversion above.
+#     if not daq_units:
+#         dflags = dict()
+#         for det in obs.local_detectors:
+#             nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+#             if nnan > 0:
+#                 msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+#                 log.warning(msg)
+#                 dflags[det] = defaults.det_mask_invalid
+#         obs.update_local_detector_flags(dflags)
+
+
+# @function_timer
+# def _create_observation(
+#     self, obs_name, session_name, comm, telescope, n_samp, fp_flags, meta
+# ):
+#     """Create the observation.
+
+#     Note that the focalplane table has already been sorted by wafer
+#     name and then detector name.
+
+#     Args:
+#         obs_name (str):  The observation name
+#         session_name (str):  The observing session name (context obs ID).
+#         gcomm (MPI.Comm):  The group communicator or None.
+#         telescope (Telescope):  The Telescope for this observation.
+#         n_samp (int):  The number of samples in the observation.
+#         fp_flags (dict):  The per-detector flags to apply.
+#         meta (dict):  The observation metadata to populate.
+
+#     Returns:
+#         (tuple):  The (Observation, have_pointing), where the second
+#             element is True if the observation has boresight pointing.
+
+#     """
+
+
+
+
+# def axman_to_observation(
+#     aman,
+#     telescope_name="UNKNOWN",
+#     ax_times="timestamps",
+#     ax_flags=[
+#         ("smurfgaps_ufm_{det_info:wafer:array}", defaults.shared_mask_invalid),
+#         ("acu_drops", defaults.shared_mask_invalid)
+#     ],
+#     ax_det_signal="signal",
+#     ax_det_flags=[],
+#     ax_boresight_az="boresight:az",
+#     ax_boresight_el="boresight:el",
+#     ax_boresight_roll="boresight:roll",
+#     ax_boresight_angle="ancil:boresight_enc",
+#     ax_hwp_angle="hwp_angle",
+#     ax_corotator_angle="ancil:corotator_enc",
+#     ax_pathsep=":",
+#     ax_detinfo_wafer_key="stream_id",
+#     axis_detector="dets",
+#     axis_sample="samps",
+#     detset_key="pixel",
+#     times=defaults.times,
+#     det_data_units=defaults.det_data_units,
+#     shared_flags=defaults.shared_flags,
+#     det_data=defaults.det_data,
+#     det_flags=defaults.det_flags,
+#     azimuth=defaults.azimuth,
+#     elevation=defaults.elevation,
+#     roll=defaults.roll,
+#     boresight_azel=defaults.boresight_azel,
+#     boresight_radec=defaults.boresight_radec,
+#     corotator_angle="corotator_angle",
+#     boresight_angle="boresight_angle",
+#     hwp_angle=defaults.hwp_angle,
+#     analytic_bandpass=False,
+#     bandwidth=0.2,
+#     daq_units=False,
+#     comm=None
+# ):
+#     """Create an Observation from an AxisManager.
+
+#     The AxisManager should exist on a single process.  The Observation may be distributed over a process group.  The AxisManager may have
+
+#     """
+#     log = Logger.get()
+#         timer = Timer()
+#         timer.start()
+
+#         # Computer the detector sets
+#         if self.detset_key is None:
+#             detsets = None
+#         else:
+#             detsets = telescope.focalplane.detector_groups(self.detset_key)
+
+#         # Note:  the session times will be updated later when reading timestamps
+#         session = toast.instrument.Session(session_name)
+
+#         # Create the observation
+#         ob = toast.Observation(
+#             comm,
+#             telescope,
+#             n_samp,
+#             name=obs_name,
+#             session=session,
+#             detector_sets=detsets,
+#             sample_sets=None,
+#             process_rows=comm.group_size,
+#         )
+
+#         # Apply detector flags for bad pointing reconstruction
+#         local_dets = set(ob.local_detectors)
+#         local_fp_flags = {x: y for x, y in fp_flags.items() if x in local_dets}
+#         ob.update_local_detector_flags(local_fp_flags)
+
+#         # Create observation fields
+#         ob.shared.create_column(
+#             self.times,
+#             shape=(ob.n_local_samples,),
+#             dtype=np.float64,
+#         )
+
+#         fp_array = telescope.focalplane.detector_data
+#         ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
+#         ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
+#         ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+#         ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+
+#         have_pointing = True
+#         if ax_boresight_az is None:
+#             have_pointing = False
+#         else:
+#             ob.shared.create_column(
+#                 self.azimuth,
+#                 shape=(ob.n_local_samples,),
+#                 dtype=np.float64,
+#             )
+#         if ax_boresight_el is None:
+#             have_pointing = False
+#         else:
+#             ob.shared.create_column(
+#                 self.elevation,
+#                 shape=(ob.n_local_samples,),
+#                 dtype=np.float64,
+#             )
+#         if ax_boresight_roll is None:
+#             have_pointing = False
+#         else:
+#             ob.shared.create_column(
+#                 self.roll,
+#                 shape=(ob.n_local_samples,),
+#                 dtype=np.float64,
+#             )
+
+#         if have_pointing:
+#             ob.shared.create_column(
+#                 self.boresight_azel,
+#                 shape=(ob.n_local_samples, 4),
+#                 dtype=np.float64,
+#             )
+#             ob.shared.create_column(
+#                 self.boresight_radec,
+#                 shape=(ob.n_local_samples, 4),
+#                 dtype=np.float64,
+#             )
+#         ob.shared.create_column(
+#             self.shared_flags,
+#             shape=(ob.n_local_samples,),
+#             dtype=np.uint8,
+#         )
+#         if have_pointing:
+#             ob.shared.create_column(
+#                 defaults.position,
+#                 shape=(ob.n_local_samples, 3),
+#                 dtype=np.float64,
+#             )
+#             ob.shared.create_column(
+#                 defaults.velocity,
+#                 shape=(ob.n_local_samples, 3),
+#                 dtype=np.float64,
+#             )
+#         if ax_det_signal is not None:
+#             if self.daq_units:
+#                 ob.detdata.create(
+#                     self.det_data, dtype=np.int32, units=u.dimensionless_unscaled
+#                 )
+#             else:
+#                 ob.detdata.create(
+#                     self.det_data, dtype=np.float64, units=self.det_data_units
+#                 )
+#             ob.detdata.create(self.det_flags, dtype=np.uint8)
+
+#         if meta is not None:
+#             ob.update(meta)
+
+#         log.debug_rank(
+#             f"LoadContext {obs_name} allocate Observation in",
+#             comm=comm.comm_group,
+#             timer=timer,
+#         )
+#         return ob, have_pointing
+
+
+#         # One process in the group loads the metadata, builds the focalplane
+#         # model, and broadcasts to the rest of the group.
+#         #
+#         # FIXME: in the case of multiple wafers per observation, each wafer
+#         # reader needs to do this step, in order to pull in unique metadata
+#         # that is per-wafer and merge.
+#         #
+#         obs_meta, det_props = self._load_metadata(
+#             obs_name,
+#             obs_props[obindx]["session_name"],
+#             comm.comm_group,
+#             obs_dets_select,
+#             preproc_conf,
+#         )
+
+#         # Create the instrument model for the observation
+#         telescope, fp_flags = self._create_obs_instrument(
+#             obs_name,
+#             comm.comm_group,
+#             det_props,
+#         )
+
+#         # Create the observation and allocate data objects
+#         ob, have_pointing = self._create_observation(
+#             obs_name,
+#             obs_props[obindx]["session_name"],
+#             comm,
+#             telescope,
+#             n_samp,
+#             fp_flags,
+#             obs_meta,
+#         )
+
+#         # Read and communicate data
+#         self._load_data(ob, have_pointing, preproc_conf)
+
+#         # Report number of cut detectors
+#         local_cut = np.count_nonzero(
+#             [y for x, y in ob.local_detector_flags.items()]
+#         )
+#         if ob.comm.comm_group is None:
+#             all_cut = local_cut
+#         else:
+#             all_cut = ob.comm.comm_group.gather(local_cut, root=0)
+#             if ob.comm.group_rank == 0:
+#                 tot_cut = np.sum(all_cut)
+#                 msg = f"LoadContext {ob.name} {tot_cut} / "
+#                 msg += f"{len(ob.all_detectors)} dets trimmed on read"
+#                 log.debug(msg)
+
+#         # Now that all metadata has been loaded, ensure that all byte strings
+#         # are converted to unicode arrays.
+#         ob._internal = replace_byte_arrays(ob._internal)
+
+#         # Optionally load housekeeping data
+#         if self.hk_site_root is not None or self.hk_platform_root is not None:
+#             hk_timer = Timer()
+#             hk_timer.start()
+#             ob.hk = HKManager(
+#                 ob.comm.comm_group,
+#                 ob.shared[self.times].data,
+#                 site_root=self.hk_site_root,
+#                 site_db=self.hk_site_db,
+#                 site_fields=self.hk_site_fields,
+#                 site_aliases=self.hk_site_aliases,
+#                 plat_root=self.hk_platform_root,
+#                 plat_db=self.hk_platform_db,
+#                 plat_fields=self.hk_platform_fields,
+#                 plat_aliases=self.hk_platform_aliases,
+#             )
+#             log.debug_rank(
+#                 f"LoadContext {obs_name} load House Keeping in",
+#                 comm=comm.comm_group,
+#                 timer=hk_timer,
+#             )
+
+#         # Compute the boresight pointing and observatory position
+#         if have_pointing:
+#             compute_boresight_pointing(
+#                 ob,
+#                 self.times,
+#                 self.azimuth,
+#                 self.elevation,
+#                 self.roll,
+#                 self.boresight_azel,
+#                 self.boresight_radec,
+#                 defaults.position,
+#                 defaults.velocity,
+#                 self.shared_flags,
+#                 defaults.shared_mask_processing,
+#             )
+#         data.obs.append(ob)
+#         log.info_rank(
+#             f"LoadContext {obs_name} loaded in",
+#             comm=comm.comm_group,
+#             timer=otimer,
+#         )
+
+
+def observation_to_axman(obs):
+    """Create an AxisManager from an Observation.
+
+    The Observation must be distributed with a group size of one.
+
+    """
+    pass
+
+
+# def _wrap_obs(self, ob, dets, passinfo):
+#     """ Prepare data for the mapmaker """
+
+#     # Get the focalplane for this observation
+#     fp = ob.telescope.focalplane
+
+#     # Get the sample rate from the data.  We also have nominal sample rates
+#     # from the noise model and also from the focalplane.
+#     # (rate, dt, dt_min, dt_max, dt_std) = rate_from_times(
+#     #     ob.shared[self.times].data
+#     # )
+
+#     axdets = LabelAxis("dets", dets)
+#     nsample = int(ob.n_local_samples)
+
+#     axsamps = OffsetAxis(
+#         "samps",
+#         count=nsample,
+#         offset=ob.local_index_offset,
+#         origin_tag=ob.name,
+#     )
+
+#     # Convert the data view into a RangesMatrix
+#     ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), nsample))
+#     if self.view is not None:
+#          view_ranges = np.array(
+#              [[x.first, x.last] for x in ob.intervals[self.view]]
+#          )
+#          ranges += so3g.proj.ranges.Ranges.from_array(view_ranges.astype(np.int32), nsample)
+
+#     # Convert the focalplane offsets into the expected form
+#     det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
+#     det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
+#     xi, eta, gamma = quat_to_xieta(det_quat)
+
+#     axfp = AxisManager()
+#     axfp.wrap("xi", xi, axis_map=[(0, axdets)])
+#     axfp.wrap("eta", eta, axis_map=[(0, axdets)])
+#     axfp.wrap("gamma", gamma, axis_map=[(0, axdets)])
+
+#     # Convert Az/El quaternion of the detector back into
+#     # angles from the simulation.
+#     theta, phi, pa = toast.qarray.to_iso_angles(ob.shared[self.boresight])
+
+#     # Azimuth is measured in the opposite direction from longitude
+#     az = 2 * np.pi - phi
+#     el = np.pi / 2 - theta
+#     roll = pa
+
+#     axbore = AxisManager()
+#     axbore.wrap("az", az, axis_map=[(0, axsamps)])
+#     axbore.wrap("el", el, axis_map=[(0, axsamps)])
+#     axbore.wrap("roll", roll, axis_map=[(0, axsamps)])
+
+#     axobs = AxisManager()
+#     axobs.wrap("focal_plane", axfp)
+#     axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
+#     axobs.wrap(
+#         "signal",
+#         np.vstack(ob.detdata[self.det_data][dets, :]),
+#         axis_map=[(0, axdets), (1, axsamps)],
+#     )
+#     axobs.wrap("boresight", axbore)
+#     axobs.wrap('flags', FlagManager.for_tod(axobs))
+#     axobs.flags.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
+#     axobs.wrap("weather", np.full(1, self.weather))
+#     axobs.wrap("site",    np.full(1, "so"))
+
+#     # median detrend added to TOAST workflow script
+#     #axobs.signal -= np.median(axobs.signal, axis=-1, keepdims=True)
+
+#     if self.truncate_tod:
+#         # FFT-truncate for faster fft ops
+#         axobs.restrict("samps", [0, fft.fft_len(axobs.samps.count)])
+
+#     # MLMapmaker.add_obs will apply deslope
+#     if self.deslope:
+#         utils.deslope(axobs.signal, w=5, inplace=True)
+
+#     if self.downsample != 1:
+#         axobs = mm.downsample_obs(axobs, passinfo.downsample)
+
+#     # NOTE:  Expected contents look like:
+#     # >>> tod
+#     # AxisManager(signal[dets,samps], timestamps[samps], readout_filter_cal[dets],
+#     # mce_filter_params[6], iir_params[3,5], flags*[samps], boresight*[samps],
+#     # array_data*[dets], pointofs*[dets], focal_plane*[dets], abscal[dets],
+#     # timeconst[dets], glitch_flags[dets,samps], source_flags[dets,samps],
+#     # relcal[dets], dets:LabelAxis(63), samps:OffsetAxis(372680))
+#     # >>> tod.focal_plane
+#     # AxisManager(xi[dets], eta[dets], gamma[dets], dets:LabelAxis(63))
+#     # >>> tod.boresight
+#     # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
+
+#     return axobs
+
