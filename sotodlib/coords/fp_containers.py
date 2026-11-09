@@ -721,12 +721,8 @@ class FocalPlane:
     weights : Float[np.ndarray, "ndet"]
         Per-detector weights used when fitting transforms and combining
         measurements.
-    template : DetectorOffsets
-        Reference detector layout used as the transform source on sky.
-    template_fp : DetectorOffsets
-        Reference detector layout used as the transform source in focal plane coords.
-    template_ot : DetectorOffsets
-        Reference detector layout used as the transform source in OT coords.
+    parent : FocalPlaneCollection
+        The collection that this measurement belongs to.
     pointing_model : PointingModel
         Pointing model to apply before computing corrected transforms.
     static : bool
@@ -752,6 +748,12 @@ class FocalPlane:
         Residuals between `data` and `transformed`.
     pm_resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data_pm` and `pm_transformed`.
+    template : DetectorOffsets
+        Reference detector layout used as the transform source on sky.
+    template_fp : DetectorOffsets
+        Reference detector layout used as the transform source in focal plane coords.
+    template_ot : DetectorOffsets
+        Reference detector layout used as the transform source in OT coords.
     """
 
     name: str
@@ -759,10 +761,8 @@ class FocalPlane:
     data: DetectorOffsets
     enc: DetectorOffsets
     weights: Float[np.ndarray, "ndet"]
-    template: DetectorOffsets
-    template_fp: DetectorOffsets
-    template_ot: DetectorOffsets
-    pointing_model: PointingModel
+    parent: FocalPlaneCollection
+    pointing_model : PointingModel
     static: bool
     autofreeze: bool
     fake_gamma: bool
@@ -771,11 +771,25 @@ class FocalPlane:
     transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("transformed")
     pm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("pm_transform")
     pm_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("pm_transformed")
+    fpc_transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("fpc_transformed")
     _data_pm_stat: DetectorOffsets = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
     _pm_transform_stat: Transform = field(init=False)
     _pm_transformed_stat: DetectorOffsets = field(init=False)
+    _fpc_transformed_stat: DetectorOffsets = field(init=False)
+
+    @property
+    def template(self) -> DetectorOffsets:
+        return self.parent.template
+
+    @property
+    def template_fp(self) -> DetectorOffsets:
+        return self.parent.template_fp
+
+    @property
+    def template_ot(self) -> DetectorOffsets:
+        return self.parent.template_ot
 
     @classmethod
     def from_aman(
@@ -783,10 +797,8 @@ class FocalPlane:
         name: str,
         meas_id: str,
         aman: AxisManager,
-        template: DetectorOffsets,
-        template_fp: DetectorOffsets,
-        template_ot: DetectorOffsets,
-        pointing_model: PointingModel,
+        parent: FocalPlaneCollection,
+        pointing_model : PointingModel,
         autofreeze: bool = False,
         fake_gamma: bool = True,
         weight_factor: float = 1000.0,
@@ -809,12 +821,8 @@ class FocalPlane:
         aman : AxisManager
             Input data container holding focal plane and detector metadata.
             See above for details on assumptions.
-        template : DetectorOffsets
-            Template focal plane.
-        template_fp : DetectorOffsets
-            Reference detector layout used as the transform source in focal plane coords.
-        template_ot : DetectorOffsets
-            Reference detector layout used as the transform source in OT coords.
+        parent : FocalPlaneCollection
+            The collection that this measurement belongs to.
         pointing_model : PointingModel
             Pointing model associated with the observation.
         autofreeze : bool, default: False
@@ -832,6 +840,7 @@ class FocalPlane:
             Note that this will have `static = False`.
         """
         # Figure out mapping
+        template = parent.template
         aman_det_ids = np.asarray(aman.det_info.det_id)
         template_det_ids = np.asarray(template.det_id)
         _, aman_idx, template_idx = np.intersect1d( aman_det_ids, template_det_ids, return_indices=True)
@@ -935,9 +944,7 @@ class FocalPlane:
             data,
             enc,
             weights,
-            template,
-            template_fp,
-            template_ot,
+            parent,
             pointing_model,
             False,
             autofreeze,
@@ -984,12 +991,20 @@ class FocalPlane:
         return _transformed(self, "_pm_transformed_stat", self.pm_transform)
 
     @property
+    def _fpc_transformed_dyn(self) -> DetectorOffsets:
+        return _transformed(self, "_pm_transformed_stat", self.parent.transform)
+
+    @property
     def resid(self):
         return self.data.xyz - self.transformed.xyz
 
     @property
     def pm_resid(self):
         return self.data_pm.xyz - self.pm_transformed.xyz
+
+    @property
+    def fpc_resid(self):
+        return self.data_pm.xyz - self.fpc_transformed.xyz
 
     def save(
         self,
@@ -1051,18 +1066,16 @@ class FocalPlane:
         if "_pm_transform_stat" in self.__dict__:
             self._pm_transform_stat.save(f, f"{path}/pm_transform", overwrite=overwrite)
         if "_pm_transformed_stat" in self.__dict__:
-            self._pm_transformed_stat.save(
-                f, f"{path}/pm_transformed", overwrite=overwrite
-            )
+            self._pm_transformed_stat.save( f, f"{path}/pm_transformed", overwrite=overwrite)
+        if "_fpc_transformed_stat" in self.__dict__:
+            self._fpc_transformed_stat.save( f, f"{path}/fpc_transformed", overwrite=overwrite)
 
     @classmethod
     def load(
         cls,
         f: h5py.File,
         path: str,
-        template: DetectorOffsets,
-        template_fp: DetectorOffsets,
-        template_ot: DetectorOffsets,
+        parent: FocalPlaneCollection,
         pointing_models: tuple[PointingModel, ...],
     ) -> Self:
         """
@@ -1101,9 +1114,7 @@ class FocalPlane:
             data=data,
             enc=enc,
             weights=weights,
-            template=template,
-            template_fp=template_fp,
-            template_ot=template_ot,
+            parent=parent,
             pointing_model=pointing_models[pm_idx],
             static=cast(bool, group.attrs["static"]),
             autofreeze=cast(bool, group.attrs["autofreeze"]),
@@ -1120,6 +1131,8 @@ class FocalPlane:
             fp._pm_transform_stat = Transform.load(f, f"{path}/pm_transform")
         if "pm_transformed" in group:
             fp._pm_transformed_stat = DetectorOffsets.load(f, f"{path}/pm_transformed")
+        if "fpc_transformed" in group:
+            fp._fpc_transformed_stat = DetectorOffsets.load(f, f"{path}/fpc_transformed")
 
         return fp
 
@@ -1358,32 +1371,9 @@ class FocalPlaneCollection:
         )
         group = cast(h5py.Group, f[path])
 
-        focal_planes = []
-        for name in group:
-            if name in {
-                "template",
-                "template_fp",
-                "template_ot",
-                "data",
-                "weights",
-                "transform",
-                "transformed",
-            }:
-                continue
-            focal_planes.append(
-                FocalPlane.load(
-                    f,
-                    f"{path}/{name}",
-                    template=template,
-                    template_fp=template_fp,
-                    template_ot=template_ot,
-                    pointing_models=pointing_models,
-                )
-            )
-
         collection = cls(
             name=cast(str, group.attrs["name"]),
-            focal_planes=focal_planes,
+            focal_planes=[],
             template=template,
             template_fp=template_fp,
             template_ot=template_ot,
@@ -1406,6 +1396,26 @@ class FocalPlaneCollection:
             collection._transformed_stat = DetectorOffsets.load(
                 f,
                 f"{path}/transformed",
+            )
+
+        for name in group:
+            if name in {
+                "template",
+                "template_fp",
+                "template_ot",
+                "data",
+                "weights",
+                "transform",
+                "transformed",
+            }:
+                continue
+            collection.focal_planes.append(
+                FocalPlane.load(
+                    f,
+                    f"{path}/{name}",
+                    parent=collection,
+                    pointing_models=pointing_models,
+                )
             )
 
         return collection

@@ -33,6 +33,9 @@ import sqlalchemy as sqy
 from scipy.optimize import minimize
 import emcee
 
+# TODO: Calculate a weighted per-det scatter
+# TODO: Include per-det scatter in chisq
+
 logger = init_logger(__name__, "solve_static_pointing: ")
 default_config = {
     "tel": "LAT",
@@ -349,17 +352,27 @@ def _get_obslist(ctx, cfg, system):
     return obslist
 
 
-def _load_obs(aman, obs_id, array, ctx, system, cfg):
+def _load_obs(aman, obs_id, array, ctx, system, cfg, job):
     obs = ctx.obsdb.get(obs_id)
     rx = system.search("receivers", obs["timestamp"])
     pm = system.search("pointing_models", obs["timestamp"])
     fp = rx.find_fpc(obs["tube_slot"], array)
     if fp is None:
         raise ValueError("Array {array} not found in {rx.name} {rx.epoch}")
-    loaded = fpc.FocalPlane.from_aman( fp.name, obs["obs_id"], aman, fp.template, fp.template_fp, fp.template_ot, pm, fp.autofreeze, fp.fake_gamma, cfg.weight_factor)
+    # Cuts
+    if "hits" in aman.focal_plane:
+        aman.restrict( "dets", aman.focal_plane.hits >= cfg.min_hits )
+    if "R2" in aman.focal_plane:
+        aman.restrict("dets", aman.focal_plane.R2 > cfg.min_r2)
+    dfrac = aman.dets.count / len(fp.template.xyz)
+    if dfrac < cfg.min_frac_dets:
+        msg = f"Only {100*np.round(dfrac, 2)}% of dets uncut"
+        ju.fail(job, ErrCode.MIN_DETS, msg, logger)
+        return None, rx, fp
+    loaded = fpc.FocalPlane.from_aman( fp.name, obs["obs_id"], aman, fp, pm, fp.autofreeze, fp.fake_gamma, cfg.weight_factor)
 
     # Not adding to the system so that we can leave ourselves open to parallelism
-    return loaded
+    return loaded, rx, fp
 
 
 def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
@@ -399,34 +412,14 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
             ju.fail(job, ErrCode.LOADER, msg, logger)
             continue
 
-        # Locate
-        # TODO: I must be able to cache/hash somehow for this
-        rx = system.search("receivers", float(job.tags["timestamp"]))
-        if rx is None:
-            raise ValueError(f"Somehow found no receiver for {jstr}")
-        fp = rx.find_fpc(job.tags["ot"], array)
-        if fp is None:
-            raise ValueError(f"Somehow found no focal plane for {jstr}")
-
-
-        # Cuts
-        if "hits" in aman.focal_plane:
-            aman.restrict( "dets", aman.focal_plane.hits >= cfg.min_hits )
-        if "R2" in aman.focal_plane:
-            aman.restrict("dets", aman.focal_plane.R2 > cfg.min_r2)
-        dfrac = aman.dets.count / len(fp.template.xyz)
-        if dfrac < cfg.min_frac_dets:
-            msg = f"Only {100*np.round(dfrac, 2)}% of dets uncut"
-            ju.fail(job, ErrCode.MIN_DETS, msg, logger)
-            continue
-
         # Init the fp
-        meas = _load_obs(aman, obs_id, array, ctx, system, cfg)
         try:
-            meas = _load_obs(aman, obs_id, array, ctx, system, cfg)
+            meas, rx, fp = _load_obs(aman, obs_id, array, ctx, system, cfg, job)
         except Exception as e:
             msg = f"Failed to build focal plane with error: {e}"
             ju.fail(job, ErrCode.FPINIT, msg, logger)
+            continue
+        if meas is None:
             continue
 
         # Check min dets
@@ -627,12 +620,11 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
                     for meas in fp.focal_planes:
-                        resid = meas.data_pm.xyz - meas.pm_transformed.xyz
                         wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
                         if meas.fake_gamma:
-                            err = np.linalg.norm(resid[:, :2], axis=1) 
+                            err = np.linalg.norm(meas.fpc_resid[:, :2], axis=1) 
                         else:
-                            err = np.linalg.norm(resid, axis=1) 
+                            err = np.linalg.norm(meas.fpc_resid, axis=1) 
                         mrmsk = err > cfg.outlier_sigma*np.std(err[wmsk])
                         meas.weights[mrmsk] = 0
                         tot_cut += np.sum(mrmsk[wmsk])
