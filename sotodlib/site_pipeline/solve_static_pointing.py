@@ -435,6 +435,9 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir):
             ju.fail(job, ErrCode.MIN_DETS, msg, logger)
             continue
 
+        # Lets make sure transformed is initid
+        meas.freeze(True)
+
         # Cut on scale and shear
         try:
             scale, shear, _ = meas.transform.decompose
@@ -556,13 +559,19 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
     # Save our template
+    logger.info("Saving templates")
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
+    fpc.make_manifestdb(
+        system, "template", os.path.join(data_dir, "template.sqlite"), outfile
+    )
 
     # Mark pad epochs as pad
+    logger.info("Padding epochs")
     system.set_pad(cfg.pad_epochs, False)
 
     # Get obs list
+    logger.info("Getting obslist")
     obslist = _get_obslist(ctx, cfg, system)
 
     # Set up per-obs jobs
@@ -592,13 +601,17 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
     # Pad empty if needed
     if cfg.pad_empty:
+        logger.info("Padding empty")
         system.set_pad(cfg.pad_epochs, True)
 
     # Save our per-obs results
-    # TODO: Setup databases!
+    logger.info("Saving per-obs")
     system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
+    fpc.make_per_obs_manifestdb(
+        system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
+    )
 
     # Setup fit params
     params = system.parameters.copy()
@@ -664,10 +677,12 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # TODO: plots
 
     # Save
-    # TODO: Setup databases!
     system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
+    fpc.make_manifestdb(
+        system, "transformed", os.path.join(data_dir, "focal_plane.sqlite"), outfile
+    )
 
 
 def main():

@@ -10,6 +10,7 @@ calculations or as static attributes for loading saved results.
 from __future__ import annotations
 
 import logging
+import os
 from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -53,6 +54,136 @@ logger = logging.getLogger("solve_static_pointing")
 T = TypeVar("T")
 
 
+def make_manifestdb(system: PointingSystem, field: str, db_path: str, h5_path: str):
+    """
+    Create a ManifestDB mapping `(obs:timestamp, array) -> template dataset`
+    for all templates contained in a PointingSystem.
+    Note that if an existing db is on disk this will delete it
+
+    Parameters
+    ----------
+    system : PointingSystem
+        System containing template focal planes.
+    field : str
+        The field within each saved `FocalPlaneCollection` to point to.
+    db_path : str
+        Output sqlite database path.
+    h5_path : str
+        HDF5 file containing the saved templates.
+    """
+    if os.path.isfile(db_path):
+        os.remove(db_path)
+    scheme = metadata.ManifestScheme()
+    scheme.add_range_match("obs:timestamp")
+    scheme.add_exact_match("array")
+    scheme.add_data_field("dataset")
+    mdb = metadata.ManifestDb(scheme=scheme)
+    mdb.to_file(db_path)
+    mdb = metadata.ManifestDb(db_path)
+    h5_rel = os.path.relpath(
+        os.path.abspath(h5_path), os.path.dirname(os.path.abspath(db_path))
+    )
+    epoch_dict = {ep.name: ep for ep in system.era.epochs}
+    seen = set()
+    for rx_idx, rx in enumerate(system.receivers):
+        for epoch_name in rx.epoch.split("+"):
+            epoch = epoch_dict[epoch_name]
+            for cover in epoch.covers:
+                for ot in rx.optics_tubes:
+                    for wafer_slot, fp in zip(
+                        ot.wafer_slots,
+                        ot.focal_planes,
+                    ):
+                        dataset = (
+                            f"/receivers/"
+                            f"{rx_idx}_{rx.name}_{rx.epoch}/"
+                            f"{ot.name}/"
+                            f"{wafer_slot}-{fp.name}/"
+                            f"{field}"
+                        )
+
+                        key = (
+                            cover.start,
+                            cover.stop,
+                            fp.name,
+                        )
+                        if key in seen:
+                            raise ValueError(
+                                f"Duplicate entry for array={fp.name} and range=({cover.start}, {cover.stop})"
+                            )
+                        seen.add(key)
+                        mdb.add_entry(
+                            {
+                                "obs:timestamp": (cover.start, cover.stop),
+                                "array": fp.name,
+                                "dataset": dataset,
+                            },
+                            filename=h5_rel,
+                        )
+
+
+def make_per_obs_manifestdb(
+    system: PointingSystem, field: str, db_path: str, h5_path: str
+):
+    """
+    Create a ManifestDB mapping `(obs:obs_id, array) -> dataset`
+    for a field stored on each FocalPlane measurement.
+
+    Parameters
+    ----------
+    system : PointingSystem
+        System containing per-observation measurements.
+    field : str
+        Field within each saved FocalPlane measurement to point to.
+    db_path : str
+        Output sqlite database path.
+    h5_path : str
+        HDF5 file containing the saved system.
+    """
+    if os.path.isfile(db_path):
+        os.remove(db_path)
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match("obs:obs_id")
+    scheme.add_exact_match("array")
+    scheme.add_data_field("dataset")
+    mdb = metadata.ManifestDb(scheme=scheme)
+    mdb.to_file(db_path)
+    mdb = metadata.ManifestDb(db_path)
+    h5_rel = os.path.relpath(
+        os.path.abspath(h5_path), os.path.dirname(os.path.abspath(db_path))
+    )
+    seen = set()
+    for rx_idx, rx in enumerate(system.receivers):
+        for ot in rx.optics_tubes:
+            for wafer_slot, fp in zip(ot.wafer_slots, ot.focal_planes):
+                for meas_idx, meas in enumerate(fp.focal_planes):
+                    dataset = (
+                        f"/receivers/"
+                        f"{rx_idx}_{rx.name}_{rx.epoch}/"
+                        f"{ot.name}/"
+                        f"{wafer_slot}-{fp.name}/"
+                        f"focal_planes/"
+                        f"{meas_idx}_{meas.meas_id}/"
+                        f"{field}"
+                    )
+
+                    key = (meas.meas_id, fp.name)
+
+                    if key in seen:
+                        raise ValueError(
+                            f"Duplicate entry for obs_id={meas.meas_id}, array={fp.name}"
+                        )
+                    seen.add(key)
+                    mdb.add_entry(
+                        {
+                            "obs:obs_id": meas.meas_id,
+                            "array": fp.name,
+                            "dataset": dataset,
+                        },
+                        filename=h5_rel,
+                    )
+
+
 def _add_attrs(dset, attrs):
     for k, v in attrs.items():
         if v is None:
@@ -61,7 +192,7 @@ def _add_attrs(dset, attrs):
         dset.attrs[k] = v
 
 
-def _create_group(f, path, overwrite=True):
+def _create_group(f, path, overwrite=True) -> h5py.Group:
     if path in f:
         if path == "/":
             return f[path]
@@ -122,7 +253,7 @@ def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name:
     affine, shift = mt.get_affine_two_stage(
         self.template.xyz[wmsk, :2],
         getattr(self, data_name).xyz[wmsk, :2],
-        self.weights,
+        self.weights[wmsk],
     )
     to_ret = Transform.identity()
     to_ret.shift[:2] = shift
@@ -480,8 +611,6 @@ class Transform:
             If True overwrite any existing h5groups.
         """
         group = _create_group(f, path, overwrite=overwrite)
-
-        group = f.create_group(path)
         group.create_dataset("shift", data=self.shift)
         group.create_dataset("affine", data=self.affine)
 
@@ -2397,8 +2526,8 @@ class PointingSystem:
         group.attrs["parameter_names"] = np.asarray(
             self.parameter_names, dtype=h5py.string_dtype()
         )
-        parameter_map_group = _create_group(
-            f, f"{path}/parameter_map", overwrite=overwrite
+        parameter_map_group = cast(
+            h5py.Group, _create_group(f, f"{path}/parameter_map", overwrite=overwrite)
         )
         for idx, par_map in enumerate(self.parameter_map):
             parameter_map_group.create_dataset(

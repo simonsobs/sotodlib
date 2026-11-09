@@ -10,7 +10,7 @@ from .fp_containers import DetectorOffsets, FocalPlane, FocalPlaneCollection, Re
 
 
 def plot_detector_offsets(
-        ax: mpl.axes._axes.Axes, # type: ignore
+    ax: mpl.axes._axes.Axes,  # type: ignore
     offsets: DetectorOffsets,
     text: Optional[str] = None,
     fontsize: int = 16,
