@@ -13,6 +13,7 @@ import shutil
 from enum import Enum
 from functools import partial
 from typing import cast
+from copy import deepcopy
 
 import emcee
 import git
@@ -331,7 +332,8 @@ def _get_obslist(ctx, cfg, system):
     if "obs:obs_id" not in cols:
         raise ValueError("Pointing metadata not indexed on obsdb!")
     obsids = np.unique(np.array([entry["obs:obs_id"] for entry in point_db.inspect()]))
-    obsids = ["obs_1782128967_lati1_111"]
+    # obsids = ["obs_1782128967_lati1_111"]
+    # obsids = ["obs_1777500417_lati6_111"]
 
     # Validate against black and whitelist
     if len(cfg.obs_whitelist) > 0:
@@ -385,12 +387,17 @@ def _load_obs(aman, obs_id, array, ctx, system, cfg, job):
 def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile):
     job = None
     njobs = len(open_jobs)
+    if njobs == 0:
+        logger.info("No new per-obs jobs to run!")
+        return
     logger.info(
         "Starting per-obs mode with %d open jobs and %d already done",
         njobs,
         len(done_jobs),
     )
     open_jobs += [None]
+    pm_pars = deepcopy(system.parameters) # Cache a copy of the pars
+    system.set_pm_to_defaults(cfg)
     for i, j in enumerate(open_jobs):
         if job is not None:
             logger.debug("Writing to db")
@@ -437,7 +444,12 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
             continue
 
         # Lets make sure transformed is initid
-        meas.freeze(True)
+        try:
+            meas.freeze(True)
+        except Exception as e:
+            msg = f"Failed to compute affine with error: {e}"
+            ju.fail(job, ErrCode.AFF_ERR, msg, logger)
+            continue
 
         # Cut on scale and shear
         try:
@@ -474,6 +486,7 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
         if i > 0 and i % cfg.save_every == 10:
             with h5py.File(outfile, "a") as f:
                 system.save(f, "/", True)
+    system.update_parameters(pm_pars)
     logger.info("Done with per-obs mode!")
 
 
@@ -517,7 +530,7 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
         for ot in rx.optics_tubes:
             for fp in ot.focal_planes:
                 fp.focal_planes = [
-                    meas for meas in fp if f"{meas.meas_id}+{meas.name}" not in open_ids
+                    meas for meas in fp.focal_planes if f"{meas.meas_id}+{meas.name}" not in open_ids
                 ]
 
     return open_jobs, done_jobs
@@ -635,7 +648,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Setup fit params
     params = system.parameters.copy()
     bounds = [(-np.inf, np.inf)] * len(params)
-    for name, par in cfg.parameters:
+    for name, par in cfg.parameters.items():
         if name not in system.parameter_names:
             logger.warning("Unknown paramter %s", name)
             continue
@@ -646,6 +659,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             continue
         bounds[idx] = tuple(par.get("bounds", bounds[idx])[:2])
     system.update_parameters(params)
+    logger.info(params)
 
     # Fit for pointing model and focal planes
     for i in range(cfg.n_rounds):
@@ -659,13 +673,14 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             method="Nelder-Mead",
         )
         system.update_parameters(res.x)
+        logger.info(params)
+        system.set_freeze(True)
 
         # Cut outliers
         tot_cut = 0
         for rx in system.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
-                    fp.freeze(True)
                     for meas in fp.focal_planes:
                         wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
                         if meas.fake_gamma:
@@ -675,7 +690,6 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                         mrmsk = err > cfg.outlier_sigma * np.std(err[wmsk])
                         meas.weights[mrmsk] = 0
                         tot_cut += np.sum(mrmsk[wmsk])
-                        meas.freeze(True)
         _plot_fit(system, plot_dir, i)
         if tot_cut == 0:
             break
@@ -695,10 +709,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         lower = np.percentile(samples, 16, axis=0)
         upper = np.percentile(samples, 84, axis=0)
         _ = lower, upper
+        system.set_freeze(True)
         _plot_fit(system, plot_dir, "mcmc")
         # TODO: Save the chain somewhere
         # TODO: MCMC plots
-    # TODO: plots
 
     # Save
     system.set_static(True)

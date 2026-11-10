@@ -218,6 +218,7 @@ def plot_ufm(
         If True then use `pm_data` if `False` use `data`.
         Only matters for `FocalPlane`.
     """
+    wmsk = np.isfinite(focal_plane.weights) * (focal_plane.weights > 0)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
     data = focal_plane.data
     transformed = focal_plane.transformed
@@ -244,7 +245,7 @@ def plot_ufm(
     )
     plot_detector_offsets(
         ax1,
-        data,
+        data[wmsk],
         color="orange",
         alpha=0.4,
         label="measured",
@@ -255,14 +256,7 @@ def plot_ufm(
     ax1.legend()
 
     # Plot histogram of residuals.
-    dist = 3600 * np.linalg.norm(
-        np.rad2deg(
-            (transformed.xyz - data.xyz)[
-                np.isfinite(focal_plane.weights) * (focal_plane.weights > 0), :2
-            ]
-        ),
-        axis=1,
-    )
+    dist = 3600 * np.linalg.norm( np.rad2deg( (transformed.xyz - data.xyz)[wmsk, :2]), axis=1)
     if len(dist) > 0:
         dist_thresh = np.percentile(dist, 97)
         bins = max(int(len(dist) / 20), 10)

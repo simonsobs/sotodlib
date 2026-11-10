@@ -294,7 +294,11 @@ class StaticOrCached(Generic[T]):
             return self
 
         if obj.static:
-            return getattr(obj, f"_{self.name}_stat")
+            if f"_{self.name}_stat" in obj.__dict__:
+                return getattr(obj, f"_{self.name}_stat")
+            res = getattr(obj, f"_{self.name}_dyn")
+            setattr(obj, f"_{self.name}_stat", res)
+            return res
         return getattr(obj, f"_{self.name}_dyn")
 
 
@@ -332,7 +336,7 @@ class PointingModel:
         det_enc: DetectorOffsets,
         weights: Float[np.ndarray, "ndet"],
         fake_gamma: bool,
-        tol: float = 1e-6,
+        tol: float = 2.42e-6,
         max_iter: int = 5,
     ) -> DetectorOffsets:
         """
@@ -370,7 +374,7 @@ class PointingModel:
             If True, ignore detector polarization angles and propagate only
             detector position (`xi`, `eta`). If False, propagate the full
             (`xi`, `eta`, `gamma`) coordinate set.
-        tol : float, default: 1e-6
+        tol : float, default: 2.42e-6
             RMS convergence tolerance for the iterative distortion removal, in radians.
         max_iter : int, default: 5
             Maximum number of iterations for the distortion removal.
@@ -412,6 +416,9 @@ class PointingModel:
         ancil = det_enc_msk.ancil
 
         err = np.inf
+        alpha = 1.0
+        prev_err = np.inf
+        prev_distortion = np.zeros_like(estimate)
         for _ in range(max_iter):
             fp.xi = estimate[:, 0]
             fp.eta = estimate[:, 1]
@@ -460,13 +467,19 @@ class PointingModel:
                     )
                 )
             err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1) ** 2))
-
+            if err > prev_err:
+                alpha *= 0.5
+                distortion = prev_distortion
+            else:
+                alpha = min(1.0, alpha * 1.2)
+                prev_distortion = distortion
+                prev_err = err
             if err < tol:
                 to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
                 return to_ret
 
             # Update estimate of the undistorted fp
-            estimate -= distortion
+            estimate -= alpha * distortion
 
         raise RuntimeError(
             f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
@@ -1133,6 +1146,7 @@ class FocalPlane:
         static : bool
             What to set `self.static` to after freezing.
         """
+        self.static = True
         self._pm_data_stat = self._pm_data_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
@@ -1426,6 +1440,9 @@ class FocalPlaneCollection:
         static : bool
             What to set `self.static` to after freezing.
         """
+        if self.pad:
+            return
+        self.static = True
         self._data_stat = self._data_dyn
         self._weights_stat = self._weights_dyn
         self._scatter_stat = self._scatter_dyn
@@ -1439,7 +1456,10 @@ class FocalPlaneCollection:
         dat_full = np.array(
             [fp.pm_data.xyz * fp.weights[..., None] for fp in self.focal_planes]
         )
-        to_ret.xyz = np.nansum(dat_full, axis=-1) / self.weights[..., None]
+        weights = self.weights
+        wmsk = np.isfinite(weights) * (weights > 0)
+        to_ret.xyz[wmsk] = np.nansum(dat_full[:, wmsk], axis=0) / weights[wmsk, None]
+        to_ret.xyz[~wmsk] = np.nan
         to_ret.center = None
         if self.autofreeze:
             self._data_stat = to_ret
@@ -1447,8 +1467,8 @@ class FocalPlaneCollection:
 
     @property
     def _weights_dyn(self) -> Float[np.ndarray, "ndet"]:
-        weights_full = np.array([fp.weights for fp in self.focal_planes])
-        to_ret = np.nansum(weights_full, axis=-1)
+        weights_full = np.asarray( [fp.weights for fp in self.focal_planes])
+        to_ret = np.nansum(weights_full, axis=0)
         if self.autofreeze:
             self._weights_stat = to_ret
         return to_ret
@@ -1458,15 +1478,19 @@ class FocalPlaneCollection:
         dat_full = np.array([fp.pm_data.xyz for fp in self.focal_planes])
         weights_full = np.array([fp.weights for fp in self.focal_planes])
         mean = self.data.xyz
-        var = (
+        weights = self.weights
+        wmsk = np.isfinite(weights) * (weights > 0)
+        var = np.zeros_like(weights)
+        var[wmsk] = (
             np.nansum(
-                weights_full[..., None] * (dat_full - mean[None, ...]) ** 2,
+                weights_full[:, wmsk, None] * (dat_full - mean[None, wmsk, :])** 2,
                 axis=0,
             )
-            / self.weights[..., None]
+            / weights[wmsk, None]
         )
-        std = np.sqrt(var)
-        to_ret = np.sqrt(np.nanmean(std**2, axis=0))
+        to_ret = np.sqrt(np.nanmean(var, axis=0))
+        if self.autofreeze:
+            self._scatter_stat= to_ret
         return to_ret
 
     @property
@@ -1523,7 +1547,7 @@ class FocalPlaneCollection:
         for fp in self.focal_planes:
             fp.save(
                 f,
-                f"{path}/{fp.meas_id}",
+                f"{path}/focal_planes/{fp.meas_id}",
                 pointing_models=pointing_models,
                 overwrite=overwrite,
             )
@@ -1613,22 +1637,13 @@ class FocalPlaneCollection:
                 f"{path}/transformed",
             )
 
-        for name in group:
-            if name in {
-                "template",
-                "template_fp",
-                "template_ot",
-                "data",
-                "weights",
-                "scatter",
-                "transform",
-                "transformed",
-            }:
-                continue
+        if "focal_planes" not in group:
+            return collection
+        for name in cast(h5py.Group, group["focal_planes"]):
             collection.focal_planes.append(
                 FocalPlane.load(
                     f,
-                    f"{path}/{name}",
+                    f"{path}/focal_planes/{name}",
                     parent=collection,
                     pointing_models=pointing_models,
                 )
@@ -1712,6 +1727,9 @@ class OpticsTube:
         static : bool
             What to set `self.static` to after freezing.
         """
+        if self.allpad:
+            return
+        self.static = True
         self._cm_transform_stat = self._cm_transform_dyn
         self.static = static
 
@@ -1733,7 +1751,7 @@ class OpticsTube:
         elif len(transforms) == 1:
             cm_aff, cm_shift = transforms[0], shifts[0]
         else:
-            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, False)
+            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, False, fast=True)
         to_ret = Transform(cm_shift, cm_aff)
         if self.autofreeze:
             self._cm_transform_stat = to_ret
@@ -1947,6 +1965,9 @@ class Receiver:
         static : bool
             What to set `self.static` to after freezing.
         """
+        if self.allpad:
+            return
+        self.static = True
         self._cm_transform_stat = self._cm_transform_dyn
         self.static = static
 
@@ -1970,7 +1991,7 @@ class Receiver:
         elif len(transforms) == 1:
             cm_aff, cm_shift = transforms[0], shifts[0]
         else:
-            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, True)
+            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, True, fast=True)
         to_ret = Transform(cm_shift, cm_aff)
         if self.autofreeze:
             self._cm_transform_stat = to_ret
@@ -2137,6 +2158,24 @@ class PointingSystem:
                     for meas in fp.focal_planes:
                         meas.static = static
 
+    def set_freeze(self, static: bool):
+        """
+        Run freeze for all relevent childen.
+
+        Parameters
+        ----------
+        static : bool
+            The value to set `static` to for all relevent children.
+        """
+        for rx in self.receivers:
+            rx.freeze(static)
+            for ot in rx.optics_tubes:
+                ot.freeze(static)
+                for fp in ot.focal_planes:
+                    fp.freeze(static)
+                    for meas in fp.focal_planes:
+                        meas.freeze(static)
+
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
         return np.array(
@@ -2269,7 +2308,7 @@ class PointingSystem:
             pad = rx.epoch in pad_epochs
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
-                    fp.pad = bool(pad + bool(pad_empty * (len(fp.focal_planes) == 0)))
+                    fp.pad = pad or (pad_empty and (len(fp.focal_planes) == 0))
 
     def load_pm_from_mdb(self, mdb: ManifestDb):
         """
@@ -2473,6 +2512,21 @@ class PointingSystem:
         par_map = tuple(np.array(pmap) for pmap, n in zip(par_map, n_mapped) if n > 0)
 
         return cls(era, tuple(pms), tuple(rxs), par_names, par_map, calender_str, {})
+
+    def set_pm_to_defaults(self, cfg):
+        params = self.parameters.copy()
+        def_pars = []
+        for pm in self.pointing_models:
+            pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
+            pars = deepcopy(param_defaults[pm_ver])
+            pars.update(cfg.pm_defaults_overrides[pm_ver])
+            def_pars = []
+        for i, (p_idx, name) in enumerate(zip(self.parameter_map, self.parameter_names)):
+            pars = def_pars[p_idx[0]]
+            par_name = name.split("(")[0]
+            params[i] = pars[par_name]
+        self.update_parameters(params)
+
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
