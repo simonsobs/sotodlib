@@ -523,6 +523,20 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
     return open_jobs, done_jobs
 
 
+def _plot_fit(system, plot_dir, i):
+    logger.info("Plotting fitted focal-plane collections for round %s", i)
+    for rx in system.receivers:
+        pdir = os.path.join(plot_dir, f"fit_{i}", rx.epoch)
+        os.makedirs(pdir, exist_ok=True)
+        fpp.plot_receiver(rx, pdir)
+        fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
+        fpp.plot_receiver_resid_vs_enc(rx, pdir)
+        for ot in rx.optics_tubes:
+            fpp.plot_optics_tube(ot, pdir)
+            for fp in ot.focal_planes:
+                fpp.plot_ufm(fp, pdir)
+
+
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
     require = (
@@ -634,9 +648,9 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.update_parameters(params)
 
     # Fit for pointing model and focal planes
-    system.set_static(False)
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
+        system.set_static(False)
         res = minimize(
             system.objective,
             system.parameters,
@@ -651,6 +665,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         for rx in system.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
+                    fp.freeze(True)
                     for meas in fp.focal_planes:
                         wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
                         if meas.fake_gamma:
@@ -660,11 +675,14 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                         mrmsk = err > cfg.outlier_sigma * np.std(err[wmsk])
                         meas.weights[mrmsk] = 0
                         tot_cut += np.sum(mrmsk[wmsk])
+                        meas.freeze(True)
+        _plot_fit(system, plot_dir, i)
         if tot_cut == 0:
             break
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
+        system.set_static(False)
         ndim = len(system.parameters)
         sampler = emcee.EnsembleSampler(
             cfg.nwalkers, ndim, system.log_prob, args=(cfg.cm_priors,)
@@ -677,6 +695,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         lower = np.percentile(samples, 16, axis=0)
         upper = np.percentile(samples, 84, axis=0)
         _ = lower, upper
+        _plot_fit(system, plot_dir, "mcmc")
         # TODO: Save the chain somewhere
         # TODO: MCMC plots
     # TODO: plots
