@@ -2,6 +2,7 @@ import os
 import time
 import calendar
 import warnings
+import json
 from argparse import ArgumentParser
 
 import numpy as np
@@ -341,8 +342,20 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         freq=args["freq"],
         per_tube=True,
     )
+
     if comm.rank == 0:
-        L.debug(f"Depth 1 mapmaking obslist: {obslists}")
+        for key in obskeys:
+            pid, tube, band = (str(k) for k in key)
+            record = {
+                "period": int(pid),
+                "tube": tube,
+                "band": band,
+                "obs": [
+                    {"obs_id": str(o), "wafer": str(w), "band": str(b)} for o, w, b, i in obslists[key]
+                ],
+            }
+            L.debug(f"Obslist per Depth1 map: {json.dumps(record)}")
+
 
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
