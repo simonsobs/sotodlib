@@ -461,21 +461,25 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                                             _t.value = errors[0]
                                 else:
                                     j.jstate = JState.done
-    if raise_error:
-        n_obs_fail = 0
-        n_groups_fail = 0
-        for obs_id, out_meta in obs_errors.items():
-            if all(entry['error'] is not None for entry in out_meta):
-                n_obs_fail += 1
-                n_groups_fail += len(out_meta)
-            else:
-                for entry in out_meta:
-                    if entry['error'] is not None:
-                        n_groups_fail += 1
+    n_obs_fail = 0
+    n_groups_fail = 0
+    for obs_id, out_meta in obs_errors.items():
+        if all(entry['error'] is not None for entry in out_meta):
+            n_obs_fail += 1
+            n_groups_fail += len(out_meta)
+        else:
+            for entry in out_meta:
+                if entry['error'] is not None:
+                    n_groups_fail += 1
 
-        if n_groups_fail > 0:
-            raise RuntimeError(f"multilayer_preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
-                               f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
+    if n_groups_fail > 0:
+        msg = (
+            f"preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} failed obsids "
+            f"and {n_groups_fail}/{len(run_list)} failed groups"
+        )
+        if raise_error:
+            raise RuntimeError(msg)
+        logger.warning(msg)
     logger.info("multilayer_preprocess_tod is done")
 
 
