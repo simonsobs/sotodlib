@@ -506,7 +506,7 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
     bsa.am = am
     zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
     if zero_bias_count > 0:
-        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+        logger.warning(f'Patching {zero_bias_count} zero bias values in {obs_id}')
         fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
@@ -679,7 +679,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             if cfg.apply_cal_correction:
                 correction = find_correction_results(band, chan, detset)
                 if correction is None:
-                    logger.warn(
+                    logger.warning(
                         "Unable to find correction result for %s %s %s (%s)",
                         band,
                         chan,

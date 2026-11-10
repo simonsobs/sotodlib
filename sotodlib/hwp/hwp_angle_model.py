@@ -68,7 +68,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
         raise ValueError('hwp_solution is missing')
     model = tod.get('hwp_angle_model', None)
     if model is None:
-        logger.warn('hwp_angle_model metadata is missing. '
+        logger.warning('hwp_angle_model metadata is missing. '
                     'Apply default model. This may be old.')
         model = default_model(telescope)
 
