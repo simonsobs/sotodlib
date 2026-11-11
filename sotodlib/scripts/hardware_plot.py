@@ -1,7 +1,15 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Plot a hardware model.
 """
+
+# vis_hardware seems to hang sometimes when importing TOAST.
+# Solution is to import it early
+try:
+    import toast
+except ImportError:
+    msg = "Toast package is not importable, cannot simulate detector positions"
+    raise RuntimeError(msg)
 
 import argparse
 
