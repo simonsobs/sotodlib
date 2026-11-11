@@ -252,6 +252,10 @@ class CoordsUtilsTest(unittest.TestCase):
         self.assertEqual(pos1[0], pos2[0])
         self.assertEqual(pos1[1], pos2[1])
 
+        # And by name, from SOURCES_LIST ...
+        pos = coords.planets.get_source_pos('taua', t)
+
+
 class OpticsTest(unittest.TestCase):
     def test_sat_fp(self):
         x = np.array([-100, 0, 100])
