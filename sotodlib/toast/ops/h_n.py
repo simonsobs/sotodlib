@@ -47,8 +47,8 @@ class Hn(Operator):
       indexing "Re" and "Im" respectively.  
 
     Each file also has the following attributes:
-    - "pol_ang_rad": polarization angle in the focalplane ("pol_ang").
-    - "wafer_x_mm", "wafer_y_mm": position of the detector in its wafer
+    - "pol_angle_rad": detector polarization angle in radian from the focalplane ("pol_ang").
+    - "wafer_x_mm", "wafer_y_mm": position of the detector in its wafer in mm
       ("wafer_x", "wafer_y"), relative to the wafer centre.
     - "duration_s": total duration of the observations of this detector.
     - "sampling_rate_Hz": sampling rate of the observations of this detector.
@@ -62,13 +62,15 @@ class Hn(Operator):
     If the pixelization is WCS, the following attributes are also present:
     - "wcs_header": the WCS header of the pixelization. 
     - "wcs_shape": the shape of the WCS pixelization.
-
-    
     
     Example for building the h-maps of a single detector: 
         >>> name_hmap = 'h_n_{detector_name}.hdf'
         >>> with h5py.File(name_hmap, 'r') as file:
                 h_n_map = file["n,0"]["Re"] + 1j * file["n,0"]["Im"] 
+
+    Note:
+    The "pol_angle_rad" is taken from the sotodlib focalplane attribute "pol_ang",
+    not "pol_angle", as the former is defined modulo 2pi and the latter modulo pi.
     """
 
     # Class traits
@@ -311,7 +313,7 @@ class Hn(Operator):
     def _focalplane_attrs(self, focalplane, det):
         """Polarization angle and positions of `det` (see the class docstring)."""
         attrs = {
-            "pol_ang_rad": float(focalplane[det]["pol_ang"].to_value(u.rad)),
+            "pol_angle_rad": float(focalplane[det]["pol_ang"].to_value(u.rad)),
             "wafer_x_mm": float(focalplane[det]["wafer_x"].to_value(u.mm)),
             "wafer_y_mm": float(focalplane[det]["wafer_y"].to_value(u.mm)),
         }
