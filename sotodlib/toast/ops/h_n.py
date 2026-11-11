@@ -34,8 +34,7 @@ class Hn(Operator):
     from psi_t, the orientation of the detector polarization axis in the sky 
     frame at time t, and n_hits, the number of hits in pixel p. 
 
-    The maps are dimensionless.  One HDF5 file is written per detector, with
-    the same layout as litebird_sim (`litebird_sim/mapmaking/h_maps.py`):
+    The maps are dimensionless.  One HDF5 file is written per detector:
     one group "n,m" per spin (m = 0, the HWP spin, is not used yet) holding
     the datasets "Re" (cos part) and "Im" (sin part).  Group "0,0" (written
     when nmin == 0) holds the hit count in "Re" and zeros in "Im".  Pixels
