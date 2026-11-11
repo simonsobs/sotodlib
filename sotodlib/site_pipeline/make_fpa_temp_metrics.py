@@ -34,31 +34,81 @@ from sotodlib.io import hkdb
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
-logger = init_logger('make_fpa_temp_metrics', 'make_fpa_temp_metrics: ')
+logger = init_logger("make_fpa_temp_metrics", "make_fpa_temp_metrics: ")
 date = dtime.datetime.now()
 DEG = np.pi / 180
 
 # Per-platform context config key and FPA temperature setpoint (mK).
 PLATFORM_SETTINGS = {
-    "satp1": {"ctx_key": "ctx_path1", "setpoint": 75},
-    "satp2": {"ctx_key": "ctx_path2", "setpoint": 100},
-    "satp3": {"ctx_key": "ctx_path3", "setpoint": 62},
+    "satp1": {"setpoint": 75},
+    "satp2": {"setpoint": 100},
+    "satp3": {"setpoint": 62},
 }
 
 # Cerro Toco horizon profile: elevation (deg) every 6 deg in azimuth.
 TOCO_AZ = np.arange(0, 360, 6)
 TOCO_EL = np.array(
     [
-        0.47322, 1.94546, 5.34882, 7.6002, 10.038, 12.86298,
-        15.07134, 14.8658, 11.57238, 9.86114, 12.27982, 12.09818,
-        8.83822, 7.4329, 6.79716, 5.88896, 5.38706, 5.05724,
-        3.43682, 3.42726, 4.8278, 4.8278, 3.69494, 1.90722,
-        1.47702, 1.66344, 1.95024, 2.09842, 2.21314, 0.84606,
-        0.44932, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, -0.44932, -0.33938, -0.5019, -0.42542,
-        -0.44454, -0.60228, -0.8365, -1.41488, -1.673, -2.00282,
-        -2.03628, -2.03628, -1.97892, -1.3384, -1.94546, 1.94546,
-        1.19978, 2.19402, 0.55926, 1.82118, 1.49136, 0.0,
+        0.47322,
+        1.94546,
+        5.34882,
+        7.6002,
+        10.038,
+        12.86298,
+        15.07134,
+        14.8658,
+        11.57238,
+        9.86114,
+        12.27982,
+        12.09818,
+        8.83822,
+        7.4329,
+        6.79716,
+        5.88896,
+        5.38706,
+        5.05724,
+        3.43682,
+        3.42726,
+        4.8278,
+        4.8278,
+        3.69494,
+        1.90722,
+        1.47702,
+        1.66344,
+        1.95024,
+        2.09842,
+        2.21314,
+        0.84606,
+        0.44932,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -0.44932,
+        -0.33938,
+        -0.5019,
+        -0.42542,
+        -0.44454,
+        -0.60228,
+        -0.8365,
+        -1.41488,
+        -1.673,
+        -2.00282,
+        -2.03628,
+        -2.03628,
+        -1.97892,
+        -1.3384,
+        -1.94546,
+        1.94546,
+        1.19978,
+        2.19402,
+        0.55926,
+        1.82118,
+        1.49136,
+        0.0,
     ]
 )
 
@@ -153,8 +203,16 @@ def make_binning(sigs, rs, r_bins):
 
 # Keys returned by _bin_scan_stats, in the order they appear in exe_azbin output.
 _BINNED_KEYS = (
-    "rcount", "lcount", "rfp", "rfp_sqre", "lfp", "lfp_sqre",
-    "raze", "raze_sqre", "laze", "laze_sqre",
+    "rcount",
+    "lcount",
+    "rfp",
+    "rfp_sqre",
+    "lfp",
+    "lfp_sqre",
+    "raze",
+    "raze_sqre",
+    "laze",
+    "laze_sqre",
 )
 
 
@@ -384,7 +442,6 @@ def dataframe_maker(
     ye,
     me,
     de,
-    platform="satp1",
     tag=None,
     scan_type="cmb",
 ):
@@ -443,7 +500,6 @@ def dataframe_maker(
                 ctx,
                 iobs,
                 hk_cfg,
-                platform=platform,
             )
             dt = dtime.datetime.fromtimestamp(
                 int(iobs.split("_")[1]), tz=dtime.timezone.utc
@@ -699,7 +755,9 @@ def metric_analyzer(
                         plt.title("Gaussian fit to Deviation from Zero")
                         plt.legend()
                         if save_path is not None:
-                            plt.savefig(os.path.join(save_path + f"/{obs}_gaussian.png"))
+                            plt.savefig(
+                                os.path.join(save_path + f"/{obs}_gaussian.png")
+                            )
                         plt.close()
         logger.info(f"Number of Standard deviation flags: {n_std[j]}")
         logger.info(f"Number of right turnaround P2P flags: {n_r_p2p[j]}")
@@ -774,7 +832,7 @@ def az_circle_plotter(
     loff = 0.08
     magnify = 1
     angle_offset = 90
-    fig, ax = plt.subplots(figsize=(12, 12))
+    fig, ax = plt.subplots(figsize=(13, 12))
     ax.set_aspect("equal")
     center = (0, 0)
     radius = offset
@@ -854,7 +912,9 @@ def az_circle_plotter(
             # range -- nothing to plot for it, so skip rather than operate
             # on empty arrays below.
             if debug:
-                logger.info(f"az_circle_plotter: no observations in az bin {i}, skipping")
+                logger.info(
+                    f"az_circle_plotter: no observations in az bin {i}, skipping"
+                )
             continue
 
         iaz = dfm["az"][imask] + angle_offset
@@ -900,7 +960,9 @@ def az_circle_plotter(
                     ),
                 )
         elif debug:
-            logger.info(f"az_circle_plotter: no valid right-turnaround data in az bin {i}")
+            logger.info(
+                f"az_circle_plotter: no valid right-turnaround data in az bin {i}"
+            )
 
         ilfl = ~np.isnan(ilaz.values)
         laz = iaz.values[ilfl]
@@ -935,7 +997,9 @@ def az_circle_plotter(
                     ),
                 )
         elif debug:
-            logger.info(f"az_circle_plotter: no valid left-turnaround data in az bin {i}")
+            logger.info(
+                f"az_circle_plotter: no valid left-turnaround data in az bin {i}"
+            )
 
     azimuths = np.arange(0, 360, 30)
     for az in azimuths:
@@ -1013,15 +1077,22 @@ def az_circle_plotter(
             },
         )
 
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
+    # Pad the axes so the flag-count boxes at |x| = 1 aren't clipped.
+    xbuffer = 0.35
+    ybuffer = 0.1
+    ax.set_xlim(-1 - xbuffer, 1 + xbuffer)
+    ax.set_ylim(-1 - ybuffer, 1 + ybuffer)
     ax.invert_xaxis()
     ax.axis("off")
     fig.suptitle(f"{platform}, {ms}/{ds} - {me}/{de}", y=0.93)
     if show:
         plt.show()
     if save_path is not None:
-        fig.savefig(os.path.join(save_path, f"{me}_{de}_circle_plot.png"))
+        fig.savefig(
+            os.path.join(save_path, f"{me}_{de}_circle_plot.png"),
+            bbox_inches="tight",
+            pad_inches=0.2,
+        )
 
 
 def get_parser(parser=None):
@@ -1126,7 +1197,7 @@ def main(
         configs = yaml.safe_load(f)
 
     settings = PLATFORM_SETTINGS[platform]
-    ctx = core.Context(configs["contexts"][settings["ctx_key"]])
+    ctx = core.Context(configs["ctx_path"])
     setpoint = settings["setpoint"]
     dfm, df = dataframe_maker(
         ctx,
@@ -1137,7 +1208,6 @@ def main(
         ye=ye,
         me=me,
         de=de,
-        platform=platform,
         tag=tag,
         scan_type=scan_type,
     )
@@ -1171,7 +1241,9 @@ def main(
             show=False,
         )
     else:
-        logger.info("Skipping az_circle_plotter since there are no observations to plot.")
+        logger.info(
+            "Skipping az_circle_plotter since there are no observations to plot."
+        )
     logger.info("finished analyzing metrics")
 
 
