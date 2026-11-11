@@ -224,6 +224,7 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     """
     if az is None:
         az = aman.boresight.az
+    az = np.unwrap(az)
 
     # Get the throw (convert to degrees).
     az_throw = np.ptp(az) * 90 / np.pi
