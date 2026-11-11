@@ -436,10 +436,12 @@ def _main(
                 obs_id=job.tags['obs_id'],
                 obs_type=job.tags['obs_type'],
                 n_split=n_split,
+                max_chunk_size=max_chunk_size,
             ))
 
         for future in as_completed_callable(futures):
             oid, stm_cal, error_info = future.result()
+            futures.remove(future)
             detsets = ctx.obsfiledb.get_detsets(oid)
             for job in jobs:
                 if job.tags['obs_id'] == oid:
