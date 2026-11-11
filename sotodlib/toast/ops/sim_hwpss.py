@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2024 Simons Observatory.
+# Copyright (c) 2018-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -71,6 +71,11 @@ class SimHWPSS(Operator):
         help="This must be an instance of a Stokes weights operator",
     )
 
+    det_mask = Int(
+        defaults.det_mask_invalid,
+        help="Bit mask value for per-detector flagging",
+    )
+
     fname_hwpss = Unicode(
         os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
@@ -116,7 +121,39 @@ class SimHWPSS(Operator):
         "detectors and the HWPSS random drift mode."
     )
 
+    zero = Bool(
+        False,
+        help="Zero detector signal before adding HWPSS",
+    )
+
     realization = Int(0, help="Realization ID")
+
+    @traitlets.validate("det_mask")
+    def _check_det_mask(self, proposal):
+        check = proposal["value"]
+        if check < 0:
+            raise traitlets.TraitError("Det mask should be a positive integer")
+        return check
+
+    @traitlets.validate("stokes_weights")
+    def _check_stokes_weights(self, proposal):
+        stokes_weights = proposal["value"]
+        if stokes_weights is not None:
+            if not isinstance(stokes_weights, Operator):
+                raise traitlets.TraitError(
+                    "stokes_weights should be an Operator instance"
+                )
+            # Check that this operator has the traits we expect
+            for trt in [
+                "mode",
+            ]:
+                if not stokes_weights.has_trait(trt):
+                    msg = f"stokes_weights operator should have a '{trt}' trait"
+                    raise traitlets.TraitError(msg)
+            if stokes_weights.mode != "IQU":
+                msg = f"stokes_weights.mode must be 'IQU', not "
+                msg += f"{stokes_weights.mode}"
+        return stokes_weights
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -143,7 +180,7 @@ class SimHWPSS(Operator):
             self.thetas, self.chis, self.all_stokes = pickle.load(fin)
 
         for obs in data.obs:
-            dets = obs.select_local_detectors(detectors)
+            dets = obs.select_local_detectors(detectors, flagmask=self.det_mask)
             obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
             det_units = obs.detdata[self.det_data].units
             det_scale = unit_conversion(u.K, det_units)
@@ -197,15 +234,29 @@ class SimHWPSS(Operator):
                     atmo = None
                 else:
                     atmo = obs.detdata[self.atmo_data][det]
-                band = focalplane[det]["band"]
-                freq = {
-                    "SAT_f030" : "027",
-                    "SAT_f040" : "039",
-                    "SAT_f090" : "093",
-                    "SAT_f150" : "145",
-                    "SAT_f230" : "225",
-                    "SAT_f290" : "278",
-                }[band]
+
+                try:
+                    # Try retrieving real data bandpass
+                    band = focalplane[det]["det_info:wafer:bandpass"]
+                    freq = {
+                        "f030" : "027",
+                        "f040" : "039",
+                        "f090" : "093",
+                        "f150" : "145",
+                        "f230" : "225",
+                        "f290" : "278",
+                    }[band]
+                except KeyError:
+                    # Failed, try simulated data bandpasses
+                    band = focalplane[det]["band"]
+                    freq = {
+                        "SAT_f030" : "027",
+                        "SAT_f040" : "039",
+                        "SAT_f090" : "093",
+                        "SAT_f150" : "145",
+                        "SAT_f230" : "225",
+                        "SAT_f290" : "278",
+                    }[band]
 
                 # Get incident angle
 
@@ -341,7 +392,9 @@ class SimHWPSS(Operator):
 
                 # Co-add with the cached signal
 
-                if atmo is not None:
+                if self.zero:
+                    signal *= 0
+                elif atmo is not None:
                     # Avoid double-counting the atmosphere.
                     # HWPSS has a copy of it
                     signal -= atmo

@@ -17,7 +17,7 @@ from toast import qarray as qa
 from toast.mpi import MPI, Comm, MPI_Comm
 from toast.observation import default_values as defaults
 from toast.timing import function_timer, Timer
-from toast.traits import Int, Unicode, Quantity, trait_docs
+from toast.traits import Bool, Int, Unicode, Quantity, trait_docs
 from toast.utils import Environment, Logger
 from toast.ops import Operator
 from toast.ops.demodulation import Lowpass
@@ -78,6 +78,11 @@ class IntensityTemplates(Operator):
         None,
         allow_none=True,
         help="If specified, cache templates in this directory.",
+    )
+
+    overwrite_cache = Bool(
+        False,
+        help="Force recompute of cached templates",
     )
 
     source_pattern = Unicode(
@@ -306,9 +311,21 @@ class IntensityTemplates(Operator):
             intensity_templates = {}
             if self.cache_dir is not None:
                 fname_cache = os.path.join(self.cache_dir, f"{ob.name}.pck")
-                result = persistent_pickle_load(fname_cache)
-                if result is not None:
+                if self.overwrite_cache:
+                    result = None
+                else:
+                    result = persistent_pickle_load(fname_cache)
+                if result is None:
+                    log.info_rank(
+                        f"{self.template_name} not found in {fname_cache}",
+                        comm=gcomm,
+                    )
+                else:
                     intensity_templates = result
+                    log.info_rank(
+                        f"Succesfully loaded {self.template_name} from {fname_cache}",
+                        comm=gcomm,
+                    )
             else:
                 fname_cache = None
 
