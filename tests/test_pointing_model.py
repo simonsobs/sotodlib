@@ -180,24 +180,26 @@ class CoordsUtilsTest(unittest.TestCase):
         np.testing.assert_array_equal(fp1.xi, tod.focal_plane.xi)
 
 
-    def test_sat_v1(self):
-        # Test model_sat_v1 general behaviors.
+    def _test_sat_versions(self, version='sat_v1'):
+        # Test model_sat_v1 (or other versions) general behaviors.
+        model_fn = getattr(pm, f'model_{version}')
+        
         az, el, roll = full_vectors(az=np.linspace(-90, 90, 100),
                                     el=60)
         params = core.AxisManager()
-        params.wrap('version', 'sat_v1')
-        az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
+        params.wrap('version', version)
+        az1, el1, roll1 = to_deg(*model_fn(params, *to_rad(az, el, roll))[0])
         np.testing.assert_allclose(az1, az)
 
-        params0 = {'version': 'sat_v1'}
-        az1, el1, roll1 = to_deg(*pm.model_sat_v1(params0, *to_rad(az, el, roll))[0])
+        params0 = {'version': version}
+        az1, el1, roll1 = to_deg(*model_fn(params0, *to_rad(az, el, roll))[0])
         np.testing.assert_allclose(az, az1)
 
         params = dict(params0)
         params['enc_offset_az'] = 1. * DEG
         params['enc_offset_el'] = 1. * DEG
         params['enc_offset_boresight'] = -1. * DEG
-        az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
+        az1, el1, roll1 = to_deg(*model_fn(params, *to_rad(az, el, roll))[0])
         assert np.all(center_branch(az1 - az) > 0)
         assert np.all(center_branch(el1 - el) > 0)
         assert np.all(center_branch(roll1 - roll) > 0)
@@ -221,7 +223,7 @@ class CoordsUtilsTest(unittest.TestCase):
                 'base_tilt_cos': bt_c,
                 'base_tilt_sin': bt_s,  # West up.
                 })
-            az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll))[0])
+            az1, el1, roll1 = to_deg(*model_fn(params, *to_rad(az, el, roll))[0])
 
             # Check that delta el, near the expected high_az point, is postive.
             d_el = el1 - el
@@ -250,7 +252,7 @@ class CoordsUtilsTest(unittest.TestCase):
                 (0.4, 0.1, 0.),
                 (0.5, 0.2, 0.1*2**.5),
         ]:
-            az1, el1, roll1 = pm.model_sat_v1(params, *to_rad(az, el, roll))[0]
+            az1, el1, roll1 = model_fn(params, *to_rad(az, el, roll))[0]
             # Measure az, el on sky of a detector (xi, eta):
             q_hs1 = (quat.rotation_lonlat(-az1, el1, roll1) *
                      quat.rotation_xieta(xi * DEG, eta * DEG))
@@ -259,6 +261,14 @@ class CoordsUtilsTest(unittest.TestCase):
             d_azc = center_branch(-neg_az2 - az*DEG, 2*np.pi) * np.cos(el*DEG)
             sig_meas = (d_el.std()**2 + d_azc.std()**2)**.5
             assert(abs(sig_meas - sig * DEG) < .001*DEG)
+
+
+    def test_sat_v1(self):
+        self._test_sat_versions(version='sat_v1')
+
+
+    def test_sat_v2(self):
+        self._test_sat_versions(version='sat_v2')
 
 
     def test_lat_v1(self):
