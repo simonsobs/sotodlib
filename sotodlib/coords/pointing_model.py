@@ -480,29 +480,33 @@ def model_sat_v1_v2(params, az, el, roll, focal_plane_template=None, version='sa
       focal_plane_template: template to use as base for updating with
         focal plane distortions. Must not be None, if the model
         includes focal_plane distortions.
-      version: model version
+      version: model version, typically passed implicitly
 
     The implemented model parameters, in radians, are:
-      v1 and v2:
+
+    **v1 and v2:**
+
       - ``fp_rot_{xi,eta}0``: within the focal plane (i.e. relative to the
         corrected boresight), the center of rotation of the boresight.
-      - ``fp_offset_{xi,eta}0``: Offset of focal plane's rotational center
+      - ``fp_offset_{xi,eta}0``: Offset of focal planes rotational center
         relative to position in focal plane that lies along the optical axis.
         Corrects for "collimation error".
-      - ``enc_offset_{az,el,boresight}``: Encoder offsets
-        Sign convention: True = Encoder + Offset
-        Sign convention: enc_offset_az = TPoint's IA*-1
+      - ``enc_offset_{az,el,boresight}``: Encoder offsets.
+        Sign convention: True = Encoder + Offset.
+        Sign convention: enc_offset_az = TPoints IA*-1.
       - ``base_tilt_{cos,sin}``: Base tilt coefficients (AN, AW)
       - ``harmonic_2az_{cos,sin}``: 2nd order azimuth correction, (HACA2, HASA2)
       - ``harmonic_2el_{cos,sin}``: 2nd order elevation correction (HECA2, HESA2)
       - ``{acec, aces}``: Az Centering Error params, (ACEC, ACES)
       
-      v1 only:
+    **v1 only:**
+
       - ``az_rot``: Dimensionless parameter describing a linear dependence of Az on El.
       
-      v2 only:
+    **v2 only:**
+
       - ``harmonic_el_{cos,sin}``: 1st order elevation correction, (HECA, HESA)
-      - ``npae: Az/El non perpindicularity,
+      - ``npae``: Az/El non perpendicularity,
       - ``el_sag_pivot``: Default set to pi/3
       - ``el_sag``: modeled as 1/sin(el) with a pivot
 
