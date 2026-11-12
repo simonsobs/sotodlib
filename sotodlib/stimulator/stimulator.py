@@ -650,7 +650,11 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         )
 
         # Initialize axis manager for fit results. Do not overwrite if already exists.
-        field = ensure_wrapped(aman.stm_cal, "fit_coadd")
+        field = ensure_wrapped(aman.stm_cal, "fit_coadd",
+                    axis=core.AxisManager(
+                        aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
+                    ),
+        )
 
         for filt_key in filt_keys:
             if filt_key == "iirc":
