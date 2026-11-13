@@ -3,6 +3,8 @@ import os
 import numpy as np
 import warnings
 
+from sqlglot import Dialect, exp, parse, parse_one
+
 from .resultset import ResultSet
 from . import common
 from .. import util
@@ -381,56 +383,73 @@ class ObsDb(object):
             output['tags'] = [r[0] for r in c]
         return output
 
+    def _resolve_tag_functions(self, query):
+        """Replace tag('name') with a correlated EXISTS expression."""
+        if 'tag' not in query.lower():
+            return query
+        statements = parse(query, read='sqlite')
+        if len(statements) != 1:
+            raise ValueError('ObsDb queries must contain a single SQL statement')
+        tree = statements[0]
+        calls = [node for node in tree.find_all(exp.Anonymous)
+                 if node.name.lower() == 'tag']
+        if not calls:
+            return query
+        names = {node.name.lower() for node in tree.find_all(exp.Identifier)}
+        alias = '_obsdb_tag'
+        while alias in names:
+            alias += '_'
+        matches = ' AND '.join(
+            f'{exp.column(key, table=alias, quoted=True).sql("sqlite")} = '
+            f'{exp.column(key, table="obs", quoted=True).sql("sqlite")}'
+            for key in self.primary_keys)
+        for call in calls:
+            args = call.expressions
+            if len(args) != 1 or not isinstance(args[0], exp.Literal) or not args[0].is_string:
+                raise ValueError('tag() requires exactly one string literal argument')
+            call.replace(parse_one(
+                f'EXISTS (SELECT 1 FROM tags AS {alias} WHERE {matches} '
+                f'AND {alias}.tag = {args[0].sql("sqlite")})', read='sqlite'))
+        return tree.sql(dialect='sqlite')
+
     def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix=''):
-        """Queries the ObsDb using user-provided text.  Returns a ResultSet.
+        """Query observation fields and tags, returning a ResultSet.
 
         Args:
-          query_text (str): The sqlite query string.  All fields
-            should refer to the obs table, or to tags explicitly
-            listed in the tags argument.
-          tags (list of str): Tags to include in the output; if they
-            are listed here then they can also be used in the query
-            string.  Filtering on tag value can be done here by
-            appending '=0' or '=1' to a tag name.
+          query_text (str): SQLite WHERE expression using obs fields,
+            tags declared below, or tag('name') membership calls.
+          tags (list of str): Tags to return as 0/1 columns. Append '=0'
+            or '=1' to also filter on membership; these constraints are
+            AND-ed with the query. Unapplied tags have value 0.
+          sort (list of str): ORDER BY expressions, or None to skip sorting.
+          add_prefix (str): Prefix for output field names, e.g. 'obs:'.
 
-        Returns:
-          A ResultSet with one row for each Observation matching the
-          criteria.
+        tag('name') returns 1 when present and 0 otherwise, including tags
+        absent from the database. It matches all primary keys, including
+        wafer fields, without adding output columns. Names must be string
+        literals; double single quotes inside names, e.g. tag('it''s a tag').
+        For example::
 
-        Notes:
-          Tags are added to the output on request.  For example,
-          passing tags=['planet','stare'] will cause the output to
-          include columns 'planet' and 'stare' in addition to all the
-          columns defined in the obs table.  The value of 'planet' and
-          'stare' in each row will be 0 or 1 depending on whether that
-          tag is set for that observation.  We can include expressions
-          involving planet and stare in the query, for example::
+            obsdb.query("tag('planet') or tag('stare')")
+            obsdb.query("not tag('cryo_problem')", tags=['planet'])
+            obsdb.query(tags=['planet=1', 'hwp=1'])
 
-            obsdb.query('planet=1 or stare=1', tags=['planet', 'stare'])
+        Tags listed in the tags argument can also be queried as columns. Use
+        backticks for names containing special characters::
 
-          For simple filtering on tags, pass '=1' or '=0', like this::
-
-            obsdb.query(tags=['planet=1','hwp=1'])
-
-          When filtering is activated in this way, the returned
-          results must satisfy all the criteria (i.e. the individual
-          constraints are AND-ed). If your tag name contains special 
-          characters (e.g. '-'), you will need to enclose it in 
-          backticks when using it in a query string, e.g.::
- 
             obsdb.query('`bad-tag`=1', tags=['bad-tag'])
-
-          For this reason, we generally advise against the use of 
-          non-alphanumeric characters in tags.
-
         """
-        sort_text = ''
-        if sort is not None and len(sort):
-            sort_text = ' ORDER BY ' + ','.join(sort)
+        sort_text = ' ORDER BY ' + ','.join(sort) if sort else ''
         if '"' in query_text:
-            warnings.warn('obsdb.query text contains double quotes (") -- '
-                          'replacing with single quotes (\').')
-            query_text = query_text.replace('"', "'")
+            tokens = Dialect.get_or_raise('sqlite').tokenize(query_text)
+            quoted = [token for token in tokens if query_text[token.start] == '"']
+            if quoted:
+                warnings.warn('obsdb.query text contains double quotes (") -- '
+                              'replacing with single quotes (\').')
+                for token in reversed(quoted):
+                    query_text = (query_text[:token.start]
+                                  + exp.Literal.string(token.text).sql('sqlite')
+                                  + query_text[token.end + 1:])
 
         joins = ''
         extra_fields = []
@@ -440,13 +459,11 @@ class ObsDb(object):
                     t, val = t.split('=')
                 else:
                     val = None
-                if val is None:
+                if val in (None, '0'):
                     join_type = 'left join'
                     extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
-                elif val == '0':
-                    join_type = 'left join'
-                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
-                    query_text += f' and "{t}"=0'
+                    if val == '0':
+                        query_text = f'({query_text}) and "{t}"=0'
                 else:
                     join_type = 'join'
                     extra_fields.append(f'1 as "{t}"')
@@ -454,7 +471,7 @@ class ObsDb(object):
                           f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
         q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
-        c = self.conn.execute(q)
+        c = self.conn.execute(self._resolve_tag_functions(q))
         results = ResultSet.from_cursor(c)
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]
