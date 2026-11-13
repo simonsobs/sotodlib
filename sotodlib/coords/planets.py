@@ -498,6 +498,37 @@ def get_source_azel(source_name, timestamp, site='_default'):
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
 
+def get_source_quat(source_name, timestamps, site='_default', dt=600.):
+    """Get the equatorial position of a source (e.g. "Moon" or "Sun")
+    at each of the requested times, as a vector of quaternions.
+
+    The position is computed with get_source_pos on a grid of times
+    spaced by at most dt seconds, spanning the range of timestamps,
+    and linearly interpolated to each timestamp.
+
+    Args:
+      source_name: Planet name, as accepted by get_source_pos.
+      timestamps: array of unix timestamps.
+      site (str or so3g.proj.EarthlySite): the observing site.
+      dt (float): maximum spacing, in seconds, of the times at which
+        the ephemeris is evaluated.
+
+    Returns:
+      G3VectorQuat with one entry per timestamp, equal to
+      ``quat.rotation_lonlat(ra, dec)``.
+
+    """
+    timestamps = np.asarray(timestamps, dtype=float)
+    t0, t1 = timestamps.min(), timestamps.max()
+    n = max(int(np.ceil((t1 - t0) / dt)), 1) + 1
+    t_grid = np.linspace(t0, t1, n)
+    ra, dec = np.array([get_source_pos(source_name, t, site=site)[:2]
+                        for t in t_grid]).T
+    ra = np.interp(timestamps, t_grid, np.unwrap(ra))
+    dec = np.interp(timestamps, t_grid, dec)
+    return so3g.proj.quat.rotation_lonlat(ra, dec)
+
+
 def get_nearby_sources(tod=None, source_list=None, distance=1.):
     """Identify solar system objects (especially "planets") that might be
     within a TOD's scan footprint.

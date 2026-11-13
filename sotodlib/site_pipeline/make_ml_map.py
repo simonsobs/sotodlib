@@ -177,7 +177,7 @@ def main(**args):
         # split into two parts signal.translate_single and signal.forward_single). But I don't think those
         # building blocks would be very reusable, and the full thing is more general.
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
-        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbosity>=3, window=args.window)
+        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbosity>=3, window=args.window, downweight=[1e-4, 0.25, 0.50])
         elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbosity>=3)
         elif args.nmat == "debug":  noise_model = mapmaking.NmatDebug()
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
@@ -193,7 +193,6 @@ def main(**args):
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbosity>=2)
-        sidelobe_cutters = {}
 
         nkept = 0
 
@@ -299,7 +298,7 @@ def main(**args):
 
                 # sidelobes cuts
                 if not args.no_sidelobe:
-                    cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
+                    cutss = sidelobes.get_cuts(obs)
                     for cut in cutss:
                         obs.flags.glitch_flags += cut
 
