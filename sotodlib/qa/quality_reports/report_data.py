@@ -320,7 +320,7 @@ def load_influx_data(cfg: ReportDataConfig) -> pd.DataFrame:
     missing_keys = [key for key in keys if key not in df]
 
     if missing_keys:
-        logger.warn(f"missing keys from influxdb: {missing_keys}")
+        logger.warning(f"missing keys from influxdb: {missing_keys}")
         return None
 
     df["time"] = pd.to_datetime(df["time"])
@@ -627,7 +627,7 @@ class ReportData:
             logger.info("Merging InfluxDb data with obs list")
             merge_influx_and_obs_list(influx_df, obs_list, cfg.platform, cfg.noise_scale_factor)
         else:
-            logger.warn("InfluxDb data not found")
+            logger.warning("InfluxDb data not found")
 
         # Get hkdb params for each obs
         populate_hkdb_fields(hkdb_data, pwv, obs_list)

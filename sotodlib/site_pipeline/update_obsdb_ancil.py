@@ -346,9 +346,9 @@ def main(
             except Exception as e:
                 logger.error(f"Error on step {step}")
                 if soldier_on:
-                    logger.warn(f"Step raised error (carry={carry_fail}); "
-                                "will continue with next steps.")
-                    logger.warn(f"Exception was: {e}")
+                    logger.warning(f"Step raised error (carry={carry_fail}); "
+                                   "will continue with next steps.")
+                    logger.warning(f"Exception was: {e}")
                     if carry_fail:
                         fail_count += 1
                 else:

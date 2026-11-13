@@ -14,24 +14,24 @@ logger = logging.getLogger(__name__)
 
 def fourier_filter(tod, filt_function,
                    detrend=None, resize='zero_pad',
-                   axis_name='samps', signal_name='signal', 
+                   axis_name='samps', signal_name='signal',
                    time_name='timestamps', rfft=None,
                    **kwargs):
-    """Return a filtered tod.signal_name along the axis axis_name. 
+    """Return a filtered tod.signal_name along the axis axis_name.
         Does not change the data in the axis manager.
-    
+
     Arguments:
-    
+
         tod: axis manager
-        
-        filt_function: function( freqs, tod ) function that takes a set of 
-            frequencies and the axis manager and returns the filter in 
+
+        filt_function: function( freqs, tod ) function that takes a set of
+            frequencies and the axis manager and returns the filter in
             fourier space
-        
+
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None. Note that detrending here can be slow
             for large arrays
-            
+
         resize: How to resize the axis to increase fft
             speed. 'zero_pad' will increase to the next nice number (a
             product of small primes compatible with the FFT
@@ -42,23 +42,23 @@ def fourier_filter(tod, filt_function,
             as the same size as it is input
 
         axis_name: name of axis you would like to fft along
-        
+
         signal_name: name of the variable in tod to fft
-        
+
         time_name: name for getting time of data (in seconds) from tod
 
         rfft: A RFFTObj for performing the FFTs.
               Must be valid for the input data and contain both t_forward and t_backward.
-        
+
     Returns:
-    
-        signal: filtered tod.signal_name 
-        
+
+        signal: filtered tod.signal_name
+
     """
     axis = getattr(tod, axis_name)
     times = getattr(tod, time_name)
     delta_t = (times[-1]-times[0])/axis.count
-    
+
     if len(tod._assignments[signal_name])==1:
         n_det = 1
         ## signal will be at least 2D
@@ -70,7 +70,7 @@ def fourier_filter(tod, filt_function,
         n_det = other_axis.count
     else:
         raise ValueError('fourier_filter only works for 1D or 2D data streams')
-    
+
     if resize == 'zero_pad':
         n = fft_ops.find_superior_integer(axis.count)
         logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
@@ -91,8 +91,8 @@ def fourier_filter(tod, filt_function,
     signal = np.atleast_2d(signal)
 
     if (signal.dtype != "float32"):
-        logger.warn(f'fourier_filter: signal dtype {signal.dtype} is not float32. '
-                    f'fourier_filter will demote to float32.')
+        logger.warning(f'fourier_filter: signal dtype {signal.dtype} is not float32. '
+                       f'fourier_filter will demote to float32.')
 
     if isinstance(filt_function, identity_filter):
         logger.info('fourier_filter: filt_function is identity; skipping FFT.')
@@ -136,7 +136,7 @@ def fourier_filter(tod, filt_function,
 
     if other_idx is None:
         return signal[0]
-    
+
     return signal
 
 def fft_trim(tod, axis='samps', prefer='right'):
@@ -300,8 +300,8 @@ fft_apply_filter = FilterApplyFunc.deco
 def counter_1_over_f(freqs, tod, fk=None, n=None):
     """
     Counter 1/f filter for noise w/ PSD that follows:
-    
-    w*(1 + (fk/f)**n) 
+
+    w*(1 + (fk/f)**n)
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
     You need the (fk, n) pair or noise_fit_stats to apply this filter.
@@ -444,7 +444,7 @@ def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
     """tau_filter is deprecated; use timeconst_filter."""
     logging.warning('tau_filter is deprecated; use timeconst_filter.')
     taus = getattr(tod, tau_name)
-    
+
     filt = 1 + 2.0j*np.pi*taus[:,None]*freqs[None,:]
     if not do_inverse:
         return 1.0/filt
@@ -595,11 +595,11 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
       If the filter parameters (b, a, fscale) are not passed in
       explicitly, they will be extracted from an AxisManager based on
       the argument iir_params, which must be a dict or AxisManager
-      with keys "b", "a", and "fscale", or an AxisManager including 
-      the sub-iir_params of each stream_id. In the later case, if 
+      with keys "b", "a", and "fscale", or an AxisManager including
+      the sub-iir_params of each stream_id. In the later case, if
       the filter parameters of each stream_id is different,
       raises an error.
-      
+
       But note that:
 
       - If iir_params is a string, tod[iir_params] is used (and must
@@ -701,7 +701,7 @@ def get_hpf(cfg):
         return high_pass_sine2(cutoff=cutoff, width=trans_width)
     else:
         raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')
-        
+
 
 def get_bpf(cfg):
     """
