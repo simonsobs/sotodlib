@@ -1294,6 +1294,45 @@ columns of sqlite. A config below is an example for PWV data with its valid rang
     max_valid_dvalue_dt: 0.01
 
     
+make-fpa-temp-metrics
+---------------------
+
+This element computes focal-plane-array (FPA) temperature stability metrics
+for SAT observations over a date range. For each observation the FPA
+temperature is binned in azimuth for left- and right-going scans, and the RMS,
+standard deviation, deviation from setpoint, turnaround peak-to-peak, and a
+Gaussian fit to the detrended temperature residuals are computed. Observations
+exceeding platform-specific thresholds are flagged per azimuth range, and a
+polar summary plot of the flag counts is saved.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_fpa_temp_metrics
+    :func: get_parser
+    :prog: make-fpa-temp-metrics
+
+The config file gives the context file to use for each platform::
+
+    contexts:
+        ctx_path1: '/path/to/satp1/context.yaml'
+        ctx_path2: '/path/to/satp2/context.yaml'
+        ctx_path3: '/path/to/satp3/context.yaml'
+
+    hk:
+        hk_root: '/path/to/level2/hk'
+        db_file: '/path/to/hkdb.sqlite'
+        fields:
+            - 'satp1.acu.feeds.azimuth.Azimuth_mean'        # setpoint az
+            - 'satp1.acu.feeds.azimuth.Azimuth_error'       # az error
+            - 'satp1.acu.feeds.azimuth.Azimuth_corrected'   # corrected az
+            - 'satp1.cryo-ls372.feeds.temperatures.fptemp'  # FPA temperature
+
+The ``hk`` block takes the keys of :class:`sotodlib.io.hkdb.HkConfig`, plus
+``fields``, the four HK fields to load, in the order shown. The field names
+above are placeholders.
+
+
 make-ml-map
 -----------
 
