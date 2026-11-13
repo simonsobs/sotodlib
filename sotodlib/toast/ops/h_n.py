@@ -47,7 +47,11 @@ class Hn(Operator):
       indexing "Re" and "Im" respectively.  
 
     Each file also has the following attributes:
+    - "det": the detector name.
+    - "nmin", "nmax": the minimum and maximum spins evaluated.
+    - "include_pol_angle": whether the polarization angle of the detector in the focalplane was included in the angle used to compute h_n.
     - "pol_angle_rad": detector polarization angle in radian from the focalplane ("pol_ang").
+    - "convention_pol_angle": the convention used for the polarization angle, either "COSMO" or "IAU".
     - "wafer_x_mm", "wafer_y_mm": position of the detector in its wafer in mm
       ("wafer_x", "wafer_y"), relative to the wafer centre.
     - "duration_s": total duration of the observations of this detector.
@@ -314,6 +318,7 @@ class Hn(Operator):
         """Polarization angle and positions of `det` (see the class docstring)."""
         attrs = {
             "pol_angle_rad": float(focalplane[det]["pol_ang"].to_value(u.rad)),
+            "convention_pol_angle": "COSMO",
             "wafer_x_mm": float(focalplane[det]["wafer_x"].to_value(u.mm)),
             "wafer_y_mm": float(focalplane[det]["wafer_y"].to_value(u.mm)),
         }
@@ -352,6 +357,7 @@ class Hn(Operator):
         return info
 
     def _geometry_attrs(self, dist):
+        """Return the geometry attributes of the distribution."""
         if getattr(dist, "wcs", None) is not None:
             return {
                 "pixelization": "WCS",
