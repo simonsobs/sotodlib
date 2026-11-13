@@ -164,7 +164,7 @@ def read_and_preprocess_wafers(
 def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_base):
     """Parse Context metadata.
 
-    This is a recursive function which starts with the AxisManger returned
+    This is a recursive function which starts with the AxisManager returned
     by `Context.get_meta()` and splits meta data into "detector properties"
     which will be placed in the focalplane model and "other metadata" which
     will be stored in the Observation dictionary.
@@ -197,18 +197,21 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
     if obs_base is None:
         om = obs_meta
     else:
-        obs_meta[obs_base] = dict()
+        obs_meta[obs_base] = {}
         om = obs_meta[obs_base]
     for key in axman.keys():
+        print(f"META {key} : {fp_base}", flush=True)
         if fp_base is not None:
             fp_key = f"{fp_base}{path_sep}{key}"
         else:
             fp_key = key
         if isinstance(axman[key], AxisInterface):
             # This is one of the axes
+            print("META skipping Axis", flush=True)
             continue
         if isinstance(axman[key], AxisManager):
             # Descend
+            print("META DESCEND", flush=True)
             parse_metadata(
                 axman[key], obs_meta, fp_cols, path_sep, det_axis, key, fp_key
             )
@@ -218,9 +221,11 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
             field_axes = axman._assignments[key]
             if len(field_axes) == 0:
                 # This data is not associated with an axis.
+                print("META generic metadata", flush=True)
                 om[key] = replace_byte_arrays(axman[key])
             elif len(field_axes) == 1 and field_axes[0] == det_axis:
                 # This is a detector property
+                print("META detector metadata", flush=True)
                 if fp_key in fp_cols:
                     msg = f"Context meta key '{fp_key}' is duplicated in nested"
                     msg += " AxisManagers"
@@ -228,6 +233,8 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
                 fp_cols[fp_key] = Column(
                     name=fp_key, data=np.array(byte_array_to_unicode(axman[key]))
                 )
+            else:
+                print("META other metadata, skipping", flush=True)
     if obs_base is not None and len(om) == 0:
         # There were no meta data keys- delete this dict
         del obs_meta[obs_base]

@@ -20,6 +20,7 @@ import toast
 import toast.ops
 from toast.observation import default_values as defaults
 
+from ...core import AxisManager
 from .. import ops as so_ops
 
 
@@ -153,6 +154,20 @@ def create_sim_data(comm, args):
     raise NotImplementedError(msg)
 
 
+def print_axmgr(axmgr, prefix="AXMGR ", tab=""):
+    """Recursively print AxisManager contents.
+
+    """
+    for k in sorted(axmgr.keys()):
+        v = axmgr[k]
+        if isinstance(v, AxisManager):
+            print(f"{prefix}{tab} {k}:", flush=True)
+            newtab = tab + "  "
+            print_axmgr(v, prefix=prefix, tab=newtab)
+        else:
+            print(f"{prefix}{tab} {k} = {v}", flush=True)
+
+
 def main(opts=None, comm=None):
     log = toast.utils.Logger.get()
 
@@ -187,6 +202,14 @@ def main(opts=None, comm=None):
         type=str,
         default=None,
         help="File with observation IDs",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Print extra information",
     )
 
     # Context options
@@ -293,6 +316,18 @@ def main(opts=None, comm=None):
         raise RuntimeError(msg)
 
     log.info_rank("Finished loading data", comm=comm, timer=timer)
+
+
+    from ..axmgr import observation_to_axmgr
+
+    for ob in data.obs:
+        axmgr = observation_to_axmgr(ob)
+        if args.verbose:
+            print("------------ Input Obs --------------")
+            print(ob)
+            print("--------- Converted AxMgr -----------")
+            print_axmgr(axmgr)
+
 
 
     if comm is not None:

@@ -40,30 +40,6 @@ class MLMapmaker(Operator):
 
     # Class traits
 
-    # SKN note: I think this style is *much* more readable, but I won't change it for now
-    #API       = Int(0, help="Internal interface version for this operator")
-    #out_dir   = Unicode(".", help="The output directory")
-    #area      = Unicode(None, allow_none=True, help="Load the enmap geometry from this file")
-    #center_at = Unicode(None, allow_none=True, help="The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)]")
-    #comps     = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
-    #Nmat      = Instance(allow_none=True, klass=mm.Nmat, help="The noise matrix to use")
-    #dtype_map = Instance(klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products")
-    #times     = Unicode(obs_names.times, help="Observation shared key for timestamps")
-    #boresight = Unicode(obs_names.boresight_azel, help="Observation shared key for boresight Az/El")
-    #det_data  = Unicode(obs_names.det_data, help="Observation detdata key for the timestream data")
-    #det_flags = Unicode(None, allow_none=True, help="Observation detdata key for flags to use")
-    #det_flag_mask = Int(0, help="Bit mask value for optional detector flagging")
-    #shared_flags  = Unicode(None, allow_none=True, help="Observation shared key for telescope flags to use")
-    #shared_flag_mask = Int(0, help="Bit mask value for optional shared flagging")
-    #view      = Unicode(None, allow_none=True, help="Use this view of the data in all observations")
-    #noise_model  = Unicode("noise_model", help="Observation key containing the noise model")
-    #purge_det_data = Bool(False, help="If True, clear all observation detector data after accumulating")
-    #tiled     = Bool(False, help="If True, the map will be represented as distributed tiles in memory. For large maps this is faster and more memory efficient, but for small maps it has some overhead due to extra communication.")
-    #verbose   = Int(1, allow_none=True, help="Set verbosity in MLMapmaker.  If None, use toast loglevel")
-    #weather   = Unicode("typical", help="Weather to assume when making maps")
-    #site      = Unicode("so",      help="Site to use when making maps")
-
-
     API = Int(0, help="Internal interface version for this operator")
 
     out_dir = Unicode(".", help="The output directory")
