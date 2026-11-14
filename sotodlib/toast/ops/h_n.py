@@ -72,6 +72,25 @@ class Hn(Operator):
         >>> with h5py.File(name_hmap, 'r') as file:
                 h_n_map = file["n,0"]["Re"] + 1j * file["n,0"]["Im"] 
 
+    WARNING:
+    When computing h-maps for LAT detectors, make sure the noise model attribute
+    `noise_model` is set to the base noise model, and not the one set as an output
+    of `toast.ops.elevation_noise.ElevationNoise`. 
+    The h-maps formalism doesn't rely on any noise model, but the related normalization 
+    is used internally to compute the h-maps.  The `toast.ops.elevation_noise.ElevationNoise`
+    introduces a normalization factor which depends on the NET of the detectors, 
+    which leads h-maps from detectors at the same location of two different bands to 
+    be normalized differently, and not be identical up to numerical precision. 
+    In order to correct for this, one can simply set as arguments of `toast_so_sim`:
+        >>> --default_model.noise_model noise_model_base \
+            --elevation_model.noise_model noise_model_base \
+            --elevation_model.out_model noise_model \
+            --h_n.noise_model noise_model_base \
+    so that `toast.ops.elevation_noise.ElevationNoise` will not rewrite the noise 
+    model `noise_model_base` used by the `Hn` operator to compute the h-maps, 
+    and all other operators relying on `noise_model` will still use the correct 
+    noise model modified. 
+
     Note:
     The "pol_angle_rad" is taken from the sotodlib focalplane attribute "pol_ang",
     not "pol_angle", as the former is defined modulo 2pi and the latter modulo pi.
@@ -192,6 +211,15 @@ class Hn(Operator):
                     msg = f"pixel_pointing operator should have a '{trt}' trait"
                     raise traitlets.TraitError(msg)
         return pixels
+
+    @traitlets.validate("hwp_angle")
+    def _check_hwp_angle(self, proposal):
+        hwp_angle = proposal["value"]
+        if hwp_angle is not None:
+            raise traitlets.TraitError(
+                "hwp_angle is not yet supported in the h_n operator"
+            )
+        return hwp_angle
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
