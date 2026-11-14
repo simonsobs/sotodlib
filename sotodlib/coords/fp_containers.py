@@ -32,7 +32,7 @@ import h5py
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
-from jaxtyping import Float, Integer, Shaped
+from jaxtyping import Float, Integer, Shaped, Bool
 from scipy.cluster import vq
 from scipy.optimize import minimize
 from so3g.proj import quat
@@ -250,9 +250,9 @@ def _transformed(
 
 def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name: str):
     to_ret = Transform.identity()
-    wmsk = (self.weights > 0) * np.isfinite(self.weights)
-    if np.sum(wmsk) < 5:
-        return to_ret 
+    wmsk = self.wmsk
+    if np.sum(wmsk) < 4:
+        return to_ret
     affine, shift = mt.get_affine_two_stage(
         self.template.xyz[wmsk, :2],
         getattr(self, data_name).xyz[wmsk, :2],
@@ -297,7 +297,9 @@ class StaticOrCached(Generic[T]):
 
         if obj.static:
             if f"_{self.name}_stat" in obj.__dict__:
-                return getattr(obj, f"_{self.name}_stat")
+                res = getattr(obj, f"_{self.name}_stat")
+                if res is not None:
+                    return res
             res = getattr(obj, f"_{self.name}_dyn")
             setattr(obj, f"_{self.name}_stat", res)
             return res
@@ -336,7 +338,7 @@ class PointingModel:
         self,
         det_off: DetectorOffsets,
         det_enc: DetectorOffsets,
-        weights: Float[np.ndarray, "ndet"],
+        msk: Bool[np.ndarray, "ndet"],
         fake_gamma: bool,
         tol: float = 2.42e-6,
         max_iter: int = 5,
@@ -405,7 +407,6 @@ class PointingModel:
             )
 
         # Start with the input detector coordinates
-        msk = np.isfinite(weights) * (weights > 0)
         if not np.any(msk):
             return deepcopy(det_off)
         estimate = det_off.xyz[msk].copy()
@@ -945,6 +946,7 @@ class FocalPlane:
     data: DetectorOffsets
     enc: DetectorOffsets
     weights: Float[np.ndarray, "ndet"]
+    wmsk: Bool[np.ndarray, "ndet"]
     parent: FocalPlaneCollection
     pointing_model: PointingModel
     static: bool
@@ -1131,6 +1133,7 @@ class FocalPlane:
 
         # ~1 sigma cut
         weights[weights < 0.61] = 0
+        valid_msk *= (weights == 0)
 
         return cls(
             name,
@@ -1138,6 +1141,7 @@ class FocalPlane:
             data,
             enc,
             weights,
+            valid_msk,
             parent,
             pointing_model,
             False,
@@ -1164,10 +1168,27 @@ class FocalPlane:
             self._pm_transformed_stat = self._pm_transformed_dyn
         self.static = static
 
+    def thaw(self, static: bool):
+        """
+        Clear the current values in static fields.
+
+        Parameters
+        ----------
+        static : bool
+            What to set `self.static` to after thawing.
+        """
+        self.__dict__.pop("_pm_data_stat", None) 
+        self.__dict__.pop("_fpc_transformed_stat", None)
+        self.__dict__.pop("_transform_stat", None)
+        self.__dict__.pop("_transformed_stat", None)
+        self.__dict__.pop("_pm_transform_stat", None)
+        self.__dict__.pop("_pm_transformed_stat", None)
+        self.static = static
+
     @property
     def _pm_data_dyn(self) -> DetectorOffsets:
         to_ret = self.pointing_model.apply_det(
-            self.data, self.enc, self.weights, self.fake_gamma
+            self.data, self.enc, self.wmsk, self.fake_gamma
         )
         if self.autofreeze:
             self._pm_data_stat = to_ret
@@ -1255,6 +1276,7 @@ class FocalPlane:
             else:
                 raise ValueError(f"{path}/weights already exists")
         f.create_dataset(f"{path}/weights", data=self.weights)
+        f.create_dataset(f"{path}/wmsk", data=self.wmsk)
 
         if "_pm_data_stat" in self.__dict__:
             self._pm_data_stat.save(f, f"{path}/pm_data", overwrite=overwrite)
@@ -1309,6 +1331,11 @@ class FocalPlane:
         data = DetectorOffsets.load(f, f"{path}/data")
         enc = DetectorOffsets.load(f, f"{path}/enc")
         weights = np.asarray(f[f"{path}/weights"])
+        if "wmsk" in group:
+            wmsk = np.asarray(f[f"{path}/wmsk"])
+        else:
+            wmsk = np.isfinite(weights) * (weights > 0)
+        wmsk = np.isfinite(weights) * (weights > 0)
 
         pm_idx = cast(int, group.attrs["pm_idx"])
         fp = cls(
@@ -1317,6 +1344,7 @@ class FocalPlane:
             data=data,
             enc=enc,
             weights=weights,
+            wmsk=wmsk,
             parent=parent,
             pointing_model=pointing_models[pm_idx],
             static=cast(bool, group.attrs["static"]),
@@ -1422,16 +1450,12 @@ class FocalPlaneCollection:
     weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached(
         "weights"
     )
-    scatter: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached(
-        "scatter"
-    )
     transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("transform")
     transformed: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached(
         "transformed"
     )
     _data_stat: DetectorOffsets = field(init=False)
     _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
-    _scatter_stat: Float[np.ndarray, "ndet"] = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
 
@@ -1455,9 +1479,23 @@ class FocalPlaneCollection:
         self.static = True
         self._data_stat = self._data_dyn
         self._weights_stat = self._weights_dyn
-        self._scatter_stat = self._scatter_dyn
         self._transform_stat = self._transform_dyn
         self._transformed_stat = self._transformed_dyn
+        self.static = static
+
+    def thaw(self, static: bool):
+        """
+        Clear the current values in static fields.
+
+        Parameters
+        ----------
+        static : bool
+            What to set `self.static` to after thawing.
+        """
+        self.__dict__.pop("_weights_stat", None) 
+        self.__dict__.pop("_data_stat", None) 
+        self.__dict__.pop("_transform_stat", None)
+        self.__dict__.pop("_transformed_stat", None)
         self.static = static
 
     @property
@@ -1470,13 +1508,13 @@ class FocalPlaneCollection:
     @property
     def _data_dyn(self) -> DetectorOffsets:
         to_ret = deepcopy(self.template)
-        dat_full = np.array(
-            [fp.pm_data.xyz * fp.weights[..., None] for fp in self.focal_planes]
-        )
-        weights = self.weights
-        wmsk = np.isfinite(weights) * (weights > 0)
-        to_ret.xyz[wmsk] = np.nansum(dat_full[:, wmsk], axis=0) / weights[wmsk, None]
-        to_ret.xyz[~wmsk] = np.nan
+        to_ret.xyz[:] = 0
+        fmsk = np.zeros(len(to_ret.xyz), dtype=bool)
+        for meas in self.focal_planes:
+            fmsk += meas.wmsk
+            to_ret.xyz[meas.wmsk] += meas.pm_data.xyz[meas.wmsk] * meas.weights[meas.wmsk, None]
+        to_ret.xyz[~fmsk] = np.nan
+        to_ret.xyz[fmsk] /= self.weights[fmsk, None]
         to_ret.center = None
         if self.autofreeze:
             self._data_stat = to_ret
@@ -1491,26 +1529,6 @@ class FocalPlaneCollection:
         return to_ret
 
     @property
-    def _scatter_dyn(self) -> Float[np.ndarray, "ndet"]:
-        dat_full = np.array([fp.pm_data.xyz for fp in self.focal_planes])
-        weights_full = np.array([fp.weights for fp in self.focal_planes])
-        mean = self.data.xyz
-        weights = self.weights
-        wmsk = np.isfinite(weights) * (weights > 0)
-        var = np.zeros_like(mean)
-        var[wmsk] = (
-            np.nansum(
-                weights_full[:, wmsk, None] * (dat_full[:, wmsk, :] - mean[None, wmsk, :])** 2,
-                axis=0,
-            )
-            / weights[wmsk, None]
-        )
-        to_ret = np.sqrt(np.nanmean(var, axis=1))
-        if self.autofreeze:
-            self._scatter_stat= to_ret
-        return to_ret
-
-    @property
     def _transform_dyn(self) -> Transform:
         return _get_aff(self, "data", "_transform_stat")
 
@@ -1521,6 +1539,11 @@ class FocalPlaneCollection:
     @property
     def resid(self):
         return self.data.xyz - self.transformed.xyz
+
+    @property
+    def wmsk(self):
+        weights = self.weights
+        return np.isfinite(weights) * (weights > 0)
 
     def save(
         self,
@@ -1578,13 +1601,6 @@ class FocalPlaneCollection:
                 else:
                     raise ValueError(f"{path}/weights already exists")
             f.create_dataset(f"{path}/weights", data=self._weights_stat)
-        if "_scatter_stat" in self.__dict__:
-            if f"{path}/scatter" in f:
-                if overwrite:
-                    del f[f"{path}/scatter"]
-                else:
-                    raise ValueError(f"{path}/scatter already exists")
-            f.create_dataset(f"{path}/scatter", data=self._scatter_stat)
         if "_transform_stat" in self.__dict__:
             self._transform_stat.save(f, f"{path}/transform")
         if "_transformed_stat" in self.__dict__:
@@ -1644,8 +1660,8 @@ class FocalPlaneCollection:
             )
         if "weights" in group:
             collection._weights_stat = np.asarray(f[f"{path}/weights"])
-        if "scatter" in group:
-            collection._scatter_stat = np.asarray(f[f"{path}/scatter"])
+        # if "scatter" in group:
+        #     collection._scatter_stat = np.asarray(f[f"{path}/scatter"])
         if "transform" in group:
             collection._transform_stat = Transform.load(f, f"{path}/transform")
         if "transformed" in group:
@@ -1748,6 +1764,18 @@ class OpticsTube:
             return
         self.static = True
         self._cm_transform_stat = self._cm_transform_dyn
+        self.static = static
+
+    def thaw(self, static: bool):
+        """
+        Clear the current values in static fields.
+
+        Parameters
+        ----------
+        static : bool
+            What to set `self.static` to after thawing.
+        """
+        self.__dict__.pop("_cm_transform_stat", None)
         self.static = static
 
     @property
@@ -1988,6 +2016,18 @@ class Receiver:
         self._cm_transform_stat = self._cm_transform_dyn
         self.static = static
 
+    def thaw(self, static: bool):
+        """
+        Clear the current values in static fields.
+
+        Parameters
+        ----------
+        static : bool
+            What to set `self.static` to after thawing.
+        """
+        self.__dict__.pop("_cm_transform_stat", None)
+        self.static = static
+
     @property
     def allpad(self) -> bool:
         if len(self.optics_tubes) == 0:
@@ -2194,6 +2234,24 @@ class PointingSystem:
             rx.freeze(True)
         self.set_static(static)
 
+    def set_thaw(self, static: bool):
+        """
+        Run thaw for all relevent childen.
+
+        Parameters
+        ----------
+        static : bool
+            The value to set `static` to for all relevent children.
+        """
+        for rx in self.receivers:
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    for meas in fp.focal_planes:
+                        meas.thaw(static)
+                    fp.thaw(static)
+                ot.thaw(static)
+            rx.thaw(static)
+
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
         return np.array(
@@ -2260,13 +2318,12 @@ class PointingSystem:
         # orig_pars = self.parameters.copy()
         self.update_parameters(params)
         print(params)
-        self.set_static(False)
+        self.set_thaw(True)
         try:
-            self.set_freeze(True, True)
             if cm_priors is None:
                 return self.chisq
             return self.chisq_cm_prior(**cm_priors)
-        except RuntimeError:
+        except (RuntimeError, AssertionError):
             return np.inf #1000*self.objective(orig_pars, cm_priors) 
 
     def log_prob(self, params, cm_priors):

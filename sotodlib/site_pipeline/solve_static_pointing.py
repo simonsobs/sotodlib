@@ -611,33 +611,33 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.set_pad(cfg.pad_epochs, False)
 
     # Get obs list
-    logger.info("Getting obslist")
-    obslist = _get_obslist(ctx, cfg, system)
-
-    # Set up per-obs jobs
-    logger.info("Setting up per-obs jobs")
-    jdb_path = os.path.join(data_dir, "jobdb.sqlite")
-    jdb, open_jobs = ju.setup_jobs(
-        None,
-        jdb_path,
-        "per_obs",
-        _get_jobdict_po,
-        partial(_get_jobit_po, obslist=obslist, system=system),
-        _get_jobstr_po,
-        _get_tags_po,
-        [],
-        overwrite,
-        False,
-        None,
-        0,
-        False,
-        logger,
-    )
-    done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
-    open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
-
-    # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
-    _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
+    # logger.info("Getting obslist")
+    # obslist = _get_obslist(ctx, cfg, system)
+    #
+    # # Set up per-obs jobs
+    # logger.info("Setting up per-obs jobs")
+    # jdb_path = os.path.join(data_dir, "jobdb.sqlite")
+    # jdb, open_jobs = ju.setup_jobs(
+    #     None,
+    #     jdb_path,
+    #     "per_obs",
+    #     _get_jobdict_po,
+    #     partial(_get_jobit_po, obslist=obslist, system=system),
+    #     _get_jobstr_po,
+    #     _get_tags_po,
+    #     [],
+    #     overwrite,
+    #     False,
+    #     None,
+    #     0,
+    #     False,
+    #     logger,
+    # )
+    # done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
+    # open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
+    #
+    # # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+    # _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
 
     # Pad empty if needed
     if cfg.pad_empty:
@@ -667,46 +667,62 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     #     system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
     # )
 
+
     # Setup fit params
     params = system.parameters.copy()
     bounds = [(-np.inf, np.inf)] * len(params)
+    scales = np.ones(len(params))
     for name, par in cfg.parameters.items():
         if name not in system.parameter_names:
-            logger.warning("Unknown paramter %s", name)
+            logger.warning("Unknown parameter %s", name)
             continue
         idx = system.parameter_names.index(name)
-        params[idx] = par.get("init", params[idx])
+        params[idx] = float(par.get("init", params[idx]))
         if par.get("static", False):
             bounds[idx] = (params[idx], params[idx])
             continue
-        bounds[idx] = tuple(par.get("bounds", bounds[idx])[:2])
+        bounds[idx] = tuple(float(b) for b in par.get("bounds", bounds[idx]))[:2] # type: ignore
+        lo, hi = bounds[idx]
+        if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+            scales[idx] = hi - lo
+    
     system.update_parameters(params)
     logger.info(params)
-
-    system.set_static(False)
+    logger.info(scales)
+    
+    system.set_thaw(True)
     system.set_freeze(True)
     logger.info("Initial chisq is %.5f", system.chisq)
     _plot_fit(system, plot_dir, 0)
-
+    
     # Fit for pointing model and focal planes
+    def scaled_objective(z, args):
+        return system.objective(z * scales, args)
+    scaled_bounds = [(lo / scale, hi / scale,) for scale, (lo, hi) in zip(scales, bounds)]
+
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
-        system.set_static(False)
+        system.set_thaw(True)
+        x0 = system.parameters.copy()/scales
         res = minimize(
-            system.objective,
-            system.parameters,
-            bounds=bounds,
-            # args=(cfg.cm_priors,),
+            scaled_objective,
+            x0,
             args=(None,),
-            # method="powell",
-            # method="Nelder-Mead",
+            method="L-BFGS-B",
+            bounds=scaled_bounds,
+            # options={
+            #     # "eps": 1e-7,
+            #     "maxiter": 5000,
+            #     "ftol": 1e-12,
+            #     "gtol": 1e-8,
+            # }
         )
-        system.update_parameters(res.x)
-        logger.info(res.x)
-        system.set_static(False)
+        system.update_parameters(res.x * scales)
+        logger.info(res.x * scales)
+        system.set_thaw(True)
         system.set_freeze(True)
-
         _plot_fit(system, plot_dir, i+1)
+
         # Cut outliers
         tot_cut = 0
         for rx in system.receivers:
@@ -730,6 +746,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                     for meas, err, wmsk in zip(fp.focal_planes, all_errs, wmsks):
                         mrmsk = err > err_cuttoff
                         meas.weights[mrmsk] = 0
+                        meas.wmsk[mrmsk] = False
                         tot_cut += np.sum(mrmsk[wmsk])
         if tot_cut == 0:
             logger.info("None cut! Stopping optimization.")
@@ -745,6 +762,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         backend = emcee.backends.HDFBackend(chain_file)
     
         # Run a fresh chain
+        system.set_thaw(True)
         backend.reset(cfg.nwalkers, ndim)
         sampler = emcee.EnsembleSampler(
             cfg.nwalkers,
@@ -762,6 +780,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         lower = np.percentile(samples, 16, axis=0)
         upper = np.percentile(samples, 84, axis=0)
         _ = lower, upper
+        system.set_thaw(True)
         system.set_freeze(True)
 
         # Plot
