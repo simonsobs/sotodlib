@@ -11,9 +11,11 @@ import hashlib
 import os
 import shutil
 from enum import Enum
-from functools import partial
 from typing import cast
 from copy import deepcopy
+import corner
+import matplotlib.pyplot as plt
+from functools import partial
 
 import emcee
 import git
@@ -445,7 +447,7 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
 
         # Lets make sure transformed is initid
         try:
-            meas.freeze(True)
+            meas.freeze(True, False)
         except Exception as e:
             msg = f"Failed to compute affine with error: {e}"
             ju.fail(job, ErrCode.AFF_ERR, msg, logger)
@@ -539,14 +541,20 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
 def _plot_fit(system, plot_dir, i):
     logger.info("Plotting fitted focal-plane collections for round %s", i)
     for rx in system.receivers:
-        pdir = os.path.join(plot_dir, f"fit_{i}", rx.epoch)
+        if rx.allpad:
+            continue
+        pdir = os.path.join(plot_dir, rx.epoch, f"fit_{i}")
         os.makedirs(pdir, exist_ok=True)
         fpp.plot_receiver(rx, pdir)
         fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
         fpp.plot_receiver_resid_vs_enc(rx, pdir)
         for ot in rx.optics_tubes:
+            if ot.allpad:
+                continue
             fpp.plot_optics_tube(ot, pdir)
             for fp in ot.focal_planes:
+                if fp.pad:
+                    continue
                 fpp.plot_ufm(fp, pdir)
 
 
@@ -591,12 +599,12 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
     # Save our template
-    logger.info("Saving templates")
-    with h5py.File(outfile, "a") as f:
-        system.save(f, "/", True)
-    fpc.make_manifestdb(
-        system, "template", os.path.join(data_dir, "template.sqlite"), outfile
-    )
+    # logger.info("Saving templates")
+    # with h5py.File(outfile, "a") as f:
+    #     system.save(f, "/", True)
+    # fpc.make_manifestdb(
+    #     system, "template", os.path.join(data_dir, "template.sqlite"), outfile
+    # )
 
     # Mark pad epochs as pad
     logger.info("Padding epochs")
@@ -636,14 +644,28 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         logger.info("Padding empty")
         system.set_pad(cfg.pad_epochs, True)
 
+    # Force pointing model consistancy
+    pm_epcs = [pm.epoch for pm in system.pointing_models]
+    for rx in system.receivers:
+        for ot in rx.optics_tubes:
+            for fp in ot.focal_planes:
+                for meas in fp.focal_planes:
+                    try:
+                        pm_idx = pm_epcs.index(meas.pointing_model.epoch)
+                    except ValueError:
+                        raise ValueError(
+                            f"Can't find pointing model with epoch {meas.pointing_model.epoch} (in {meas.name}+{meas.meas_id})"
+                        )
+                    meas.pointing_model = system.pointing_models[pm_idx]
+
     # Save our per-obs results
-    logger.info("Saving per-obs")
-    system.set_static(True)
-    with h5py.File(outfile, "a") as f:
-        system.save(f, "/", True)
-    fpc.make_per_obs_manifestdb(
-        system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
-    )
+    # logger.info("Saving per-obs")
+    # system.set_static(True)
+    # with h5py.File(outfile, "a") as f:
+    #     system.save(f, "/", True)
+    # fpc.make_per_obs_manifestdb(
+    #     system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
+    # )
 
     # Setup fit params
     params = system.parameters.copy()
@@ -661,6 +683,11 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.update_parameters(params)
     logger.info(params)
 
+    system.set_static(False)
+    system.set_freeze(True)
+    logger.info("Initial chisq is %.5f", system.chisq)
+    _plot_fit(system, plot_dir, 0)
+
     # Fit for pointing model and focal planes
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
@@ -669,50 +696,89 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             system.objective,
             system.parameters,
             bounds=bounds,
-            args=(cfg.cm_priors,),
-            method="Nelder-Mead",
+            # args=(cfg.cm_priors,),
+            args=(None,),
+            # method="powell",
+            # method="Nelder-Mead",
         )
         system.update_parameters(res.x)
-        logger.info(params)
+        logger.info(res.x)
+        system.set_static(False)
         system.set_freeze(True)
 
+        _plot_fit(system, plot_dir, i+1)
         # Cut outliers
         tot_cut = 0
         for rx in system.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
+                    if fp.pad:
+                        continue
+                    all_errs = []
+                    wmsks = []
                     for meas in fp.focal_planes:
                         wmsk = np.isfinite(meas.weights) * (meas.weights > 0)
                         if meas.fake_gamma:
                             err = np.linalg.norm(meas.fpc_resid[:, :2], axis=1)
                         else:
                             err = np.linalg.norm(meas.fpc_resid, axis=1)
-                        mrmsk = err > cfg.outlier_sigma * np.std(err[wmsk])
+                        err[~wmsk] = np.nan
+                        all_errs += [err]
+                        wmsks += [wmsk]
+                    errs_full  = np.hstack(all_errs)
+                    err_cuttoff = np.nanmean(errs_full) + cfg.outlier_sigma*np.nanstd(errs_full) 
+                    for meas, err, wmsk in zip(fp.focal_planes, all_errs, wmsks):
+                        mrmsk = err > err_cuttoff
                         meas.weights[mrmsk] = 0
                         tot_cut += np.sum(mrmsk[wmsk])
-        _plot_fit(system, plot_dir, i)
         if tot_cut == 0:
+            logger.info("None cut! Stopping optimization.")
             break
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
         system.set_static(False)
         ndim = len(system.parameters)
+    
+        # Create HDF5 backend
+        chain_file = os.path.join(data_dir, "mcmc_chain.h5")
+        backend = emcee.backends.HDFBackend(chain_file)
+    
+        # Run a fresh chain
+        backend.reset(cfg.nwalkers, ndim)
         sampler = emcee.EnsembleSampler(
-            cfg.nwalkers, ndim, system.log_prob, args=(cfg.cm_priors,)
+            cfg.nwalkers,
+            ndim,
+            system.log_prob,
+            args=(cfg.cm_priors,),
+            backend=backend,
         )
         sampler.run_mcmc(system.parameters, cfg.mcmc_steps)
-        samples = np.array(
-            sampler.get_chain(discard=int(0.1 * cfg.mcmc_steps), flat=True)
-        )
+        samples = sampler.get_chain( discard=int(0.1 * cfg.mcmc_steps), flat=True)
+        assert samples is not None
+    
+        # Update params
         system.update_parameters(np.median(samples, axis=0))
         lower = np.percentile(samples, 16, axis=0)
         upper = np.percentile(samples, 84, axis=0)
         _ = lower, upper
         system.set_freeze(True)
+
+        # Plot
         _plot_fit(system, plot_dir, "mcmc")
-        # TODO: Save the chain somewhere
-        # TODO: MCMC plots
+        labels = list(system.parameter_names)
+        fig = corner.corner(
+            samples,
+            labels=labels,
+            quantiles=[0.16, 0.50, 0.84],
+            show_titles=True,
+            title_fmt=".4f",
+            title_kwargs={"fontsize": 10},
+            label_kwargs={"fontsize": 10},
+            truths=np.median(samples, axis=0),
+        )
+        fig.savefig( os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight")
+        plt.close(fig)
 
     # Save
     system.set_static(True)

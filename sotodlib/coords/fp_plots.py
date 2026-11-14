@@ -302,6 +302,8 @@ def plot_optics_tube(
     etas = []
     arcsec_per_rad = np.rad2deg(1.0) * 3600
     for fp in ot.focal_planes:
+        if fp.pad:
+            continue
         data = fp.data
         transformed = fp.transformed
         xi = transformed.xyz[:, 0]
@@ -359,27 +361,7 @@ def plot_optics_tube(
     color_limit = np.nanpercentile(np.abs(dist), 99)
     cf = None
     if len(dist) >= 3 and np.isfinite(color_limit) and color_limit > 0:
-        try:
-            cf = ax2.tricontourf(
-                xi,
-                eta,
-                dist,
-                levels=np.linspace(-color_limit, color_limit, 21),
-                vmin=-color_limit,
-                vmax=color_limit,
-                cmap="coolwarm",
-                extend="both",
-            )
-        except (ValueError, RuntimeError):
-            cf = ax2.scatter(
-                xi,
-                eta,
-                c=dist,
-                s=10,
-                vmin=-color_limit,
-                vmax=color_limit,
-                cmap="coolwarm",
-            )
+        cf = ax2.scatter( xi, eta, c=dist, s=10, vmin=-color_limit, vmax=color_limit, cmap="coolwarm")
     if cf is not None:
         fig.colorbar(cf, ax=ax2, label='Radial residual (")')
     ax2.set_aspect("equal")
@@ -448,7 +430,8 @@ def plot_receiver(
     all_splits = set()
     neighbors = {}
     for fp in focal_planes:
-        splits = sorted(np.unique(np.asarray(fp.template.split)), key=str)
+        valid = np.isfinite(fp.weights) * (fp.weights > 0)
+        splits = sorted(np.unique(np.asarray(fp.template.split)[valid]), key=str)
         all_splits.update(splits)
         for split in splits:
             neighbors.setdefault(split, set())
@@ -480,6 +463,8 @@ def plot_receiver(
     all_x = []
     all_y = []
     for fp in focal_planes:
+        if fp.pad:
+            continue
         transformed = fp.transformed.xyz
         data = fp.data.xyz
         splits = np.asarray(fp.template.split)
@@ -673,6 +658,8 @@ def plot_receiver_displacements(
     dy = []
     for ot in receiver.optics_tubes:
         for fp in ot.focal_planes:
+            if fp.pad:
+                continue
             if fp.template.center is None:
                 continue
             xc = fp.template.center[0]
@@ -682,10 +669,10 @@ def plot_receiver_displacements(
                 if np.sum(msk) == 0:
                     continue
                 disp_x = np.nanmedian(
-                    meas.fpc_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0]
+                    meas.pm_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0]
                 )
                 disp_y = np.nanmedian(
-                    meas.fpc_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1]
+                    meas.pm_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1]
                 )
                 x0.append(xc)
                 y0.append(yc)

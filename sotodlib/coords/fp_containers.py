@@ -249,13 +249,15 @@ def _transformed(
 
 
 def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name: str):
+    to_ret = Transform.identity()
     wmsk = (self.weights > 0) * np.isfinite(self.weights)
+    if np.sum(wmsk) < 5:
+        return to_ret 
     affine, shift = mt.get_affine_two_stage(
         self.template.xyz[wmsk, :2],
         getattr(self, data_name).xyz[wmsk, :2],
         self.weights[wmsk],
     )
-    to_ret = Transform.identity()
     to_ret.shift[:2] = shift
     to_ret.affine[:2, :2] = affine
     if not self.fake_gamma:
@@ -414,6 +416,7 @@ class PointingModel:
         fp = to_ret[msk].fp
         det_enc_msk = det_enc[msk]
         ancil = det_enc_msk.ancil
+        # xi, eta, gamma = to_ret.xyz[msk].T
 
         err = np.inf
         alpha = 1.0
@@ -481,9 +484,14 @@ class PointingModel:
             # Update estimate of the undistorted fp
             estimate -= alpha * distortion
 
+        # logger.error(
+        #     f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
+        # )
         raise RuntimeError(
-            f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
-        )
+             f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
+         )
+        # to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
+        # return to_ret
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -1137,7 +1145,7 @@ class FocalPlane:
             fake_gamma,
         )
 
-    def freeze(self, static: bool):
+    def freeze(self, static: bool, optimizer: bool):
         """
         Save the current dynamic properties to the static fields.
 
@@ -1148,10 +1156,12 @@ class FocalPlane:
         """
         self.static = True
         self._pm_data_stat = self._pm_data_dyn
-        self._transform_stat = self._transform_dyn
-        self._transformed_stat = self._transformed_dyn
-        self._pm_transform_stat = self._pm_transform_dyn
-        self._pm_transformed_stat = self._pm_transformed_dyn
+        self._fpc_transformed_stat = self._fpc_transformed_dyn
+        if not optimizer:
+            self._transform_stat = self._transform_dyn
+            self._transformed_stat = self._transformed_dyn
+            self._pm_transform_stat = self._pm_transform_dyn
+            self._pm_transformed_stat = self._pm_transformed_dyn
         self.static = static
 
     @property
@@ -1451,6 +1461,13 @@ class FocalPlaneCollection:
         self.static = static
 
     @property
+    def chisq(self) -> float:
+        chisq = 0
+        for meas in self.focal_planes:
+            chisq += np.nansum((np.linalg.norm(meas.fpc_resid, axis=1)*meas.weights)**2)
+        return chisq
+
+    @property
     def _data_dyn(self) -> DetectorOffsets:
         to_ret = deepcopy(self.template)
         dat_full = np.array(
@@ -1480,15 +1497,15 @@ class FocalPlaneCollection:
         mean = self.data.xyz
         weights = self.weights
         wmsk = np.isfinite(weights) * (weights > 0)
-        var = np.zeros_like(weights)
+        var = np.zeros_like(mean)
         var[wmsk] = (
             np.nansum(
-                weights_full[:, wmsk, None] * (dat_full - mean[None, wmsk, :])** 2,
+                weights_full[:, wmsk, None] * (dat_full[:, wmsk, :] - mean[None, wmsk, :])** 2,
                 axis=0,
             )
             / weights[wmsk, None]
         )
-        to_ret = np.sqrt(np.nanmean(var, axis=0))
+        to_ret = np.sqrt(np.nanmean(var, axis=1))
         if self.autofreeze:
             self._scatter_stat= to_ret
         return to_ret
@@ -2158,7 +2175,7 @@ class PointingSystem:
                     for meas in fp.focal_planes:
                         meas.static = static
 
-    def set_freeze(self, static: bool):
+    def set_freeze(self, static: bool, optimizer: bool = False):
         """
         Run freeze for all relevent childen.
 
@@ -2168,13 +2185,14 @@ class PointingSystem:
             The value to set `static` to for all relevent children.
         """
         for rx in self.receivers:
-            rx.freeze(static)
             for ot in rx.optics_tubes:
-                ot.freeze(static)
                 for fp in ot.focal_planes:
-                    fp.freeze(static)
                     for meas in fp.focal_planes:
-                        meas.freeze(static)
+                        meas.freeze(True, optimizer)
+                    fp.freeze(True)
+                ot.freeze(True)
+            rx.freeze(True)
+        self.set_static(static)
 
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
@@ -2201,9 +2219,10 @@ class PointingSystem:
                 for fp in ot.focal_planes:
                     if fp.pad:
                         continue
-                    chisq += np.nansum(
-                        ((fp.weights * fp.resid) ** 2) * (1 + fp.scatter)
-                    ).item()
+                    chisq += fp.chisq
+                    # chisq += np.nansum(
+                    #     ((fp.weights * np.linalg.norm(fp.resid, axis=1)) ** 2) * (1 + fp.scatter)
+                    # ).item()
         return chisq
 
     def chisq_cm_prior(
@@ -2238,8 +2257,17 @@ class PointingSystem:
         return self.chisq
 
     def objective(self, params, cm_priors):
+        # orig_pars = self.parameters.copy()
         self.update_parameters(params)
-        return self.chisq_cm_prior(**cm_priors)
+        print(params)
+        self.set_static(False)
+        try:
+            self.set_freeze(True, True)
+            if cm_priors is None:
+                return self.chisq
+            return self.chisq_cm_prior(**cm_priors)
+        except RuntimeError:
+            return np.inf #1000*self.objective(orig_pars, cm_priors) 
 
     def log_prob(self, params, cm_priors):
         return -0.5 * self.objective(params, cm_priors)
@@ -2520,7 +2548,7 @@ class PointingSystem:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
             pars.update(cfg.pm_defaults_overrides[pm_ver])
-            def_pars = []
+            def_pars += [pars] 
         for i, (p_idx, name) in enumerate(zip(self.parameter_map, self.parameter_names)):
             pars = def_pars[p_idx[0]]
             par_name = name.split("(")[0]

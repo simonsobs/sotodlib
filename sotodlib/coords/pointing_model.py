@@ -6,6 +6,10 @@ from .. import core
 from .helpers import _valid_arg
 from .optics import _interp_func
 from so3g.proj import quat
+from functools import lru_cache
+from scipy.interpolate import RegularGridInterpolator, bisplev
+from scipy.ndimage import map_coordinates, spline_filter
+
 
 import logging
 logger = logging.getLogger(__name__)
@@ -388,8 +392,9 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane):
             * quat.rotation_xieta(focal_plane.xi, focal_plane.eta))
 
         # Get distortion
-        dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp'])
-        deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_eta_bsp'])
+        # dxi = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp'])
+        # deta = _interp_func(xi1, eta1, LAT_ROLL_DIST_OPTICS_V1['d_eta_bsp'])
+        dxi, deta = _interpolate_map_coordinates(xi1, eta1)
 
         # Apply distortion and return to un-rolled focal_plane.
         xi2, eta2, _ = quat.decompose_xieta(
@@ -684,3 +689,25 @@ LAT_ROLL_DIST_OPTICS_V1 = {
         3, 3
     ],
 }
+
+@lru_cache(maxsize=1)
+def _get_lat_optics_grids(n_grid=2048):
+    tx, ty, _, kx, ky = LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp']
+    xi_grid = np.linspace(tx[kx], tx[-kx-1], n_grid)
+    eta_grid = np.linspace(ty[ky], ty[-ky-1], n_grid)
+    dxi_grid = np.asarray(bisplev(xi_grid, eta_grid, LAT_ROLL_DIST_OPTICS_V1['d_xi_bsp']))
+    deta_grid = np.asarray(bisplev(xi_grid, eta_grid, LAT_ROLL_DIST_OPTICS_V1['d_eta_bsp']))
+    dxi_coeff = spline_filter(dxi_grid, order=3)
+    deta_coeff = spline_filter(deta_grid, order=3)
+
+    return xi_grid, eta_grid, dxi_coeff, deta_coeff
+
+def _interpolate_map_coordinates(xi, eta):
+    xi_grid, eta_grid, dxi_coeff, deta_coeff = _get_lat_optics_grids()
+    xi_idx = np.interp(xi, xi_grid, np.arange(len(xi_grid)))
+    eta_idx = np.interp(eta, eta_grid, np.arange(len(eta_grid)))
+    coords = np.array([xi_idx, eta_idx])
+    dxi = map_coordinates( dxi_coeff, coords, order=3, mode='nearest', prefilter=False)
+    deta = map_coordinates( deta_coeff, coords, order=3, mode='nearest', prefilter=False)
+
+    return dxi, deta
