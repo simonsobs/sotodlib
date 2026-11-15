@@ -1665,7 +1665,7 @@ class Imprinter:
         -----------
         book : Books
             book object
-        book_path : path
+        book_path : str
             Output path of book
 
         Returns

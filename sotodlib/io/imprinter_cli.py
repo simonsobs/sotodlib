@@ -84,7 +84,7 @@ def fix_single_book(imprint:Imprinter, book:Books):
             "Are you sure you want to delete level 2?"
         )
         if sure:
-            utils.delete_level2_obs_and_book(imprint, book)
+            utils.delete_level2_obs_and_book(imprint, book, obs_ok=True)
         else:
             print("Skipping")
     elif resp == 6:

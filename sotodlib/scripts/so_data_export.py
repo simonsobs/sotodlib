@@ -43,9 +43,9 @@ import signal
 import sqlite3
 import subprocess as sp
 import sys
+import traceback
 
-import yaml
-
+from ..core.context import _read_cfg
 from ..core.util import tag_substr
 
 
@@ -177,10 +177,51 @@ def load_context_file(path):
         (dict):  The loaded context as a dictionary.
 
     """
-    with open(path, "r") as f:
-        conf = yaml.safe_load(f)
+    conf = {}
+
+    def _merge(cfg, input):
+        for k, v in input.items():
+            if k == "tags":
+                if k not in cfg:
+                    cfg[k] = {}
+                cfg[k].update(v)
+            elif k == "metadata":
+                if k not in cfg:
+                    cfg[k] = []
+                cfg[k].extend(v)
+            else:
+                cfg[k] = v
+
+    # Start with site and user config.
+    site_ok, site_file, site_cfg = _read_cfg(
+        None,
+        'SOTODLIB_SITECONFIG',
+        os.path.join(os.getcwd(), 'site.yaml'),
+    )
+    if site_ok:
+        print(f"Using site config file '{site_file}'", flush=True)
+        _merge(conf, site_cfg)
+
+    user_ok, user_file, user_cfg = _read_cfg(
+        None,
+        'SOTODLIB_USERCONFIG',
+        os.path.expanduser('~/.sotodlib.yaml'),
+    )
+    if user_ok:
+        print(f"Using user config file '{user_file}'", flush=True)
+        _merge(conf, user_cfg)
+
+    ok, full_path, context_cfg = _read_cfg(path)
+    if path is not None and not ok:
+        raise RuntimeError(
+            f"Could not load requested context file '{full_path}'"
+        )
+
+    _merge(conf, context_cfg)
+
     # Do any tag substitutions
-    tag_substr(conf, conf["tags"])
+    if "tags" in conf:
+        tag_substr(conf, conf["tags"])
     return conf
 
 
@@ -481,7 +522,7 @@ def main():
         ssh_connection.open()
 
         # The remote context file
-        print(f"Using context file {args.remote_context}", flush=True)
+        print(f"Using remote context file {args.remote_context}", flush=True)
 
         # Fetch the context file and localize
         ssh_connection.sync(args.remote_context, args.local_context)
@@ -511,8 +552,8 @@ def main():
         for obs in obs_list:
             sync_obs_g3book(obs, args)
 
-    except Exception: #noqa
-        pass
+    except Exception as e: #noqa
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

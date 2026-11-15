@@ -350,7 +350,7 @@ def get_encoder_timing(aman, hkdata):
 
     if "stm_samps" not in aman._axes.keys():
         stm_samps = core.IndexAxis("stm_samps", t_enc.size)
-        stm_cal = core.AxisManager(stm_samps, aman.samps, aman.dets)
+        stm_cal = core.AxisManager(aman.dets, aman.samps, stm_samps)
         aman.wrap("stm_cal", stm_cal, overwrite=True)
     aman.stm_cal.wrap("t_enc", t_enc, [(0, "stm_samps")], overwrite=True)
     aman.stm_cal.wrap("t_hk", t_hk, [(0, "stm_samps")], overwrite=True)
@@ -616,7 +616,9 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         )
 
         for filt_key in filt_keys:
-            ensure_wrapped(aman.stm_cal.coadd_data, filt_key, axis=core.AxisManager())
+            ensure_wrapped(aman.stm_cal.coadd_data, filt_key,
+                           axis=core.AxisManager(aman.dets,
+                                                 aman.stm_cal.coadd_data.stm_coadd_bins))
 
             for freq_key in freq_keys:
                 ensure_wrapped(
@@ -648,7 +650,11 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         )
 
         # Initialize axis manager for fit results. Do not overwrite if already exists.
-        field = ensure_wrapped(aman.stm_cal, "fit_coadd")
+        field = ensure_wrapped(aman.stm_cal, "fit_coadd",
+                    axis=core.AxisManager(
+                        aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
+                    ),
+        )
 
         for filt_key in filt_keys:
             if filt_key == "iirc":

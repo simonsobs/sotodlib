@@ -21,6 +21,7 @@ import argparse
 from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
+from sotodlib.io import load_book as lb
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
@@ -48,19 +49,6 @@ from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
     sp_init_logger("det_cal")
-
-
-def get_data_root(ctx: core.Context, obs_id:str) -> str:
-    "Get root data directory based on context file"
-    c = ctx.obsfiledb.conn.execute("select name from files limit 1")
-    res = [r[0] for r in c][0]
-    # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(5):
-        res = os.path.dirname(res)
-    # add telescope str to path
-    tel_str = obs_id.split(('_'))[2]
-    res = os.path.join(res, tel_str)
-    return res
 
 
 @dataclass
@@ -398,16 +386,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bsa_files = {}
         for dset, oid in iv_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
-                for f in os.listdir(zsmurf_dir):
-                    if "iv" in f:
-                        iva_files[dset] = os.path.join(zsmurf_dir, f)
-                        break
-                else:
-                    raise ValueError(f"IV data not found for in cal obs {oid}")
+                iva_files[dset] = lb.load_smurf_npy_data(ctx, oid, "iv_analysis", path_only=True)
             else:
                 logger.debug("missing IV data for %s", dset)
 
@@ -418,17 +397,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
         for dset, oid in bias_step_obsids.items():
             if oid is not None:
-                timecode = oid.split("_")[1][:5]
-                zsmurf_dir = os.path.join(
-                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
-                )
-                for f in os.listdir(zsmurf_dir):
-                    if "bias_step" in f:
-                        bs_file = os.path.join(zsmurf_dir, f)
-                        bsa_files[dset] = bs_file
-                        break
-                else:
-                    raise ValueError(f"Bias step data not found for in cal obs {oid}")
+                bsa_files[dset] = lb.load_smurf_npy_data(ctx, oid, "bias_step_analysis", path_only=True)
             else:
                 logger.debug("missing bias step data for %s", dset)
 

@@ -550,8 +550,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--raise-error',
         help="Raise an error upon completion if any obsids or groups fail.",
-        type=bool,
-        default=False
+        action='store_true',
     )
     parser.add_argument(
         '--pb-path',

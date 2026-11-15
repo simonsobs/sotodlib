@@ -246,7 +246,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False,
                             sample0=samples[0])
 
 
-def load_smurf_npy_data(ctx, obs_id, substr):
+def load_smurf_npy_data(ctx, obs_id, substr, path_only=False):
     """
     Loads an sodetlib npy file from Z_smurf archive of book.
 
@@ -256,6 +256,8 @@ def load_smurf_npy_data(ctx, obs_id, substr):
         obs-id of book to load file from
     substr: str
         substring to use to find numpy file in Z_smurf
+    path_only: bool
+        If True, only return the path to the file.
     """
     files = ctx.obsfiledb.get_files(obs_id)
     book_dir = os.path.dirname(list(files.values())[0][0][0])
@@ -265,7 +267,9 @@ def load_smurf_npy_data(ctx, obs_id, substr):
             fpath = os.path.join(smurf_dir, f)
             break
     else:
-        raise FileNotFoundError("Could not find npy file")
+        raise FileNotFoundError(f"Could not find {substr} npy file for {obs_id}")
+    if path_only:
+        return fpath
     res = np.load(fpath, allow_pickle=True).item()
     return res
 
@@ -491,7 +495,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             # if we don't have flag fields, assume it's good
             bs_flag = so3g.RangesInt32(aman.samps.count)
             for k, flg in _a._fields.items():
-                if "flag" in k:
+                if "flag" in k and ("az" in k or "el" in k):
                     bs_flag += flg 
             aman.flags.wrap("acu_drops", bs_flag, [(0, 'samps')])
 

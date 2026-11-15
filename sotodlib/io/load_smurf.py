@@ -2026,8 +2026,7 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (SmurfStatus instance): object indexing of rogue variables
-            at specified time.
+            SmurfStatus: object indexing of rogue variables at specified time.
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
@@ -2256,7 +2255,7 @@ class SmurfStatus:
         self.aman = self.aman.wrap("filter_gain", self.filter_gain)
         self.filter_order = self.status.get(f"{filter_root}.Order")
         self.aman = self.aman.wrap("filter_order", self.filter_order)
-        self.filter_enabled = not self.status.get("{filter_root}.Disable")
+        self.filter_enabled = not self.status.get(f"{filter_root}.Disable")
         self.aman = self.aman.wrap("filter_enabled", self.filter_enabled)
 
         ds_root = "AMCc.SmurfProcessor.Downsampler"
