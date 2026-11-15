@@ -223,6 +223,7 @@ def make_depth1_map(
         if holefill_mask is not None:
             bright = d1u.cut_bright(obs, holefill_mask, holefill_thresh, holefill_buffer)
             strip = d1u.strip_samples(obs, bright)
+            L.debug(f"{name} holefill strips {bright.mean():.5f} of samples")
             del bright
         if gapfill_cuts or holefill_mask is not None:
             d1u.gapfill_cuts(obs)
@@ -460,7 +461,7 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
                 fname = holefill_file.format(band=band)
                 if fname not in holefill_cache:
                     holefill_cache.clear()
-                    holefill_cache[fname] = enmap.read_map(fname).preflat[:1]
+                    holefill_cache[fname] = enmap.read_map(fname).preflat[:1].astype(np.float64)
                 holefill_mask = holefill_cache[fname]
             # Make the maps
             mapdata = make_depth1_map(
