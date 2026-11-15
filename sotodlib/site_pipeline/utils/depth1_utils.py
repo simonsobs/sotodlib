@@ -417,6 +417,7 @@ def cut_bright(obs, sky, thresh, buffer):
     Returns:
         (ndet, nsamp) bool array of the bright-strip samples.
     """
+    sky = sky.astype(np.float64, copy=False)
     ctime = obs.timestamps
     srate = (len(ctime) - 1) / (ctime[-1] - ctime[0])
     pmat = coords.pmat.P.for_tod(

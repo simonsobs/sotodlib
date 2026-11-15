@@ -449,7 +449,7 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
             if holefill_file:
                 holefill_mask = enmap.read_map(
                     holefill_file, geometry=(subshape, subwcs)
-                ).preflat[:1].astype(np.float32)
+                ).preflat[:1]
             # Make the maps
             mapdata = make_depth1_map(
                 context,
