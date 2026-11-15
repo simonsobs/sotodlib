@@ -14,7 +14,7 @@ from sotodlib.io.metadata import ResultSet, write_dataset
 from sotodlib.site_pipeline.utils import logging
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
-import warnings
+
 # warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 # running the planet mapmaker will produce the maps and database, and store it in a location specified by the paths in the config file 
@@ -166,7 +166,7 @@ def get_errors(e):
 
     return errmsg, tb
 
-def map_selection(band, obs_id, configs, solved_maps=None, verbosity = 3):
+def map_selection(band, obs_id, configs, solved_maps=None, verbosity = 2):
     """Determines if provided map contributes to co-add.
     Based on FWHM.
 
@@ -213,7 +213,7 @@ def map_selection(band, obs_id, configs, solved_maps=None, verbosity = 3):
         return False, None 
     return True, rad_prof
     
-def calc_map_quality(maps, band, configs, metric='resid', verbosity = 3):
+def calc_map_quality(maps, band, configs, metric='resid', verbosity = 2):
     """Iterate through stored maps, and Calculate map quality based on fitted
     2D Gaussian. 
 
@@ -320,10 +320,10 @@ def add_to_failed_cache(obs_id, band, ws, msg, failed_cache_file, logger):
 
 def get_quality_db(index_path):
     """
-    The index key is (obs:obs_id, band, wafer).  The HDF5 dataset address is
+    The index key is (obs:obs_id, band, dets:wafer_slot).  The HDF5 dataset address is
     stored explicitly so every tuple can point to its own dataset.
     """
-    required_fields = {"obs:obs_id", "band", "wafer", "success", "rmse", "dataset"}
+    required_fields = {"obs:obs_id", "dets:wafer.bandpass", "dets:wafer_slot", "success", "rmse", "dataset"}
 
     if os.path.exists(index_path):
         db = core.metadata.ManifestDb(index_path)
@@ -340,8 +340,8 @@ def get_quality_db(index_path):
 
     scheme = core.metadata.ManifestScheme()
     scheme.add_exact_match("obs:obs_id")
-    scheme.add_exact_match("band")
-    scheme.add_exact_match("wafer")
+    scheme.add_exact_match("dets:wafer.bandpass")
+    scheme.add_exact_match("dets:wafer_slot")
     scheme.add_data_field("success")
     scheme.add_data_field("rmse")
     scheme.add_data_field("dataset")
@@ -368,8 +368,8 @@ def handle_result(obs_id, rmse, wafer, band, success, h5_path, h5_unix_digits, i
     obsid_result = np.array(
         [(obs_id, rmse, wafer, band, True, *popts)],
         dtype=[
-            ("obs_id", "U50"), ("rmse", "f8"), ("wafer_slot", "U10"),
-            ("wafer.bandpass", "U10"), ("success", "?"),
+            ("obs_id", "U50"), ("rmse", "f8"), ("dets:wafer_slot", "U10"),
+            ("dets:wafer.bandpass", "U10"), ("success", "?"),
             ("amp", "f8"), ("x0", "f8"), ("y0", "f8"), ("sigma_x", "f8"),
             ("sigma_y", "f8"), ("theta", "f8"), ("offset", "f8")])
     rset = ResultSet.from_friend(obsid_result)
@@ -389,7 +389,7 @@ def handle_result(obs_id, rmse, wafer, band, success, h5_path, h5_unix_digits, i
 
     db = get_quality_db(index_path)
     relpath = os.path.relpath(h5_path, start=os.path.dirname(index_path))
-    db.add_entry({"obs:obs_id": obs_id, "band": band, "wafer": wafer,
+    db.add_entry({"obs:obs_id": obs_id, "dets:wafer.bandpass": band, "dets:wafer_slot": wafer,
             "success": True, "rmse": float(rmse), "dataset": dataset_name},
         filename=relpath, replace=True, )
     return True
@@ -402,17 +402,13 @@ def get_parser(parser=None):
     parser.add_argument('--query', type=str, default=None, help='query string for obsdb')
     parser.add_argument('--update_delay', type=int, default=None, help='number of days to subtract from the current time to set the minimum ctime')
     parser.add_argument('--planet_tags', type=str, nargs='+', default=[], help='planet names to be tagged')
-    parser.add_argument('--verbosity', type=int, default=2, help='Number for logger verbosity')
-    parser.add_argument('--h5_path', type=str, default='quality_check.h5', help='Path to store hdf5 files')
     parser.add_argument('--h5_unix_digits', type=int, default=4, help='unix digits to store with h5 path')
-    parser.add_argument('--index_path', type=str, default='quality_check.sqlite', help='Path to store db')
-    parser.add_argument('--failed_cache_file', type=str, default='failed_obsids.yaml', help='Path to store failed obsids')
-    parser.add_argument('--overwrite_map', type=bool, help='Re-run mapmaker even if map already exists')
+    # parser.add_argument('--overwrite_map', type=bool, help='Re-run mapmaker even if map already exists')
 
     return parser
 
-def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_path: str, 
-         h5_unix_digits: int, index_path: str, failed_cache_file: str, planet_tags: list[str] | None = None, overwrite_map: bool = False):
+def main(config_file: str, query: str, update_delay: int, 
+         h5_unix_digits: int, planet_tags: list[str], overwrite_map: bool = False):
 
     configs = read_configs(config_file)
     context = core.Context(configs["context_file"])
@@ -423,6 +419,12 @@ def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_pat
     
     repo_root = Path(configs["mapmaker_path"])
     module_path = repo_root / "planet_mapmaking.py"
+
+    verbosity = 2
+    h5_path = configs['h5_path']
+    index_path = configs['index_path']
+    failed_cache_file = configs['failed_cache']
+    overwrite_map = configs['overwrite']
     
     sys.path.insert(0, str(repo_root))
     spec = importlib.util.spec_from_file_location("planet_mapmaking", module_path)
@@ -430,7 +432,9 @@ def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_pat
     spec.loader.exec_module(module)
     
     logger = logging.init_logger("compute_data_quality", verbosity=verbosity)
-    
+
+    if planet_tags is None:
+        raise ValueError('Should specify the planet tags')
     obsid_list = get_obslist(context=context, query=query, update_delay=update_delay, tags=planet_tags, planet_obs=True)
     obs_ids = list(dict.fromkeys( obs["obs_id"] for obs in obsid_list))
 
@@ -455,8 +459,6 @@ def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_pat
                     )
 
             except Exception as e:
-                # At this point we do not reliably know the wafer(s), so do not
-                # fabricate tuple-level cache entries.
                 errmsg, tb = get_errors(e)
                 logger.error(
                     f"Could not determine wafers for {obs_id} in {band}:\n{errmsg}\n{tb}"
@@ -478,7 +480,7 @@ def main(config_file: str, query: str, update_delay: int, verbosity: int, h5_pat
 
                 try:
                     logger.info(f"Processing obs_id={obs_id}, band={band}, wafer={ws}")
-                    dets = {"wafer_slot": [ws], "wafer.bandpass": band}
+                    dets = {"dets:wafer_slot": [ws], "dets:wafer.bandpass": band}
                     map_file = os.path.join(map_path, band, "map", f"{obs_id}_{ws}.fits")
                 
                     if (not os.path.exists(map_file)) or overwrite_map:
