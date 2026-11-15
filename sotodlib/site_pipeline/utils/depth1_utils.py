@@ -54,6 +54,7 @@ DEPTH1MAPMAKER_DEFAULTS = {
     "holefill_mask": None,
     "holefill_thresh": 0.01,
     "holefill_buffer": 0.1,
+    "map_dtype": "float64",
 }
 
 SENS_LIMITS = {

@@ -115,17 +115,22 @@ def get_parser(parser=None):
     parser.add_argument(
         "--holefill-mask",
         type=str,
-        help="T brightness map (e.g. Planck) with the --area pixelization. Samples above --holefill-thresh are cut and gap-filled for the solve, then put back into the map after it. Implies --gapfill-cuts.",
+        help="T brightness map (e.g. Planck), any CAR geometry that covers the scans. '{band}' in the path is replaced by the band. Samples above --holefill-thresh are cut and gap-filled for the solve, then put back into the map after it. Implies --gapfill-cuts.",
     )
     parser.add_argument(
         "--holefill-thresh",
         type=float,
-        help="Brightness limit for --holefill-mask, in the mask map unit. Default 0.01",
+        help="Brightness limit for --holefill-mask, in the mask map unit. Default 0.01. In a config file this can be a dict of band: limit.",
     )
     parser.add_argument(
         "--holefill-buffer",
         type=float,
         help="Padding along the scan around --holefill-mask samples, in seconds. Default 0.1",
+    )
+    parser.add_argument(
+        "--map-dtype",
+        type=str,
+        help="Data type of the output map files: float32 or float64 (default)",
     )
     return parser
 
@@ -323,6 +328,8 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
 
     srcsamp_mask = enmap.read_map(args["srcsamp"]) if args["srcsamp"] else None
     holefill_file = args.get("holefill_mask")
+    holefill_cache = {}
+    dtype_out = np.dtype(args.get("map_dtype") or "float64")
 
     if args["nmat"] == "uncorr":
         noise_model = mapmaking.NmatUncorr()
@@ -446,10 +453,15 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
             )
         try:
             holefill_mask = None
+            holefill_thresh = args.get("holefill_thresh", 0.01)
+            if isinstance(holefill_thresh, dict):
+                holefill_thresh = holefill_thresh[band]
             if holefill_file:
-                holefill_mask = enmap.read_map(
-                    holefill_file, geometry=(subshape, subwcs)
-                ).preflat[:1]
+                fname = holefill_file.format(band=band)
+                if fname not in holefill_cache:
+                    holefill_cache.clear()
+                    holefill_cache[fname] = enmap.read_map(fname).preflat[:1]
+                holefill_mask = holefill_cache[fname]
             # Make the maps
             mapdata = make_depth1_map(
                 context,
@@ -475,16 +487,15 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
                 min_dets=args["min_dets"],
                 gapfill_cuts=args.get("gapfill_cuts", False),
                 holefill_mask=holefill_mask,
-                holefill_thresh=args.get("holefill_thresh", 0.01),
+                holefill_thresh=float(holefill_thresh),
                 holefill_buffer=args.get("holefill_buffer", 0.1),
             )
-            del holefill_mask
 
             # Write them
             d1u.write_depth1_map(
                 prefix,
                 mapdata,
-                dtype=dtype_map,
+                dtype=dtype_out,
                 binned=args["bin"],
                 rhs=args["rhs"],
                 unit=args["unit"],
