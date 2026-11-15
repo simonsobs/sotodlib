@@ -12,7 +12,7 @@ from scipy import ndimage
 
 from sotodlib import coords, mapmaking
 from sotodlib.core import FlagManager, metadata
-from sotodlib.mapmaking import utils as smutils
+from sotodlib.mapmaking.utils import safe_invert_div, unarr
 from sotodlib.site_pipeline.utils.config import _get_config
 from sotodlib.tod_ops import detrend_tod
 
@@ -424,8 +424,8 @@ def cut_bright(obs, sky, thresh, buffer):
         comps="T",
         geom=sky.geometry,
         threads="domdir",
-        weather=smutils.unarr(obs.weather),
-        site=smutils.unarr(obs.site),
+        weather=unarr(obs.weather),
+        site=unarr(obs.site),
         interpol="nearest",
     )
     tod = np.zeros(obs.signal.shape, np.float32)
@@ -558,7 +558,7 @@ def holefill(signal_map, mapmaker, strips, map_):
         div = putils.allreduce(div, sm.comm)
         map_mul = enmap.map_mul
     tot = sm.div + div
-    new = map_mul(smutils.safe_invert_div(tot), map_mul(sm.div, map_) + rhs)
+    new = map_mul(safe_invert_div(tot), map_mul(sm.div, map_) + rhs)
     sel = div[0, 0] > 0
     out = map_.copy()
     out[..., sel] = new[..., sel]
