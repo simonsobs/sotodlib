@@ -1,9 +1,12 @@
+import numpy as np
 import pytest
 import yaml
 
 from sotodlib.site_pipeline.utils.depth1_utils import (
     DEPTH1MAPMAKER_DEFAULTS,
     create_mapmaker_config,
+    gapfill_cuts,
+    strip_samples,
 )
 
 
@@ -86,3 +89,58 @@ def test_config_file_override_kargs(file_config, tmp_path):
         assert config[key] == value
     assert config["preprocess_config"] == "file2.yaml"
     assert config["area"] == "new_area.fits"
+
+
+def _strip_obs(sig, cut):
+    import so3g
+    from sotodlib import core
+
+    ndet, nsamp = sig.shape
+    obs = core.AxisManager(core.LabelAxis("dets", [f"d{i}" for i in range(ndet)]),
+                           core.OffsetAxis("samps", nsamp))
+    obs.wrap("signal", sig.astype(np.float32), [(0, "dets"), (1, "samps")])
+    obs.wrap("flags", core.FlagManager.for_tod(obs))
+    obs.flags.wrap("glitch_flags", so3g.proj.RangesMatrix.from_mask(cut),
+                   [(0, "dets"), (1, "samps")])
+    return obs
+
+
+def test_strip_samples_and_gapfill():
+    nsamp = 40
+    x = np.arange(nsamp, dtype=float)
+    base = 2.0 + 0.5 * x
+    src = np.zeros(nsamp)
+    src[10:15] = 10.0
+    sig = np.stack([base + src, base + src])
+    bright = np.zeros((2, nsamp), bool)
+    bright[0, 9:16] = True  # inside the TOD
+    bright[1, 0:4] = True   # at the TOD start: one end point
+    bright[1, 37:] = True   # at the TOD end: one end point
+    cut = bright.copy()
+    cut[0, 16:18] = True    # glitch cut next to the strip
+    obs = _strip_obs(sig, cut)
+
+    s = strip_samples(obs, bright)
+    assert s.det.size == bright.sum()
+    d0 = s.det == 0
+    np.testing.assert_array_equal(s.left[d0], 8)
+    np.testing.assert_array_equal(s.right[d0], 18)
+    np.testing.assert_allclose(s.resid[d0], src[9:16], atol=1e-4)
+    d1 = s.det == 1
+    start = d1 & (s.samp < 4)
+    end = d1 & (s.samp >= 37)
+    np.testing.assert_array_equal(s.left[start], 4)
+    np.testing.assert_array_equal(s.right[start], 4)
+    np.testing.assert_array_equal(s.left[end], 36)
+    np.testing.assert_array_equal(s.right[end], 36)
+    np.testing.assert_allclose(s.resid[start], base[0:4] - base[4], atol=1e-4)
+
+    gapfill_cuts(obs)
+    np.testing.assert_allclose(obs.signal[0], base, atol=1e-4)
+    filled = obs.signal[1].copy()
+    np.testing.assert_allclose(filled[0:4], base[4], atol=1e-4)
+    np.testing.assert_allclose(filled[37:], base[36], atol=1e-4)
+    # strip value = resid + fill at the end points gives back the data
+    np.testing.assert_allclose(
+        s.resid + (1 - s.frac) * obs.signal[s.det, s.left] + s.frac * obs.signal[s.det, s.right],
+        sig[s.det, s.samp], atol=1e-4)

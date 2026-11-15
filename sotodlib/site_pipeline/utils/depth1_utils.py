@@ -6,11 +6,13 @@ if TYPE_CHECKING:
 
 import numpy as np
 import so3g
-from pixell import bunch, enmap, mpi
+from pixell import bunch, enmap, mpi, tilemap
 from pixell import utils as putils
+from scipy import ndimage
 
 from sotodlib import coords, mapmaking
 from sotodlib.core import FlagManager, metadata
+from sotodlib.mapmaking import utils as smutils
 from sotodlib.site_pipeline.utils.config import _get_config
 from sotodlib.tod_ops import detrend_tod
 
@@ -48,6 +50,10 @@ DEPTH1MAPMAKER_DEFAULTS = {
     "update_delay": None,
     "min_dur": 300,
     "pretend_now_is": None,
+    "gapfill_cuts": False,
+    "holefill_mask": None,
+    "holefill_thresh": 0.01,
+    "holefill_buffer": 0.1,
 }
 
 SENS_LIMITS = {
@@ -386,6 +392,177 @@ def calibrate_obs(
             good = sensitivity_cut(rms, SENS_LIMITS[band])
         putils.deslope(obs.signal, w=5, inplace=True)
     return obs, good
+
+
+def _set_glitch_flags(obs, mask):
+    obs.flags.move("glitch_flags", None)
+    obs.flags.wrap(
+        "glitch_flags",
+        so3g.proj.RangesMatrix.from_mask(mask),
+        [(0, "dets"), (1, "samps")],
+    )
+
+
+def cut_bright(obs, sky, thresh, buffer):
+    """Cut the samples where sky > thresh, plus buffer seconds on each side.
+
+    The cuts are added to obs.flags.glitch_flags.
+
+    Arguments:
+        obs: AxisManager with pointing and glitch_flags.
+        sky: (1, ny, nx) T map, in the same unit as thresh.
+        thresh: brightness limit.
+        buffer: padding along the scan, in seconds.
+
+    Returns:
+        (ndet, nsamp) bool array of the bright-strip samples.
+    """
+    ctime = obs.timestamps
+    srate = (len(ctime) - 1) / (ctime[-1] - ctime[0])
+    pmat = coords.pmat.P.for_tod(
+        obs,
+        comps="T",
+        geom=sky.geometry,
+        threads="domdir",
+        weather=smutils.unarr(obs.weather),
+        site=smutils.unarr(obs.site),
+        interpol="nearest",
+    )
+    tod = np.zeros(obs.signal.shape, np.float32)
+    pmat.from_map(sky, dest=tod)
+    bright = tod > thresh
+    del tod, pmat
+    nbuf = int(round(buffer * srate))
+    if nbuf > 0 and bright.any():
+        bright = ndimage.binary_dilation(
+            bright, structure=np.ones((1, 2 * nbuf + 1), bool)
+        )
+    _set_glitch_flags(obs, obs.flags.glitch_flags.mask() | bright)
+    return bright
+
+
+def strip_samples(obs, bright):
+    """Get the bright-strip samples relative to the linear fill of the cuts.
+
+    Call this after cut_bright and before gapfill_cuts. A strip with no good
+    sample on one side (at a TOD end) uses the other end point on both sides,
+    the same as np.interp in gapfill_cuts.
+
+    Returns:
+        Bunch of per-sample arrays: det, samp, left, right (fill end
+        points), frac (position between the end points) and resid
+        (signal - linear fill).
+    """
+    mask = obs.flags.glitch_flags.mask()
+    rec = {k: [] for k in ("det", "samp", "left", "right", "frac", "resid")}
+    for di in np.flatnonzero(bright.any(1)):
+        good = np.flatnonzero(~mask[di])
+        if good.size == 0:
+            continue
+        samp = np.flatnonzero(bright[di])
+        pos = np.searchsorted(good, samp)
+        left = good[np.maximum(pos - 1, 0)]
+        right = good[np.minimum(pos, good.size - 1)]
+        span = right - left
+        frac = np.where(span > 0, (samp - left) / np.maximum(span, 1), 0.0)
+        sig = obs.signal[di]
+        rec["det"].append(np.full(samp.size, di))
+        rec["samp"].append(samp)
+        rec["left"].append(left)
+        rec["right"].append(right)
+        rec["frac"].append(frac)
+        rec["resid"].append(sig[samp] - (1 - frac) * sig[left] - frac * sig[right])
+    dtypes = dict(det=np.int32, samp=np.int32, left=np.int32, right=np.int32,
+                  frac=np.float32, resid=np.float32)
+    return bunch.Bunch(**{
+        k: np.concatenate(v).astype(dtypes[k]) if v else np.zeros(0, dtypes[k])
+        for k, v in rec.items()
+    })
+
+
+def gapfill_cuts(obs):
+    """Fill the glitch_flags samples by linear interpolation, in place.
+
+    The samples stay cut. The fill keeps bright signal in cut samples out of
+    the noise model and the CG solution.
+    """
+    mask = obs.flags.glitch_flags.mask()
+    x = np.arange(obs.samps.count)
+    for di in np.flatnonzero(mask.any(1)):
+        bad = mask[di]
+        if bad.all():
+            continue
+        obs.signal[di, bad] = np.interp(x[bad], x[~bad], obs.signal[di, ~bad])
+
+
+def holefill(signal_map, mapmaker, strips, map_):
+    """Put the bright-strip samples back into the solved map.
+
+    Each strip sample is its residual from the linear fill plus the solved
+    map at the fill end points. The samples are binned with the white-noise
+    weights and combined with the ML map by inverse variance. Only pixels hit
+    by strip samples change.
+
+    Arguments:
+        signal_map: SignalMap after the solve.
+        mapmaker: MLMapmaker.
+        strips: dict of strip_samples output per obs name (this task only).
+        map_: solved map.
+
+    Returns:
+        (map, div): the filled map and the total inverse covariance.
+    """
+    sm = signal_map
+    ncomp = sm.ncomp
+    if sm.tiled:
+        rhs = tilemap.zeros(sm.geo_work, map_.dtype)
+        div = tilemap.zeros(sm.geo_work.copy(pre=(ncomp, ncomp)), map_.dtype)
+    else:
+        rhs = enmap.zeros(sm.rhs.shape, sm.rhs.wcs, map_.dtype)
+        div = enmap.zeros(sm.div.shape, sm.div.wcs, map_.dtype)
+    mwork = sm.to_work(map_)
+    for data in mapmaker.data:
+        s = strips.get(data.id)
+        if s is None or s.det.size == 0:
+            continue
+        pmap = sm.data[data.id].pmap
+        w = data.nmat.ivar[s.det].astype(mapmaker.dtype)
+        tod = np.zeros((data.ndet, data.nsamp), mapmaker.dtype)
+        sm.forward(data.id, tod, mwork)
+        val = s.resid + (1 - s.frac) * tod[s.det, s.left] + s.frac * tod[s.det, s.right]
+        tod[:] = 0
+        tod[s.det, s.samp] = val * w
+        obs_rhs = pmap.zeros()
+        pmap.to_map(dest=obs_rhs, signal=tod)
+        rhs = rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
+        obs_div = pmap.zeros(super_shape=(ncomp, ncomp))
+        for i in range(ncomp):
+            obs_div[i] = 0
+            obs_div[i, i] = 1
+            tod[:] = 0
+            pmap.from_map(obs_div[i], dest=tod)
+            resp = tod[s.det, s.samp]
+            tod[:] = 0
+            tod[s.det, s.samp] = resp * w
+            obs_div[i] = 0
+            pmap.to_map(signal=tod, dest=obs_div[i])
+        div = div.insert(obs_div, op=np.ndarray.__iadd__)
+        del tod, obs_rhs, obs_div
+    if sm.tiled:
+        active = sm.rhs.geometry.active
+        rhs = tilemap.redistribute(rhs, sm.comm, active)
+        div = tilemap.redistribute(div, sm.comm, active)
+        map_mul = tilemap.map_mul
+    else:
+        rhs = putils.allreduce(rhs, sm.comm)
+        div = putils.allreduce(div, sm.comm)
+        map_mul = enmap.map_mul
+    tot = sm.div + div
+    new = map_mul(smutils.safe_invert_div(tot), map_mul(sm.div, map_) + rhs)
+    sel = div[0, 0] > 0
+    out = map_.copy()
+    out[..., sel] = new[..., sel]
+    return out, tot
 
 
 def create_mapmaker_config(

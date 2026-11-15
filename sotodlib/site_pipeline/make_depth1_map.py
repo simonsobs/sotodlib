@@ -106,6 +106,27 @@ def get_parser(parser=None):
         type=str,
         help='Change current time for running with update-delay. Time in UTC and format %%Y-%%m-%%d %%H:%%M:%%S.',
     )
+    parser.add_argument(
+        "--gapfill-cuts",
+        action="store_true",
+        default=None,
+        help="Fill cut samples by linear interpolation before the noise model is built. The samples stay cut.",
+    )
+    parser.add_argument(
+        "--holefill-mask",
+        type=str,
+        help="T brightness map (e.g. Planck) with the --area pixelization. Samples above --holefill-thresh are cut and gap-filled for the solve, then put back into the map after it. Implies --gapfill-cuts.",
+    )
+    parser.add_argument(
+        "--holefill-thresh",
+        type=float,
+        help="Brightness limit for --holefill-mask, in the mask map unit. Default 0.01",
+    )
+    parser.add_argument(
+        "--holefill-buffer",
+        type=float,
+        help="Padding along the scan around --holefill-mask samples, in seconds. Default 0.1",
+    )
     return parser
 
 
@@ -132,6 +153,10 @@ def make_depth1_map(
     srcsamp_mask=None,
     unit="K",
     min_dets=50,
+    gapfill_cuts=False,
+    holefill_mask=None,
+    holefill_thresh=0.01,
+    holefill_buffer=0.1,
 ):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0:
@@ -159,6 +184,7 @@ def make_depth1_map(
     if comm.rank == 0:
         L.info(f"{pre} Building RHS")
     time_rhs = signal_map.rhs * 0
+    strips = {}
     # And feed it with our observations
     nobs_kept = 0
     for oi in range(len(obslist)):
@@ -188,6 +214,13 @@ def make_depth1_map(
         if obs.dets.count == 0:
             print(f"Skipping {obs_id}, {detset}, {band}")
             continue
+        strip = None
+        if holefill_mask is not None:
+            bright = d1u.cut_bright(obs, holefill_mask, holefill_thresh, holefill_buffer)
+            strip = d1u.strip_samples(obs, bright)
+            del bright
+        if gapfill_cuts or holefill_mask is not None:
+            d1u.gapfill_cuts(obs)
         # And add it to the mapmaker
         try:
             mapmaker.add_obs(name, obs)
@@ -199,6 +232,12 @@ def make_depth1_map(
         Nt += obs.timestamps - t0
         Nt *= mapmaker.data[-1].nmat.ivar[:, None]
         signal_cut.data[name].pcut.clear(Nt)
+        if strip is not None:
+            # Strip samples are cut, but holefill puts them back
+            Nt[strip.det, strip.samp] = (
+                obs.timestamps[strip.samp] - t0
+            ) * mapmaker.data[-1].nmat.ivar[strip.det]
+            strips[name] = strip
         # Bin into pixels
         pmap = signal_map.data[name].pmap
         obs_time_rhs = pmap.zeros()
@@ -232,7 +271,10 @@ def make_depth1_map(
             )
         t1 = time.time()
     map_ = step.x[1]
-    ivar = signal_map.div[0, 0]
+    div = signal_map.div
+    if holefill_mask is not None:
+        map_, div = d1u.holefill(signal_map, mapmaker, strips, map_)
+    ivar = div[0, 0]
     with utils.nowarn():
         tmap = utils.remove_nan(time_rhs / ivar)
     return bunch.Bunch(
@@ -280,6 +322,7 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         context = Context(args["context"])
 
     srcsamp_mask = enmap.read_map(args["srcsamp"]) if args["srcsamp"] else None
+    holefill_file = args.get("holefill_mask")
 
     if args["nmat"] == "uncorr":
         noise_model = mapmaking.NmatUncorr()
@@ -402,6 +445,11 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
                 mapcat_settings=mapcat_settings,
             )
         try:
+            holefill_mask = None
+            if holefill_file:
+                holefill_mask = enmap.read_map(
+                    holefill_file, geometry=(subshape, subwcs)
+                ).preflat[:1].astype(np.float32)
             # Make the maps
             mapdata = make_depth1_map(
                 context,
@@ -425,7 +473,12 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
                 srcsamp_mask=srcsamp_mask,
                 unit=args["unit"],
                 min_dets=args["min_dets"],
+                gapfill_cuts=args.get("gapfill_cuts", False),
+                holefill_mask=holefill_mask,
+                holefill_thresh=args.get("holefill_thresh", 0.01),
+                holefill_buffer=args.get("holefill_buffer", 0.1),
             )
+            del holefill_mask
 
             # Write them
             d1u.write_depth1_map(
