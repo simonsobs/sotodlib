@@ -113,6 +113,11 @@ def axman_with_modified_axis(axman, newaxis, op):
 
 def index_list(vals): return list(enumerate(vals))
 
+def drop_fields_if_present(axman, field_paths):
+    for field_path in field_paths:
+        if field_path in axman:
+            axman.move(field_path, None)
+
 def cutdup(cuts, nmul):
     res = cuts
     for i in range(nmul-1):
