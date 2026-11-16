@@ -3,7 +3,8 @@ import numpy as np
 import os
 import yaml
 from copy import deepcopy
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
+from collections import defaultdict
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
@@ -46,6 +47,8 @@ class UpdateDetMatchesConfig:
         h5 files will be stored.
     context_path: str
         Path to context file. This must contain detset and det_cal metadata.
+    wafer_info_path: str
+        Path to wafer info metadata file.
     site_pipeline_root: str
         Path to root of site-pipeline-configs. If ``$SITE_PIPELINE_CONFIG_DIR``
         is set in the environment, that will be used as the default.
@@ -92,7 +95,7 @@ class UpdateDetMatchesConfig:
         Time in seconds before a failed detset will be added to the cache. This
         is to prevent new detsets still acquiring data from being added right
         away.
-    
+
     Attributes
     -------------
     freq_offsets : Optional[np.ndarray]
@@ -101,6 +104,7 @@ class UpdateDetMatchesConfig:
     """
     results_path: str
     context_path: str
+    wafer_info_path: str
     site_pipeline_root:str = os.environ.get('SITE_PIPELINE_CONFIG_DIR')
     wafer_map_path: Optional[str] = None
     freq_offset_range_args: Optional[tuple[float, float, float]] = (-4, 4, 0.3)
@@ -124,7 +128,7 @@ class UpdateDetMatchesConfig:
         if self.wafer_map_path is None:
             self.wafer_map_path = os.path.join(
                 self.site_pipeline_root, 'shared/detmapping/wafer_map.yaml')
-        
+
         if self.freq_offset_range_args is not None:
             self.freq_offsets = np.arange(*self.freq_offset_range_args)
         else:
@@ -135,12 +139,12 @@ class UpdateDetMatchesConfig:
 
         if not os.path.exists(self.results_path):
             raise FileNotFoundError(f"Results dir does not exist: {self.results_path}")
-        
+
         allowed_solution_types = ['kaiwen_handmade', 'resonator_set']
         if self.solution_type not in allowed_solution_types:
             raise ValueError(
                 f"Solution type ({self.solution_type}) must be a member of: {allowed_solution_types}")
-        
+
         if self.solution_type == 'resonator_set':
             if self.resonator_set_dir is None:
                 raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
@@ -155,9 +159,10 @@ class Runner:
         self.ctx = core.Context(cfg.context_path)
         self.detset_db = None
         self.detcal_db = None
+        self.wafer_info_dataset: defaultdict[str, Any] = defaultdict(lambda: None)
         with open(self.cfg.wafer_map_path, 'r') as f:
             self.wafer_map = yaml.safe_load(f)
-        
+
         self.ufm_to_fp_file = os.path.join(
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
@@ -179,7 +184,11 @@ class Runner:
         if self.detcal_db is None:
             raise Exception(
                 f"Could not find detcal metadata entry with name: {cfg.detcal_meta_name}")
-        
+
+        with h5py.File(cfg.wafer_info_path) as h5f:
+            for ufm in list(h5f.keys()):
+                self.wafer_info_dataset[ufm] = h5f[ufm][:]
+
         self.failed_detset_cache_path = os.path.join(cfg.results_path, 'failed_detsets.yaml')
         self.match_dir = os.path.join(cfg.results_path, 'matches')
         if not os.path.exists(self.match_dir):
@@ -227,7 +236,7 @@ def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
         with open(cache_file, 'r') as f:
             x = yaml.safe_load(f)
     else:
-        x = {}  
+        x = {}
 
     x[str(detset)] = str(msg)
     with open(cache_file, 'w') as f:
@@ -261,7 +270,7 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
             match_pars=match_pars,
         )
         match_pars.freq_offset_mhz = opt_freq
-    match = det_match.Match(rs0, rs1, match_pars=match_pars, 
+    match = det_match.Match(rs0, rs1, match_pars=match_pars,
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
 
     return match
@@ -335,11 +344,27 @@ def run_match(runner: Runner, detset: str) -> bool:
                 ignore_missing=True,
             )
 
+            stream_id = aman.det_info.stream_id[0]
+
             bandpass = np.asarray(
                 aman.det_cal.bandpass
             ).astype(str)
 
             good = (bandpass != "NC")
+
+            # Some bg files give yields higher than design.  Skip those since
+            # there will be many spurious entries with wrong bgs.
+            bad_bg = False
+            for bp in np.unique(bandpass[good]):
+                design_yield = np.count_nonzero(wafer_info_dataset[stream_id]['dets:wafer.bandpass'] == bp)
+                det_cal_yield = np.count_nonzero(bandpass[good] == bp)
+                if det_cal_yield > design_yield:
+                    bad_bg = True
+                    break
+
+            if bad_bg:
+                logger.warnining(f"{obs_id} and {detset} yield surpasses design yield. skipping.")
+                continue
 
             n_good = int(np.count_nonzero(good))
             n_total = int(np.count_nonzero(aman.dets.count))
@@ -426,8 +451,8 @@ def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
     else:
         match_pars = deepcopy(match_pars)
     freq_offsets = np.array(freq_offsets)
-    
-    rs0 = deepcopy(rs0) 
+
+    rs0 = deepcopy(rs0)
     rs1 = deepcopy(rs1)
 
     costs = np.full_like(freq_offsets, np.nan)
@@ -477,7 +502,7 @@ def update_manifests(runner: Runner, detset):
             }, h5_path)
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
-    
+
     write_relpath = runner.cfg.write_relpath
     add_to_db(ra, det_match_idx, det_match_h5, detset,
               write_relpath=write_relpath)
@@ -506,6 +531,7 @@ def update_manifests_all(runner):
         logger.info(f"Adding {ds} to manifests")
         update_manifests(runner, ds)
 
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -514,6 +540,7 @@ def get_parser(parser=None):
     parser.add_argument('--solutions-mode', action='store_true',
                          help='create a det_match solution set')
     return parser
+
 
 def main(config_file: str, run_all: bool=False, solutions_mode: bool=False):
     """
