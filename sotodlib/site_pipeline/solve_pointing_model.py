@@ -690,16 +690,26 @@ def get_full_correlation_matrix(lmfit_result, epoch_params):
     return full_corr_mat, param_names
 
     
-def analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, params):
+def analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, params, logger=None):
     full_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=False, return_all_dets=True)
     ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
     # Apply model to data.
     xieta_model = config.get("xieta_model", "measured")
-    (full_modeled, full_residuals, rms, _ 
+    (full_modeled, full_residuals, _, model_reference_full
     ) = apply_model_params(xieta_model,
                            params,
                            config.get("pm_version"),
                            full_aman)
+    extreme_cutoff = config.get("extreme_resid_cutoff", 150)
+    bad_det_inds = np.where(full_residuals > extreme_cutoff)[0]
+    if len(bad_det_inds) > 0:
+        logger.info("Setting %d points with residual > %s arcmin to NaN when analyzing ALL DETS",
+                    len(bad_det_inds), extreme_cutoff)
+        full_aman.weights[bad_det_inds] = 0.0  # keep RMS/weight sums consistent
+        full_residuals[bad_det_inds] = np.nan
+        full_modeled = np.array(full_modeled)
+        full_modeled[:, bad_det_inds] = np.nan
+
     if xieta_model == "template":
         to_comp = "nominal_xieta_locs"
     if xieta_model == "measured":
@@ -870,7 +880,7 @@ def main(config_path: str):
                 logger.info(f"{p}: {test_params[p].value}")
             param_aman.wrap("version", pm_version)
         
-            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
+            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params, logger=logger)
             epoch["solver_aman"] = full_aman
             epoch["solver_aman"].wrap("pointing_model", param_aman)
             logger.info(f"for epoch {epoch["name"]}")
@@ -1037,6 +1047,21 @@ def main(config_path: str):
         # Model template and measured points using parameters found above
         logger.info("Calculating RMS and cutoff for %s", epoch["name"])
         modeled_fits, fit_residuals_i1, rms_i1, model_reference = apply_model_params(xieta_model, epoch["solver_aman"].pointing_model, pm_version, epoch["solver_aman"])
+        # Remove extreme outliers (arcmin) from the data entirely.
+        extreme_cutoff = config.get("extreme_resid_cutoff", 150)
+        bad_det_inds = np.where(fit_residuals_i1 > extreme_cutoff)[0]
+        if len(bad_det_inds) > 0:
+            logger.info("Setting %d points with residual > %s arcmin to NaN",
+                        len(bad_det_inds), extreme_cutoff)
+            
+            epoch["solver_aman"].measured_xieta_data[:, bad_det_inds] = np.nan
+            epoch["solver_aman"].nominal_xieta_locs[:, bad_det_inds] = np.nan
+            epoch["solver_aman"].weights[bad_det_inds] = 0.0  # keep RMS/weight sums consistent
+            fit_residuals_i1[bad_det_inds] = np.nan
+            modeled_fits = np.array(modeled_fits)
+            modeled_fits[:, bad_det_inds] = np.nan
+            rms_i1 = np.sqrt(np.nansum(fit_residuals_i1 ** 2 * epoch["solver_aman"].weights)
+                             / np.nansum(epoch["solver_aman"].weights))
         logger.info("RMS on fit: %f arcmin", rms_i1)
         logger.info("Mean & Median resid %f, %f arcmin" %(np.nanmean(fit_residuals_i1), np.nanmedian(fit_residuals_i1)))
 
@@ -1050,6 +1075,17 @@ def main(config_path: str):
         
         if fit_type == "detector":
             _, fit_residuals_full, rms_full, _ = apply_model_params(xieta_model, epoch["solver_aman"].pointing_model, pm_version, epoch["fitcheck_aman"])
+            extreme_cutoff = config.get("extreme_resid_cutoff", 150)
+            bad_det_inds = np.where(fit_residuals_full > extreme_cutoff)[0]
+            if len(bad_det_inds) > 0:
+                logger.info("Setting %d points from Full FitCheck with residual > %s arcmin to NaN",
+                            len(bad_det_inds), extreme_cutoff)
+                epoch["fitcheck_aman"].measured_xieta_data[:, bad_det_inds] = np.nan
+                epoch["fitcheck_aman"].nominal_xieta_locs[:, bad_det_inds] = np.nan
+                epoch["fitcheck_aman"].weights[bad_det_inds] = 0.0  # keep RMS/weight sums consistent
+                fit_residuals_full[bad_det_inds] = np.nan
+                rms_full = np.sqrt(np.nansum(fit_residuals_full ** 2 * epoch["fitcheck_aman"].weights)
+                                / np.nansum(epoch["fitcheck_aman"].weights))            
             logger.info("RMS on FULL detector set: %f arcmin", rms_full)
             logger.info("Mean & Median resid %f, %f arcmin" %(np.nanmean(fit_residuals_full), np.nanmedian(fit_residuals_full)))
             epoch["solver_aman"].wrap("fit_residuals_full", fit_residuals_full, overwrite=True)
@@ -1295,7 +1331,7 @@ def main(config_path: str):
             if "ot_float_aman" in epoch["solver_aman"]._assignments:
                 test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
 
-            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
+            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params, logger=logger)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
