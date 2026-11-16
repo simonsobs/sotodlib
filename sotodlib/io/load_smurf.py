@@ -116,6 +116,32 @@ def get_sample_timestamps(frame):
         times = np.array([t.time / spt3g_core.G3Units.s for t in frame["data"].times()])
         return times, TimingParadigm.G3Timestream
 
+def check_frame_counters( frame ):
+    """check counters in frame are doing what we want them to do.
+    bookbinder also checks but we'll see these warnings faster
+    """
+    fo = frame.get('primary', None)
+    if fo is None:
+        return  False # no good timing without primary
+    key_map = {k: i for i, k in enumerate(fo.names)}
+    c0 = fo.data[ key_map['Counter0']]
+    c2 = fo.data[ key_map['Counter2']]
+
+    s, ns = split_ts_bits(c2)
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+
+    # check all counters are incrementing
+    counters = np.all( np.diff( c0 ) != 0 ) 
+    counters = counters and np.all( np.diff( c2 ) != 0)
+    
+        # Look for evidence of counters de-syncing. 
+    stat = c2-(c0/480000) - np.round(c2-(c0/480000))
+    counters = counters and (
+        (np.ptp(stat)<0.001) and (np.abs(np.mean(stat))<0.0025)
+    )
+    return counters
 
 def _file_has_end_frames(filename):
     ended = False
@@ -168,12 +194,12 @@ class G3tSmurf:
 
         Args
         -----
-            archive_path: path
+            archive_path: str
                 Path to the data directory
-            db_path: path, optional
+            db_path: str, optional
                 Path to the sqlite file. Defaults to
                 ``<archive_path>/frames.db``
-            meta_path: path, optional
+            meta_path: str, optional
                 Path of directory containing smurf related metadata (ie. channel
                 assignments). Required for full functionality.
             echo: bool, optional
@@ -331,6 +357,16 @@ class G3tSmurf:
             agent.time = time
             session.commit()
 
+    def get_observation(self, obs_id, session=None, ):
+        """
+            get the observation object for obs_id
+        """
+        if session is None:
+            session = self.Session()
+        return session.query(Observations).filter(
+            Observations.obs_id==obs_id
+        ).one_or_none()
+
     def add_file(self, path, session, overwrite=False):
         """
         Indexes a single file and adds it to the sqlite database. Creates a
@@ -339,7 +375,7 @@ class G3tSmurf:
 
         Args
         ----
-            path: path
+            path: str
                 Path of the file to index
             session : SQLAlchemy session
                 Current, active sqlalchemy session
@@ -450,18 +486,7 @@ class G3tSmurf:
                         timing = timing and (
                             frame.get("timing_paradigm", "") == "High Precision"
                         )
-                    fo = frame.get('primary', None)
-                    if fo is None:
-                        timing = False # no good timing without primary
-                    else:
-                        key_map = {k: i for i, k in enumerate(fo.names)}
-                        counters = np.all(
-                            np.diff( fo.data[ key_map['Counter0']] ) != 0 
-                        ) and np.all( 
-                            np.diff( fo.data[ key_map['Counter2']] ) != 0
-                        )
-                        # check all counters are incrementing
-                        timing = timing and counters 
+                    timing = timing and check_frame_counters(frame)
 
                 else:
                     db_frame.n_samples = data.n_samples
@@ -498,6 +523,9 @@ class G3tSmurf:
                 logger.debug(f"file {db_file.name} is an observation")
                 self.add_new_observation_from_status(status, session)
 
+    
+
+        
     def index_archive(
         self,
         stop_at_error=False,
@@ -557,7 +585,9 @@ class G3tSmurf:
 
         ## files must be updated in sequencial order. otherwise we may end up
         ## with more TuneSets than are necessary
-        for f in tqdm(sorted(files), disable=(not show_pb)):
+        for i,f in tqdm(enumerate(sorted(files)), disable=(not show_pb)):
+            if (i % 25) == 0:
+                logger.info(f"Have indexed {i} of {len(files)} files.")
             try:
                 self.add_file(os.path.join(root, f), session)
                 session.commit()
@@ -642,7 +672,7 @@ class G3tSmurf:
             assignemnt
         cha : string
             The file name of the channel assignment
-        cha_path : path
+        cha_path : str
             The absolute path to the channel assignment
         session : SQLAlchemy Session
             The active session
@@ -719,7 +749,7 @@ class G3tSmurf:
 
         Args
         -------
-        tune_path : path
+        tune_path : str
             The absolute path to the tune file
         ctime : int
             ctime of SMuRF Action
@@ -779,7 +809,7 @@ class G3tSmurf:
             The stream id for the particular SMuRF slot
         ctime : int
             The ctime of the SMuRF action called to create the tuning file.
-        tune_path : path
+        tune_path : str
             The absolute path to the tune file
         session : SQLAlchemy Session
             The active session
@@ -884,6 +914,7 @@ class G3tSmurf:
             session,
             calibration=(status.tags[0] == "oper"),
             session_id=status.session_id,
+            status=status,
         )
 
     def add_new_observation(
@@ -895,6 +926,7 @@ class G3tSmurf:
         calibration,
         session_id=None,
         max_early=5,
+        status=None,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -914,6 +946,9 @@ class G3tSmurf:
             session id, if known, for timestream files that should go with the observations
         max_early : int (optional)
             Buffer time to allow the g3 file to be earlier than the smurf action
+        status: SmurfStatus (optional)
+            We're often making observations straight from a status object so 
+            this can be used to prevent reloading that status object
         """
 
         if session_id is None:
@@ -950,6 +985,7 @@ class G3tSmurf:
         )
         logger.debug(f"Observations {obs_id} already exists")
 
+        ## if observation does not exist, create one
         if obs is None:
             db_file = session.query(Files)
             db_file = db_file.filter(
@@ -965,7 +1001,9 @@ class G3tSmurf:
                     return
             
             # Verify the files we found match with Observation
-            status = SmurfStatus.from_file(db_file.name)
+            if status is None:
+                status = SmurfStatus.from_file(db_file.name)
+            
             if status.action is not None:
                 assert status.action == action_name
                 assert status.action_timestamp == action_ctime
@@ -1001,6 +1039,7 @@ class G3tSmurf:
                 obs,
                 session,
                 max_early=max_early,
+                status=status,
             )
 
     def update_observation_files(
@@ -1010,6 +1049,7 @@ class G3tSmurf:
         max_early=5, 
         force=False, 
         force_stop=False,
+        status=None,
     ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
@@ -1028,6 +1068,9 @@ class G3tSmurf:
             of the current file list. Useful for completing observations where
             computer systems crashed/restarted during the observations so no end
             frames were written.
+        status: SmurfStatus (optional)
+            We're often making and updating observations straight from a status object so 
+            this can be used to prevent reloading that status object
         """
 
         if not force and obs.stop is not None:
@@ -1054,7 +1097,10 @@ class G3tSmurf:
         obs.start = flist[0].start
 
         ## Load Status Information
-        status = SmurfStatus.from_file(flist[0].name)
+        if status is None:
+            status = SmurfStatus.from_file(flist[0].name)
+        assert status.session_id == obs.timestamp, "status does not match observation"
+        assert status.stream_id  == obs.stream_id, "status does not match observation"
 
         # Add any tags from the status
         if len(status.tags) > 0:
@@ -1455,7 +1501,7 @@ class G3tSmurf:
                 if len(x) < 1:
                     logger.error(
                         f"No data points before update time for agent "
-                        f"{agent} in file {db_agent.hkfile.filename}?"
+                        f"{agent} in file {db_field.hkfile.filename}?"
                     )
                 max_time = max(data[db_field.field][1][x])
             else:
@@ -1980,8 +2026,7 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (SmurfStatus instance): object indexing of rogue variables
-            at specified time.
+            SmurfStatus: object indexing of rogue variables at specified time.
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
@@ -2210,7 +2255,7 @@ class SmurfStatus:
         self.aman = self.aman.wrap("filter_gain", self.filter_gain)
         self.filter_order = self.status.get(f"{filter_root}.Order")
         self.aman = self.aman.wrap("filter_order", self.filter_order)
-        self.filter_enabled = not self.status.get("{filter_root}.Disable")
+        self.filter_enabled = not self.status.get(f"{filter_root}.Disable")
         self.aman = self.aman.wrap("filter_enabled", self.filter_enabled)
 
         ds_root = "AMCc.SmurfProcessor.Downsampler"
@@ -2942,7 +2987,8 @@ def load_file(
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance if we don't want to use the one from the
           first file
-      det_axis : name of the axis used for channels / detectors
+      det_axis : str
+          Name of the axis used for channels / detectors
       linearize_timestamps : bool
           sent to _get_timestamps. if true and using unix timing, linearize the timing
           based on the frame counter

@@ -1,52 +1,41 @@
-import argparse
-import datetime as dt
-from pathlib import Path
-from typing import Optional
+"""
+Upload bound Books to the Librarian, the service that holds the offsite
+copies. Every Book with status BOUND is handed to the Librarian and, on
+success, moved to status UPLOADED. Only UPLOADED Books are eligible for
+deletion by ``cleanup_level2``.
 
-from sotodlib.io.imprinter import Imprinter, BOUND, UPLOADED
+The Librarian connection is named by the ``librarian_conn`` key in the
+imprinter configuration file and resolved against the ``hera_librarian``
+client settings.
+
+The loop gives up after 5 failed uploads, so a Librarian outage produces a
+handful of log lines rather than one per Book, and then re-raises the first
+failure so the scheduler sees a non-zero exit status.
+
+See the Data Packaging page of the sotodlib documentation for the full
+pipeline description.
+"""
+
+import argparse
+
+from sotodlib.io.imprinter import Imprinter
 from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
 
 logger = init_logger(__name__, "update_librarian: ")
 
-def main(config: Optional[str] = None, profile: bool=False,
-         profile_output: Optional[Path]=None):
-    """
-    Arguments
-    ---------
-    config: string
-        configuration file for imprinter
-    profile: bool
-        if True, will run the script with pyinstrument and output to profile_output
-    profile_output: str
-        if profile is True, the file name of the directory
-        to output the pyinstrument profiling results to
-    """
 
-    if profile:
-        import pyinstrument
-        timestamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S')
-        filename = f"update_librarian_{timestamp}.html"
-        output_filename = profile_output / filename if profile_output is not None else filename
-        profiler = pyinstrument.Profiler()
-        profiler.start()
-    
-    try:
-        core(config=config)
-    finally:
-        if profile:
-            profiler.stop()
-            if profile_output is not None:
-                with open(output_filename, "w") as f:
-                    f.write(profiler.output_html())
-
-def core(config: str):
+@profile("update_librarian")
+def main(config: str):
     """
-    Update the book plan database with new data from the g3tsmurf database.
+    Upload all BOUND Books to the Librarian and mark them UPLOADED.
+
+    Stops after 5 failures and re-raises the first one.
 
     Parameters
     ----------
     config : str
-        Path to config file for imprinter
+        Path to config file for imprinter. Must set ``librarian_conn``.
     """
 
     imprinter = Imprinter(
@@ -76,13 +65,17 @@ def core(config: str):
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Upload every BOUND Book in the imprinter database to "
+            "the Librarian and mark it UPLOADED."
+        )
     parser.add_argument(
-        '--config', type=str, help="imprinter configuration file"
+        '--config', type=str,
+        help="imprinter configuration file. Must set 'librarian_conn'."
     )
-    parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
-    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
-                        type=Path)
+
+    add_profile_args(parser)
+
     return parser
 
 

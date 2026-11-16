@@ -1,3 +1,38 @@
+"""
+Bind Books: the only data packaging element that writes level 3 data. It takes
+every Book registered as UNBOUND by ``update_book_plan`` and writes it out to
+the imprinter's ``output_root`` staging area, then makes one retry pass over
+FAILED Books.
+
+Binding is delegated to ``sotodlib.io.bookbinder``:
+
+* ``obs``/``oper`` Books use ``BookBinder``, which reads the level 2 frames,
+  puts every wafer on a common sample grid, fills small gaps, co-samples the
+  housekeeping fields named in the imprinter config's ``hk_fields``, and
+  writes ``D_<stream_id>_*.g3`` plus ``A_ancil_*.g3``. ``oper`` Books also get
+  the raw sodetlib outputs copied into ``Z_smurf/``.
+* ``hk``, ``smurf`` and ``stray`` Books use ``TimeCodeBinder``, which copies
+  level 2 files verbatim (into a zip for ``smurf`` Books at schema >= 1).
+
+``M_book.yaml`` and ``M_index.yaml`` are written last, and obs/oper Books are
+re-read by ``check_book.BookScanner`` to confirm internal consistency before
+the status is set to BOUND. Anything that raises along the way leaves the Book
+FAILED with the traceback stored in its ``message`` column.
+
+The retry pass is deliberately shallow: Books that were already FAILED when
+the script started are skipped, so nothing is retried twice in one run. Books
+that fail their retry send an alert to ``--alert-webhook``. To triage the
+remaining failures use ``python -m sotodlib.io.imprinter_cli <platform>
+report|autofix|failed``.
+
+With ``--n-proc`` > 1 the Books are bound in a process pool, and each worker
+rebuilds its Imprinter with ``Imprinter.for_platform``, so ``DATAPKG_ENV``
+must be set.
+
+See the Data Packaging page of the sotodlib documentation for the Book model,
+Book statuses, and the catalogue of known binding failures.
+"""
+
 import os
 import traceback
 import argparse
@@ -110,19 +145,25 @@ def main(config: str, n_proc:int=1, alert_webhook: list[str]=None):
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Bind every UNBOUND Book in the imprinter database, "
+            "writing level 3 data to the imprinter's output_root, then retry "
+            "Books that failed on a previous run."
+        )
     parser.add_argument(
-        'config', 
-        type=str, 
+        'config',
+        type=str,
         help="Path to imprinter configuration file"
     )
     parser.add_argument(
         "--n-proc", type=int, default=1,
-        help="The number of processes to run for operations books"
+        help="Number of processes to bind Books with. Values > 1 require "
+        "DATAPKG_ENV to be set, since workers rebuild the Imprinter from the "
+        "platform name."
     )
     parser.add_argument(
         "--alert-webhook", type=str, default='', nargs="+",
-        help="Webhook address to send error alerts"
+        help="Webhook address(es) to send alerts to when a Book fails twice"
     )
     return parser
 

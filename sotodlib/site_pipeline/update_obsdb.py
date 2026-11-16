@@ -32,6 +32,7 @@ from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context 
 from sotodlib.site_pipeline import check_book
 from sotodlib.io import load_book
+from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
 import os
 import fnmatch
 import glob
@@ -104,6 +105,7 @@ def _find_books_shallow(basedirs):
         for d in sorted(glob.glob(b + '/*/M_index.yaml')):
             yield os.path.dirname(d)
 
+@profile("update_obsdb")
 def main(config: str,
          recency: float = None,
          booktype: Optional[str] = "both",
@@ -406,6 +408,9 @@ def get_parser(parser=None):
         help="Limit processing to only this number of book candidates.")
     parser.add_argument("--filter", type=str, default=None,
         help="Limit processing to books (full path) matching this fnmatch wildcard string.")
+
+    add_profile_args(parser)
+
     return parser
 
 

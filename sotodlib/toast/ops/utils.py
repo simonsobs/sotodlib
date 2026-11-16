@@ -77,7 +77,7 @@ def tb2tcmb(tb, nu):
 
 def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
     """Loading the file will fail if another process is
-    writing it. We will try up to `n_ty_max` times and wait
+    writing it. We will try up to `n_try_max` times and wait
     `wait_time` seconds between each try
     """
 
@@ -90,7 +90,7 @@ def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
         try:
             with open(fname, "rb") as f:
                 payload = pickle.load(f)
-        except EOFError:
+        except (EOFError, pickle.UnpicklingError):
             if n_try == n_try_max - 1:
                 log.warning(f"EOF at {fname}, nothing loaded")
                 return None

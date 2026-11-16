@@ -44,6 +44,8 @@ def send_alert(webhook: str | list[str], alertname='', tag='', error='', timesta
             timestamp = round(timestamp.timestamp())
     else:
         return f"Could not convert timestamp type {type(timestamp)}"
+    
+    alerts_sent = 0
 
     for wh in webhook:
         try:
@@ -67,6 +69,8 @@ def send_alert(webhook: str | list[str], alertname='', tag='', error='', timesta
                 )
                 if response.status_code != 200:
                     raise Exception("Issue with Slack webhook.")
+                else:
+                    alerts_sent += 1
 
             # Custom webhook (Campana)
             else:
@@ -84,6 +88,7 @@ def send_alert(webhook: str | list[str], alertname='', tag='', error='', timesta
                 if response.status_code != requests.codes.ok:
                     raise Exception("Issue with custom webhook.")
 
-            return "Alert sent"
         except Exception as e:
-            return f"Failed to send alert: {e}"
+            return f"Have sent {alerts_sent} alerts. Failed to send alert: {e}"
+
+    return f"Sent {alerts_sent} alerts successfully"

@@ -41,19 +41,25 @@ Wrapping a pipeline script
 Pipeline Elements
 =================
 
-update-g3tsmurf-db
--------------------
+Data packaging
+--------------
 
-This script set up to create and maintain g3tsmurf databases. :ref:`See details
-here<g3tsmurf-update-section>`.
+Six elements make up the Level 2 to Level 3 "data packaging" pipeline:
+``update_g3thk_database``, ``update_g3tsmurf_db``, ``update_book_plan``,
+``make_book``, ``update_librarian`` and ``cleanup_level2``.  They share the
+G3tSmurf, G3tHk and Imprinter databases of a DAQ node and must be run in that
+order; at the site they run as Prefect deployments rather than from the
+command line.  They are documented together on the
+:ref:`Data Packaging <data-packaging>` page, which covers the Book model,
+the shared configuration files, the command line arguments for each script,
+how the pipeline is deployed, and how to recover from failed Books.
 
-update-book-plan
-----------------
-
-This script is designed to help with the bookbinding. It will search a given
-Level 2 G3tSmurf database for observations that overlap in time. The different
-optional arguments will let us pass information from something like the sorunlib
-database to further filter the observations. 
+Quick links: :ref:`update_g3thk_database <dpkg-update-g3thk-database>` |
+:ref:`update_g3tsmurf_db <dpkg-update-g3tsmurf-db>` |
+:ref:`update_book_plan <dpkg-update-book-plan>` |
+:ref:`make_book <dpkg-make-book>` |
+:ref:`update_librarian <dpkg-update-librarian>` |
+:ref:`cleanup_level2 <dpkg-cleanup-level2>`
 
 check-book
 ----------
@@ -410,8 +416,9 @@ multiple wafers at once.
 Otherwise, specify a wafer slot or restrict detectors in command line args to debug.
 
 Command Line arguments:
+
 .. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_step1
    :func: get_parser
 
 
@@ -588,17 +595,18 @@ Example NERSC slurm job submission config file
 ``````````````````````````````````````````````
 
 .. code-block:: yaml
+
   #!/bin/bash -l
 
   #SBATCH --qos=shared
   #SBATCH --constraint=cpu
   #SBATCH --nodes=1
   #SBATCH --ntasks=1
-  
+
   #SBATCH --cpus-per-task=14
   #SBATCH --time=00:30:00
-  #SBATCH --mem=220G`` #(may need regular queue & up to 400 Gb for long obs)
-  
+  #SBATCH --mem=220G #(may need regular queue & up to 400 Gb for long obs)
+
   export OMP_NUM_THREADS=1
   set -e
 
@@ -613,13 +621,13 @@ Example NERSC slurm job submission config file
 
   if (($map)); then
     echo submitted map job;
-    srun -n 1 -N 1 -c 14 python3 
+    srun -n 1 -N 1 -c 14 python3
        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile
        --obs_id=${2} --sso_name="moon";
   else
     echo submitted tod job;
-    srun -n 1 -N 1 -c 14 python3 
-        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile 
+    srun -n 1 -N 1 -c 14 python3
+        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile
         --obs_id=${2} --sso_name="moon";
   fi
 
@@ -640,7 +648,7 @@ get_brightsrc_pointing_part2
 See Part 1 for description
 
 .. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_step2
    :func: get_parser
 
 
@@ -729,7 +737,7 @@ To run, this script requires a config file described below. If run without the
 
 .. argparse::
    :module: sotodlib.site_pipeline.update_det_match
-   :func: make_parser
+   :func: get_parser
 
 Generated results
 ```````````````````
@@ -1763,31 +1771,10 @@ config
    :undoc-members:
 
 
-constants
-`````````
-
-.. automodule:: sotodlib.site_pipeline.utils.constants
-   :members:
-   :undoc-members:
-
 depth1_utils
 ````````````
 
 .. automodule:: sotodlib.site_pipeline.utils.depth1_utils
-   :members:
-   :undoc-members:
-
-exceptions
-``````````
-
-.. automodule:: sotodlib.site_pipeline.utils.exceptions
-   :members:
-   :undoc-members:
-
-io
-``
-
-.. automodule:: sotodlib.site_pipeline.utils.io
    :members:
    :undoc-members:
 

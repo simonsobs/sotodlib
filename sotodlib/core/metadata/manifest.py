@@ -871,7 +871,7 @@ class DbBatchManager:
         """
         # Check if entry already exists to avoid duplicates
         existing_entries = self.db.inspect(params)
-        if len(existing_entries) == 0:
+        if len(existing_entries) == 0 or replace:
             # Add the entry without committing
             self.db.add_entry(
                 params, filename=filename, create=create, commit=False, replace=replace

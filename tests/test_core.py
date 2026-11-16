@@ -3,6 +3,7 @@ import tempfile
 import os
 
 import numpy as np
+import h5py
 import astropy.units as u
 from sotodlib import core
 import sotodlib.core.axisman_util as amutil
@@ -489,6 +490,80 @@ class TestAxisManager(unittest.TestCase):
                 self.assertEqual(coparent.shape, (4, n))
 
 
+    def test_420_axis_mismatch_policy(self):
+        # wrap/merge intersect axes that share a name but not coverage;
+        # the on_mismatch policy controls whether log warning ('warn') or
+        # raise ValueError ('error').
+        logger = core.axisman.logger
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+
+        def make_tod():
+            tod = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            tod.wrap('sig', np.zeros((len(dets), n)),
+                     [(0, 'dets'), (1, 'samps')])
+            return tod
+
+        # on_mismatch='warn' warns shorter axis and then truncates.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n - 100),
+                     [(0, core.OffsetAxis('samps', n - 100, ofs))],
+                     on_mismatch='warn')
+        self.assertEqual(tod.samps.count, n - 100)
+        self.assertEqual(tod.sig.shape, (3, n - 100))
+
+        # Longer incoming axis warns.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n + 100),
+                     [(0, core.OffsetAxis('samps', n + 100, ofs))],
+                     on_mismatch='warn')
+        self.assertEqual(len(tod.x), n)
+
+        # Same count but different offset warns.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n),
+                     [(0, core.OffsetAxis('samps', n, ofs + 10))],
+                     on_mismatch='warn')
+        self.assertEqual(tod.samps.count, n - 10)
+
+        # LabelAxis truncation (dets subset via child) warns.
+        tod = make_tod()
+        child = core.AxisManager(core.LabelAxis('dets', dets[:2]))
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('child', child, on_mismatch='warn')
+        self.assertEqual(tod.dets.count, 2)
+
+        # No error with matching axes.
+        tod = make_tod()
+        tod.wrap('x', np.zeros(n),
+                 [(0, core.OffsetAxis('samps', n, ofs))],
+                 on_mismatch='error')
+
+        # on_mismatch='error' raises, leaving the target untouched.
+        tod = make_tod()
+        with self.assertRaises(ValueError):
+            tod.wrap('x', np.zeros(n - 100),
+                     [(0, core.OffsetAxis('samps', n - 100, ofs))],
+                     on_mismatch='error')
+        self.assertEqual(tod.samps.count, n)
+        self.assertEqual(tod.sig.shape, (3, n))
+        self.assertNotIn('x', tod)
+
+        # Through merge() directly.
+        tod = make_tod()
+        _tod = core.AxisManager(
+            core.LabelAxis('dets', dets + ['det3']),
+            core.OffsetAxis('samps', n, ofs - n // 2))
+        with self.assertRaises(ValueError):
+            tod.merge(_tod, on_mismatch='error')
+        self.assertEqual(tod.shape, (3, n))
+
+
     def test_500_io(self):
         # Test save/load HDF5
         dets = ['det0', 'det1', 'det2']
@@ -589,6 +664,21 @@ class TestAxisManager(unittest.TestCase):
             if subkeys:
                 self.assertCountEqual(target['subaman']._fields.keys(),
                                       subkeys)
+
+
+    def test_501_io_open_file_group(self):
+        # Test io with open h5py.File / Group.
+        root = core.AxisManager(core.LabelAxis('dets', ['det0', 'det1']))
+        sub = core.AxisManager(core.LabelAxis('dets', ['det2']))
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            with h5py.File(filename, 'w') as fout:
+                root.save(fout)
+                sub.save(fout, 'sub')
+            with h5py.File(filename, 'r') as fin:
+                self.assertEqual(core.AxisManager.load(fin).dets, root.dets)
+                self.assertEqual(core.AxisManager.load(fin, 'sub').dets, sub.dets)
+
 
     def test_900_everything(self):
         tod = core.AxisManager(

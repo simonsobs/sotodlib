@@ -1,9 +1,20 @@
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 import numpy as np
 from mapcat.database import DepthOneMapTable, TODDepthOneTable
 from mapcat.helper import Settings
 from sqlmodel import select
+
+
+def _to_datetime(unix_time: float) -> datetime:
+    """Convert a unix timestamp to a UTC-aware datetime.
+
+    mapcat's ``ctime``/``start_time``/``stop_time`` columns are
+    ``datetime`` (since mapcat's "Swapping to datetime" migration), but
+    sotodlib's obsdb records these as raw unix timestamps.
+    """
+    return datetime.fromtimestamp(float(unix_time), tz=timezone.utc)
 
 
 def map_to_calculate(
@@ -84,9 +95,9 @@ def commit_depth1_tods(
             obs_info = obs_infos[obs_infos["obs_id"] == obs_id][0]
             tod_depth1_entry = {
                 "obs_id": obs_id,
-                "ctime": obs_info["timestamp"],
-                "start_time": obs_info["start_time"],
-                "stop_time": obs_info["stop_time"],
+                "ctime": _to_datetime(obs_info["timestamp"]),
+                "start_time": _to_datetime(obs_info["start_time"]),
+                "stop_time": _to_datetime(obs_info["stop_time"]),
                 "nsamples": int(obs_info["n_samples"]),
                 "telescope": obs_info["telescope"],
                 "telescope_flavor": obs_info["telescope_flavor"],
@@ -112,7 +123,7 @@ def commit_depth1_tods(
             ]
             tod_query = select(TODDepthOneTable).where(*tod_select_values)
             existing_tod = session.execute(tod_query).first()
-            tod = TODDepthOneTable(map_name=map_name, **tod_depth1_entry)
+            tod = TODDepthOneTable(**tod_depth1_entry)
             if existing_tod is None:
                 session.add(tod)
                 tods.append(tod)
@@ -171,12 +182,12 @@ def commit_depth1_map(
             map_name=map_name,
             map_path=prefix + "_map.fits",
             ivar_path=prefix + "_ivar.fits",
-            time_path=prefix + "_time.fits",
+            mean_time_path=prefix + "_time.fits",
             tube_slot=detset,
             frequency=band,
-            ctime=ctime,
-            start_time=start_time,
-            stop_time=stop_time,
+            ctime=_to_datetime(ctime),
+            start_time=_to_datetime(start_time),
+            stop_time=_to_datetime(stop_time),
             tods=tods,
         )
         session.merge(depth1map_meta)
