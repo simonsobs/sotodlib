@@ -23,7 +23,6 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import yaml
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
@@ -320,6 +319,8 @@ def ana1(df):
             and NaN in empty bins. ``az1``-``az4`` flag the four nominal
             azimuth ranges.
     """
+    import pandas as pd  # local pandas import to pass check
+
     azbins = np.arange(0, 360, 0.2)
     suffixes = ("", "_no_turnarounds", "_only_turnarounds")
     stats = ("fp", "fp_sqre", "aze", "aze_sqre")
@@ -469,6 +470,7 @@ def dataframe_maker(
         tuple: ``(dfm, df)``, the azimuth-binned summary DataFrame from
             :func:`ana1` and the per-observation DataFrame.
     """
+    import pandas as pd  # local pandas import to pass check
 
     scan_start = dtime.datetime(ys, ms, ds, 0, 0, 0, 0, tzinfo=dtime.timezone.utc)
     scan_stop = dtime.datetime(
