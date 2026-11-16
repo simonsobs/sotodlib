@@ -268,61 +268,142 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
 
 def run_match(runner: Runner, detset: str) -> bool:
     """
-    Creates match files for specified detset, along with any other unmatched
-    detsets in the loaded observation. If match fails for a known reason, this
-    will add it to the failed_detset_cache so that it is not re-attempted.
+    Find the observation with the highest number of non-NC detectors
+    for the requested detset and run detector matching.
 
     Returns
     -------
     success: bool
         True if match was successful
     """
-    # Find obs-id with cal info
-    obs_all = set(runner.ctx.obsdb.query("type=='obs'")['obs_id'])
-    cur = runner.ctx.obsfiledb.conn.execute(f"""
-        select distinct obs_id from files where detset=='{detset}'
-    """)
-    obsids_with_cal = set(runner.detcal_db.get_entries(['dataset'])['dataset'])
+
+    fpath = os.path.join(runner.match_dir, f"{detset}.h5")
+
+    if os.path.exists(fpath):
+        logger.info(f"Match already exists for {detset}")
+        return True
+
+    obs_all = set(
+        runner.ctx.obsdb.query("type=='obs'")["obs_id"]
+    )
+
+    cur = runner.ctx.obsfiledb.conn.execute(
+        "SELECT DISTINCT obs_id FROM files WHERE detset = ?",
+        (detset,),
+    )
+
     obs_dset = {r[0] for r in cur}
-    obs_ids = sorted(list(
-        obs_all.intersection(obs_dset).intersection(obsids_with_cal)), 
-        key=lambda s:s.split('_')[1])[::-1]
-    if len(obs_ids) == 0:
+
+    obsids_with_cal = set(
+        runner.detcal_db.get_entries(["dataset"])["dataset"]
+    )
+
+    obs_ids = sorted(
+        obs_all.intersection(obs_dset).intersection(obsids_with_cal),
+        key=lambda s: int(s.split("_")[1]),
+        reverse=True,
+    )
+
+    if not obs_ids:
         add_to_failed_cache(
-            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL", runner.cfg
+            runner.failed_detset_cache_path,
+            detset,
+            "NO_OBSID_WITH_CAL",
+            runner.cfg,
         )
         logger.error(f"Cannot find obsid for detset {detset}")
         return False
 
-    obs_id = obs_ids[0]
+    logger.info(
+        f"Searching {len(obs_ids)} observations for detset {detset}"
+    )
 
-    book_dir = os.path.dirname(runner.ctx.obsfiledb.get_files(obs_id)[detset][0][0])
-    book_idx_file = os.path.join(book_dir, 'M_index.yaml')
-    with open(book_idx_file, 'r') as f:
-        book_idx = yaml.safe_load(f)
+    best_obs_id = None
+    best_aman = None
+    best_n_good = -1
+    best_n_total = 0
 
-    aman = runner.ctx.get_meta(obs_id, ignore_missing=True)
-    finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
-    new_detsets = []
-    for detset in np.unique(aman.det_info.detset):
-        if (
-            detset not in finished_detsets and
-            get_detset_time(detset) > runner.cfg.start_time and
-            get_detset_time(detset) < runner.cfg.stop_time
-        ):
-            new_detsets.append(detset)
+    for obs_id in tqdm(
+        obs_ids,
+        desc=f"Searching {detset}",
+        disable=not runner.cfg.show_pb,
+    ):
+        try:
+            aman = runner.ctx.get_meta(
+                obs_id,
+                dets={"detset": detset},
+                ignore_missing=True,
+            )
 
-    logger.info(f"Loaded obs_id {obs_id}. Running matches for detsets:")
-    for ds in new_detsets:
-        logger.info(f"    - {ds}")
+            bandpass = np.asarray(
+                aman.det_cal.bandpass
+            ).astype(str)
 
-    for ds in new_detsets:
-        stream_id = aman.det_info.stream_id[aman.det_info.detset == ds][0]
-        wafer_slot = aman.det_info.wafer_slot[aman.det_info.detset == ds][0]
-        match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
-        fpath = os.path.join(runner.match_dir, f"{ds}.h5")
-        match.save(fpath)
-        logger.info(f"Saved match to file: {fpath}")
+            good = (bandpass != "NC")
+
+            n_good = int(np.count_nonzero(good))
+            n_total = int(np.count_nonzero(aman.dets.count))
+
+            if n_total == 0:
+                continue
+
+            logger.debug(
+                f"{obs_id} | {detset} | "
+                f"{n_good}/{n_total} non-NC detectors"
+            )
+
+            if n_good > best_n_good:
+                best_obs_id = obs_id
+                best_aman = aman
+                best_n_good = n_good
+                best_n_total = n_total
+
+                logger.info(
+                    f"New best obs_id: {best_obs_id} | "
+                    f"{best_n_good}/{best_n_total} non-NC detectors"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load metadata for {obs_id} "
+                f"and {detset}: {e}"
+            )
+            continue
+
+    if best_aman is None:
+        logger.error(
+            f"No usable detector calibration metadata found for {detset}"
+        )
+        return False
+
+    logger.info(
+        f"Selected obs_id {best_obs_id} for {detset}: "
+        f"{best_n_good}/{best_n_total} non-NC detectors "
+        f"({100 * best_n_good / best_n_total:.2f}%)"
+    )
+
+    stream_id = str(
+        best_aman.det_info.stream_id[0]
+    )
+
+    wafer_slot = str(
+        best_aman.det_info.wafer_slot[0]
+    )
+
+    logger.info(
+        f"Running match for {detset} | "
+        f"{stream_id} | {wafer_slot} | {best_obs_id}"
+    )
+
+    match = run_match_aman(
+        runner,
+        best_aman,
+        detset,
+        wafer_slot=wafer_slot,
+    )
+
+    match.save(fpath)
+    logger.info(f"Saved match to file: {fpath}")
 
     return True
 
