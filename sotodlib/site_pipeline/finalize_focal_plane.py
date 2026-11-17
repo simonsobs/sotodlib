@@ -407,7 +407,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, _, _, template_msk = focal_plane.map_by_det_id(aman)
+    fp, _, _, _, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -783,7 +783,7 @@ def main():
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, r2, det_boresight, template_msk = focal_plane.map_by_det_id(aman)
+                fp, r2, det_boresight, xe_fit_err, template_msk = focal_plane.map_by_det_id(aman)
                 focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
@@ -820,7 +820,7 @@ def main():
 
                 # Store weighted values
                 weights = np.column_stack((weights, r2))
-                focal_plane.add_fp(i, fp, weights, det_boresight, template_msk)
+                focal_plane.add_fp(i, fp, weights, det_boresight, xe_fit_err, template_msk)
 
                 n_obs += 1
 
