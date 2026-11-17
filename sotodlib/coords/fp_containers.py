@@ -418,12 +418,17 @@ class FocalPlane:
                 np.array(fp_full["roll"]),
             )
         )
-        xe_fit_err = np.column_stack(
-            (
-                np.array(fp_full["xi_err"]),
-                np.array(fp_full["eta_err"]),
+
+        if "xi_err" in fp_full.keys and "eta_err" in fp_full.keys:
+            xe_fit_err = np.column_stack(
+                (
+                    np.array(fp_full["xi_err"]),
+                    np.array(fp_full["eta_err"]),
+                )
             )
-        )
+        else:
+            logger.warning("No xi_err/eta_err found in this focal plane, setting to zeros.")
+            xe_fit_err = np.full((len(fp_full["xi_m"]), 2), np.nan)
         # For backwards compatibility
         weights = np.array(fp_full["weights"])
         if "r2" in fp_full.keys:

@@ -399,7 +399,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
         "tube_slot": tube_slot,
         "wafer_slot": wafer_slot,
         "config_path": config_path,
-        "ot_config_path": config_path,
+        "ot_config_path": ot_config_path,
         "zemax_path": zemax_path,
         "return_fp": False,
     }
