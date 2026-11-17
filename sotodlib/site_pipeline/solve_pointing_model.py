@@ -225,26 +225,6 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     else:
         if config.get("use_these_files") is not None:
             filelist = [filelist[i] for i in config.get("use_these_files")]
-    # if return_all_dets:
-    #     band = None
-    #     cull_dets = config.get("cull_dets", None)
-    #     cull_twice = config.get("cull_twice", False)
-    #     even_obs_size = False
-    #     which_ufm = None
-    #     filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
-    #     filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
-    # else:
-    #     band = config.get("band")
-    #     if band is not None:
-    #         band = band.encode("utf-8")
-    #     cull_dets = config.get("cull_dets", None)
-    #     cull_twice = config.get("cull_twice", False)
-    #     even_obs_size = config.get("even_obs_size", False)
-    #     which_ufm = config.get("which_ufm", None)
-    #     filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
-    #     filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
-    #     if config.get("use_these_files") is not None:
-    #         filelist = [filelist[i] for i in config.get("use_these_files")]
 
     obs_dets_fits, det_boresight, weights_dets, tot_xe_err, stream_id_list, ot_list, obs_index = [], [], [], [], [], [], []
     for i, ffp in enumerate(filelist):
@@ -1587,25 +1567,7 @@ class ModelFitsPlotter:
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350) 
             
-    def plot_SAT_wafer_resid_scatter_and_hist(self):
-        platform = self.platform
-        plotlims = self.plotlims
-        plot_dir = self.plot_dir
-        tag = self.tag
-        append = self.append_string
-        config = self.config
 
-        fit_residuals = self.aman.fit_residuals
-        xieta_model = config.get("xieta_model")
-        if xieta_model == "measured":
-            to_comp = "measured_xieta_data"
-        if xieta_model == "template":
-            to_comp = "nominal_xieta_locs"
-
-        
-        
-
-        
     def plot_dets_in_these_obs(self):  
         platform = self.platform
         plot_dir = self.plot_dir
