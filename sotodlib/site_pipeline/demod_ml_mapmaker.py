@@ -173,11 +173,11 @@ def prepare_demod_data(obs, frel=1.9, comps="QU"):
             return np.tile(val, ntile)
     obs_demod = axman_with_modified_axis(obs_down, detaxis, dupdets)
     # The demodulated signal
-    osignal = np.zeros_like(obs.signal, shape=(detaxis.count, onsamp))
+    osignal = np.zeros_like(obs.signal, shape=(detaxis.count, onsamp), dtype=dtype_tod)
     # Downsample demodulated TODs
     i = 0
     if "T" in comps:
-        ftod    = fft.rfft(obs.dsT)
+        ftod    = fft.rfft(obs.dsT.astype(dtype_tod))
         ftod    = resample_rfft(ftod, onsamp)
         # Fix fourier units to account for the resampling.
         ftod   *= 1/insamp
@@ -186,14 +186,14 @@ def prepare_demod_data(obs, frel=1.9, comps="QU"):
         i      += 1
 
     if "QU" in comps:
-        ftod    = fft.rfft(obs.demodQ)
+        ftod    = fft.rfft(obs.demodQ.astype(dtype_tod))
         ftod    = resample_rfft(ftod,onsamp)
         ftod   *= 1/insamp
         fft.irfft(ftod, osignal[i*ndet:(i+1)*ndet])
         # osignal[i*ndet:(i+1)*ndet] = obs.demodQ[:,::down] # decimate instead of fft resampling (this could be useful to match the pointing downsampling scheme)
         i      += 1
 
-        ftod    = fft.rfft(obs.demodU)
+        ftod    = fft.rfft(obs.demodU.astype(dtype_tod))
         ftod    = resample_rfft(ftod,onsamp)
         ftod   *= 1/insamp
         fft.irfft(ftod, osignal[i*ndet:(i+1)*ndet])
