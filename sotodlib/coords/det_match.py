@@ -44,16 +44,35 @@ def map_band_chans(b1, c1, b2, c2, chans_per_band=512):
     return mapping
 
 
-def get_north_is_highband(bands, bgs):
+def get_north_is_highband(bands, bgs, min_fraction=0.5):
     """
-    Checks if north is highband based on bgmapping. This will tell you if
-    the majority of dets on the north side of the ufm (bgs 0-5) belong to
-    highband (bands 4-7).
+    Determine the UFM coax orientation by requiring both SMuRF
+    band populations to agree on the north/south assignment.
     """
-    highband = (bands > 3).astype(int) * 2 - 1   # 1 if highband, -1 if not
-    north = (bgs < 6).astype(int) * 2 - 1        # 1 if north, -1 if not
-    north[bgs == -1] = 0
-    return np.mean(highband * north) > 0
+    bands, bgs = np.asarray(bands), np.asarray(bgs)
+
+    valid = (bands >= 0) & (bands < 8) & (bgs >= 0) & (bgs < 12)
+
+    low = valid & (bands < 4)
+    high = valid & (bands >= 4)
+
+    if not np.any(low) or not np.any(high):
+        raise ValueError("Missing lowband or highband population")
+
+    f_low_north = np.mean(bgs[low] < 6)
+    f_high_north = np.mean(bgs[high] < 6)
+
+    if f_high_north > min_fraction and f_low_north < 1 - min_fraction:
+        return True
+
+    if f_low_north > min_fraction and f_high_north < 1 - min_fraction:
+        return False
+
+    raise ValueError(
+        f"Ambiguous north/south orientation: "
+        f"lowband north={f_low_north:.1%}, "
+        f"highband north={f_high_north:.1%}"
+    )
 
 
 @dataclass
@@ -309,8 +328,8 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_aman(cls, aman, stream_id, det_cal=None, name=None, pointing: Optional[AxisManager]=None,
-                 ignore_north_south=False):
+    def from_aman(cls, aman, stream_id, det_cal=None, name=None,
+                  pointing: Optional[AxisManager]=None):
         """
         Load a resonator set from a Context object based on an obs_id
 
@@ -331,17 +350,20 @@ class ResSet:
         m = aman.det_info.stream_id == stream_id
         if not np.any(m):
             raise ValueError(f"No channels with stream_id {stream_id} in obs")
-        
+
         if det_cal is None:
             det_cal = aman.det_cal
-        north_is_highband = get_north_is_highband(
-            aman.det_info.smurf.band[m], det_cal.bg[m]
-        )
+        if aman.det_info.wafer_slot[0] != "ws.":
+            north_is_highband = get_north_is_highband(
+                aman.det_info.smurf.band[m], det_cal.bg[m]
+            )
+        is_norths = []
         resonators = []
         for i, ri in enumerate(np.where(m)[0]):
             band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
-            if not ignore_north_south:
+            if aman.det_info.wafer_slot[ri] != "ws.":
                 is_north = north_is_highband ^ (band < 4)
+                is_norths.append(int(is_north))
             else:
                 is_north = 1
             readout_id = aman.det_info.readout_id[ri]
@@ -382,6 +404,9 @@ class ResSet:
                 Path to file containing resonance fit data
             bgmap_file (str):
                 Path to file containing bgmap data
+            ignore_north_south (str):
+                Do not infer North/South orientation and just set all to North.
+                Used for LF.
         """
         tune = np.load(tunefile, allow_pickle=True).item()
         resonances = []
@@ -416,8 +441,7 @@ class ResSet:
 
     @classmethod
     def from_wafer_info_file(cls, wafer_info_file, array_name, name=None,
-                             pt_cfg: Optional[PointingConfig]=None,
-                             ignore_north_south=False):
+                             pt_cfg: Optional[PointingConfig]=None):
         """
         Initialize a ResSet from a wafer info file. This is a file that contains
         detector design information.
@@ -447,10 +471,7 @@ class ResSet:
         resonators = []
         idx = 0
         for r in wafer_array:
-            if not ignore_north_south:
-                is_north = r['dets:wafer.coax'] == b'N'
-            else:
-                is_north = 1
+            is_north = r['dets:wafer.coax'] == b'N'
             kwargs = dict(
                 idx=idx,
                 det_id=r['dets:det_id'].decode(),
@@ -505,16 +526,18 @@ class ResSet:
             name (str):
                 Name to label this ResSet
             north_is_highband (bool):
-                True if the north-side of the array corresponds to bands
-                4-8
+                True if the north-side of the array corresponds to bands 4-8
             fp_pars (dict):
-                Result of the function ``sotododlib.coords.optics.get_ufm_to_fp_pars``. If this is None, detector positions will
-                not be mapped to pointing angles.
+                Result of the function ``sotododlib.coords.optics.get_ufm_to_fp_pars``.
+                If this is None, detector positions will not be mapped to pointing angles.
             platform (str):
                 Which platform.  Used to determine which focal plane function to
                 use for pointing
             zemax_path (str):
                 zemax path, required to get pointing for LAT optics
+            ignore_north_south (str):
+                Do not infer North/South orientation and just set all to North.
+                Used for LF.
         """
         resonances = []
 
@@ -528,7 +551,7 @@ class ResSet:
                 labels[i] = labels[i].strip()
 
             # Helper needed for when sol file has saved ints as floats
-            def _int(val, null_val=None): 
+            def _int(val, null_val=None):
                 is_null = (val == 'null' or val == '')
                 if is_null and null_val is not None:
                     return null_val

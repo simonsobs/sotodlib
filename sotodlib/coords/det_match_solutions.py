@@ -247,7 +247,7 @@ def pointing_preprocess(cfg: SolutionsCfg, pinfo: PointingInfo):
     return meta
 
 
-def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=0, ignore_north_south=False):
+def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=0):
     """
     Combine all pointing measurements into a single resonator set, with the
     median pointing info from all. This requires a base_idx to be specified,
@@ -268,7 +268,6 @@ def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=
         meta,
         stream_id=stream_id,
         pointing=meta.tod_pointing,
-        ignore_north_south=ignore_north_south
     )
 
     pointing_map = {
@@ -288,7 +287,6 @@ def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=
             meta,
             stream_id=stream_id,
             pointing=meta.tod_pointing,
-            ignore_north_south=ignore_north_south
         )
         dst = base_resset
         match = dm.Match(src, dst, match_pars=match_pars)
@@ -419,7 +417,6 @@ def match_wafer(
     am: AxisManager,
     stream_id: str,
     meas_rset: Optional[dm.ResSet],
-    ignore_north_south: bool = False
 ) -> MatchSolution:
     """
     Create a match solution for a given wafer slot.
@@ -445,12 +442,11 @@ def match_wafer(
             am,
             stream_id,
             pointing=am[cfg.pointing_field],
-            ignore_north_south=ignore_north_south
         )
     else:
         src = meas_rset
 
-    if ignore_north_south:
+    if wafer_slot == "ws.":
         wafer_slots = []
         wafers_dict = {}
 
@@ -482,7 +478,6 @@ def match_wafer(
             cfg.wafer_info_path,
             stream_id,
             pt_cfg=pt_cfg,
-            ignore_north_south=ignore_north_south,
         ).as_array()
 
         # extract current wafer
@@ -496,12 +491,11 @@ def match_wafer(
 
     # get full wafer info and populate pointing and wafer_slot information
     # from merged dst (not necesary if matching a single wafer)
-    if ignore_north_south:
+    if wafer_slot == "ws.":
         dst = dm.ResSet.from_wafer_info_file(
                 cfg.wafer_info_path,
                 stream_id,
                 pt_cfg=None,
-                ignore_north_south=ignore_north_south,
             ).as_array()
 
         merge_fields = ["xi", "eta", "wafer_slot"]
@@ -645,12 +639,8 @@ def get_wafer_solution(
     else:
         base_idx = 0
 
-    # Whether or not to use North/South in match
-    ignore_north_south = (wafer_slot == "ws.")
-
     meas_rset, pointing_map = merge_pointing_info(
         cfg, pointing_results, base_idx=base_idx,
-        ignore_north_south=ignore_north_south
     )
 
     meta = pointing_results[0].meta
@@ -658,7 +648,6 @@ def get_wafer_solution(
 
     match_solution = match_wafer(
         cfg, meta, stream_id, meas_rset=meas_rset,
-        ignore_north_south=ignore_north_south
     )
 
     solution = FullWaferSolution(
