@@ -479,7 +479,8 @@ def model_sat_v1_v2(params, az, el, roll, focal_plane_template=None, version='sa
         boresight.
       focal_plane_template: template to use as base for updating with
         focal plane distortions. Must not be None, if the model
-        includes focal_plane distortions.
+        includes focal_plane distortions. (The current SAT models have no such
+        corrections implemented.)
       version: model version, typically passed implicitly
 
     The implemented model parameters, in radians, are:

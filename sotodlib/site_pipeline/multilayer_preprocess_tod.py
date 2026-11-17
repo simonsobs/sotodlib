@@ -186,7 +186,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           update_delay: Optional[int] = None,
           tags: Optional[str] = None,
           planet_obs: bool = False,
-          verbosity: Optional[int] = None,
+          verbosity: int = 0,
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
@@ -550,8 +550,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--raise-error',
         help="Raise an error upon completion if any obsids or groups fail.",
-        type=bool,
-        default=False
+        action='store_true',
     )
     parser.add_argument(
         '--pb-path',
@@ -572,7 +571,7 @@ def main(configs_init: str,
          update_delay: Optional[int] = None,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
-         verbosity: Optional[int] = None,
+         verbosity: int = 0,
          compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,
