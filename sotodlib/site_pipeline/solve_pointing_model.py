@@ -863,7 +863,7 @@ def main(config_path: str):
             full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params, logger=logger)
             epoch["solver_aman"] = full_aman
             epoch["solver_aman"].wrap("pointing_model", param_aman)
-            logger.info(f"for epoch {epoch["name"]}")
+            logger.info(f"for epoch {epoch['name']}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
             logger.info(f"ufm_rms: {full_aman.per_ufm_stats.rms:.3f} (arcmin) ")
@@ -871,7 +871,7 @@ def main(config_path: str):
                                        config=config,
                                        save_dir=save_dir,
                                        fpt_timestamp = fpt_timestamp,
-                                       iteration_tag=f"_{epoch["name"]}",
+                                       iteration_tag=f"_{epoch['name']}",
                                        save_figure=True,
                                        plotlims=plotlims)
             plotter.plot_full_residuals_across_focalplane()
@@ -1270,7 +1270,7 @@ def main(config_path: str):
                                            config=config,
                                            save_dir=save_dir,
                                            fpt_timestamp = fpt_timestamp,
-                                           iteration_tag=f"_{epoch["name"]}",
+                                           iteration_tag=f"_{epoch['name']}",
                                            save_figure=True,
                                            plotlims=plotlims)
                 plotter.plot_total_residuals()
@@ -1312,7 +1312,7 @@ def main(config_path: str):
                 test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
 
             full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params, logger=logger)
-            logger.info(f"for this epoch: {epoch["name"]}")
+            logger.info(f"for this epoch: {epoch['name']}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
             logger.info(f"ufm_rms: {full_aman.per_ufm_stats.rms:.3f} (arcmin) ")
@@ -1320,7 +1320,7 @@ def main(config_path: str):
                                        config=config,
                                        save_dir=save_dir,
                                        fpt_timestamp = fpt_timestamp,
-                                       iteration_tag=f"_{epoch["name"]}",
+                                       iteration_tag=f"_{epoch['name']}",
                                        save_figure=True,
                                        plotlims=plotlims,
                                       )
