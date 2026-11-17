@@ -453,7 +453,7 @@ def _init_fit_params(config, epochs):
         special_par = epoch.get("param_expr", {})
         for par in special_par.keys():
             if par not in par_list:
-                raise ValueError(f"Invalid parameter expression key in epoch {epoch["name"]}")
+                raise ValueError(f"Invalid parameter expression key in epoch {epoch['name']}")
             param_expr[par] = special_par[par]
         pmsk = np.zeros(len(par_list), bool)
         pmsk[:len(orig_pars)] = True
