@@ -15,6 +15,7 @@ from .fp_containers import (
     FocalPlaneCollection,
     OpticsTube,
     Receiver,
+    PointingSystem,
 )
 
 
@@ -840,4 +841,100 @@ def plot_receiver_resid_vs_enc(
         dpi=200,
         bbox_inches="tight",
     )
+    plt.close(fig)
+
+
+def plot_receiver_residuals(
+    receiver: Receiver,
+    output_dir: str,
+    bins: int = 100,
+    percentile: float = 99,
+    figsize: tuple[float, float] = (16, 5),
+    dpi: int = 180,
+):
+    """
+    Plot histograms of all focal-plane collection residuals in a system.
+
+    Residuals from all measurements are collected across all receivers,
+    optics tubes, and focal-plane collections. Only detectors with
+    finite, positive weights are included.
+
+    Parameters
+    ----------
+    receiver : Receiver
+        Receiver containing fitted focal-plane collections.
+    output_dir : str
+        Directory in which to save the plot.
+    bins : int, default=100
+        Number of histogram bins.
+    percentile : float, default=99
+        Percentile of the absolute residual distribution used to limit
+        the histogram range.
+    figsize : tuple[float, float], default=(16, 5)
+        Figure dimensions in inches.
+    dpi : int, default=180
+        Resolution used when saving the figure.
+    """
+    arcsec_per_rad = 180 * 3600 / np.pi
+    residuals = [[], [], [], []]
+    for ot in receiver.optics_tubes:
+        for fp in ot.focal_planes:
+            if fp.pad:
+                continue
+            for meas in fp.focal_planes:
+                valid = np.isfinite(meas.weights) * (meas.weights > 0)
+                if not np.any(valid):
+                    continue
+                resid = meas.fpc_resid * arcsec_per_rad
+                ndim = 3 - int(meas.fake_gamma)
+                for i in range(ndim):
+                    msk = valid * np.isfinite(resid[:, i])
+                    if np.any(msk):
+                        residuals[i].append(resid[msk, i])
+
+                resid_norm = np.linalg.norm(resid[:, :ndim], axis=1)
+                msk = valid * np.isfinite(resid_norm)
+                if np.any(msk):
+                    residuals[3].append(resid_norm[msk])
+
+    residuals = [
+        np.concatenate(component) if component else np.array([])
+        for component in residuals
+    ]
+
+    components = [0, 1]
+    labels = ['Xi Residual (")', 'Eta Residual (")']
+    if len(residuals[2]) > 0:
+        components.append(2)
+        labels.append('Gamma Residual (")')
+    components.append(3)
+    labels.append('Residual Norm (")')
+    if not any(len(residuals[i]) > 0 for i in components):
+        return None
+
+    fig, axs = plt.subplots( 1, len(components), figsize=figsize, squeeze=False, constrained_layout=True)
+    for ax, idx, label in zip(axs[0], components, labels):
+        data = residuals[idx]
+        if len(data) == 0:
+            continue
+
+        limit = np.nanpercentile(np.abs(data), percentile)
+        if not np.isfinite(limit) or limit <= 0:
+            limit = np.nanmax(np.abs(data))
+        if np.isfinite(limit) and limit > 0:
+            data = data[np.abs(data) <= limit]
+        ax.hist(data, bins=bins, histtype="stepfilled", alpha=0.7)
+
+        if idx != 3:
+            ax.axvline(0, color="black", linestyle="--", linewidth=1)
+
+        median = np.median(data)
+        ax.axvline( median, color="red", linestyle="-", linewidth=1.5, label=f"Median: {median:.3g}")
+        ax.set_xlabel(label)
+        ax.set_ylabel("Detectors")
+        ax.legend()
+
+    fig.suptitle(f"{receiver.name} Residuals")
+    os.makedirs(output_dir, exist_ok=True)
+    fig.savefig( os.path.join(output_dir, f"{receiver.name}_residuals.png"), dpi=dpi, bbox_inches="tight")
     plt.close(fig)

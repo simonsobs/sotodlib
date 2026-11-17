@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import reduce
 from typing import Any, Literal, Optional, Self, cast, overload
+from jaxtyping import Float, Shaped
 
 import numpy as np
 import yaml
@@ -22,6 +23,37 @@ OP_MAP = {
     "@": operator.matmul,
 }
 
+
+def group_obs( obs_ids: Shaped[np.ndarray, "n"], timestamps: Float[np.ndarray, "n"], threshold: float,) -> tuple[list[Shaped[np.ndarray, "?m"]], list[Float[np.ndarray, "?m"]]]:
+    """
+    Group observations based on timestamp proximity.
+    Mostly to group different OTs for the LAT since they have
+    seperate obs_ids with slightly different timestamps.
+
+    Parameters
+    ----------
+    obs_ids : Shaped[np.ndarray, "n"]
+        obs_ids corresponding to each timestamp.
+    timestamps : Float[np.ndarray, "n"]
+        Timestamps associated with each observation.
+    threshold : float
+        Maximum allowed difference between consecutive timestamps within a group.
+
+    Returns
+    -------
+    split_obs_ids : list[Shaped[np.ndarray, "?m"]]
+        obs_ids split into groups by their timestamp.
+    split_timestamps : Float[np.ndarray, "?m"]]
+        Timestamps split into groups in the same order as split_obs_ids.
+    """
+    sort_idx = np.argsort(timestamps)
+    sorted_timestamps = timestamps[sort_idx]
+    sorted_obs_ids = obs_ids[sort_idx]
+    split_indices = np.where(np.diff(sorted_timestamps) > threshold)[0] + 1
+    split_timestamps = np.split(sorted_timestamps, split_indices)
+    split_obs_ids = np.split(sorted_obs_ids, split_indices)
+
+    return split_obs_ids, split_timestamps
 
 @dataclass
 class Interval:

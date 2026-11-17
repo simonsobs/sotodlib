@@ -28,6 +28,7 @@ import sotodlib.utils.jdb_utils as ju
 import sqlalchemy as sqy
 import yaml
 from scipy.optimize import minimize
+from scipy.optimize import least_squares
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
 from sotodlib.io.metadata import read_dataset
@@ -64,9 +65,14 @@ default_config = {
     "n_rounds": 3,
     "cm_priors": {"sft_tol": 1e-5, "rot_tol": 1e4, "scl_tol": 0.1, "shr_tol": 0.01},
     "outlier_sigma": 3,
-    "mcmc_steps": 0,
+    "mcmc_steps": 300,
     "nwalkers": 32,
     "save_every": 10,
+    "nuisance_params": {},
+    "obs_time_thresh": 180,
+    "nuisance_scale": 10,
+    "activate_nuisance": 1,
+    "least_squares": True,
 }
 
 
@@ -79,6 +85,210 @@ class ErrCode(Enum):
     HIGH_SHEAR = 5
     PLOT = 6
     FPINIT = 7
+
+
+
+def least_squares_fixed(fun, x0, bounds, x_scale, args=(), **kwargs):
+    x0 = np.asarray(x0, dtype=float)
+    lb = np.asarray(bounds[0], dtype=float)
+    ub = np.asarray(bounds[1], dtype=float)
+    fixed_mask = lb == ub
+    free_mask = ~fixed_mask
+    x_fixed = x0.copy()
+    x_fixed[fixed_mask] = lb[fixed_mask]
+
+    def wrapped_fun(x_free, *args):
+        x = x_fixed.copy()
+        x[free_mask] = x_free
+        return fun(x, *args)
+
+    result = least_squares(
+        wrapped_fun,
+        x0[free_mask],
+        args=args,
+        bounds=(lb[free_mask], ub[free_mask]),
+        x_scale=x_scale[free_mask],
+        **kwargs,
+    )
+
+    x_full = x_fixed.copy()
+    x_full[free_mask] = result.x
+    result.x = x_full
+    result.fixed_mask = fixed_mask
+
+    return result
+
+def _fit_round(system, x0, bounds, scales, nresid, use_least_squares):
+    if use_least_squares:
+        lb = np.array([b[0] for b in bounds])
+        ub = np.array([b[1] for b in bounds])
+        res = least_squares_fixed(
+            system.objective_resid,
+            x0,
+            bounds=(lb, ub),
+            x_scale=scales,
+            args=(nresid,),
+            method="trf",
+            loss="linear", #"soft_l1",
+            tr_solver="lsmr",
+            verbose=2,
+        )
+
+        return res, res.x
+
+    scaled_bounds = [(lo / scale, hi / scale) for (lo, hi), scale in zip(bounds, scales)]
+    def scaled_objective(z):
+        return system.objective(z * scales, None, nresid)
+
+    res = minimize(
+        scaled_objective,
+        x0 / scales,
+        method="L-BFGS-B",
+        bounds=scaled_bounds,
+    )
+
+    return res, res.x * scales
+
+
+def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
+    system.set_static(False)
+    system.set_thaw(True)
+
+    x0 = system.parameters_full.copy()
+    ndim = len(x0)
+    npar = len(system.parameters)
+    scales = np.asarray(scales, dtype=float)
+    lb = np.asarray([b[0] for b in bounds], dtype=float)
+    ub = np.asarray([b[1] for b in bounds], dtype=float)
+
+    fixed_mask = lb == ub
+    free_mask = ~fixed_mask
+    nfixed = np.sum(fixed_mask)
+    nfree = np.sum(free_mask)
+    x_fixed = x0.copy()
+    x_fixed[fixed_mask] = lb[fixed_mask]
+    nwalkers = 2*nfree 
+
+    if nfree == 0:
+        raise ValueError("All parameters are fixed; nothing to sample.")
+
+    logger.info("MCMC parameters: %d total, %d free, %d fixed (%d physical, %d nuisance)", ndim, nfree, nfixed, npar, ndim - npar)
+
+    # Log probability with bounds and stuff
+    def log_prob(x_free):
+        x = x_fixed.copy()
+        x[free_mask] = x_free
+        if np.any(x_free < lb[free_mask]) or np.any(x_free > ub[free_mask]):
+            return -np.inf
+        try:
+            value = system.log_prob(x, None, nresid)
+        except (RuntimeError, AssertionError, ValueError, FloatingPointError):
+            return -np.inf
+        if not np.isfinite(value):
+            return -np.inf
+        return value
+
+    # Initialize walkers
+    rng = np.random.default_rng()
+    init_scale = 1e-2
+    x0_free = x_fixed[free_mask]
+    scales_free = scales[free_mask]
+    lb_free = lb[free_mask]
+    ub_free = ub[free_mask]
+    p0 = np.empty((nwalkers, nfree))
+    for i in range(nwalkers):
+        failed = True
+        for _ in range(1000):
+            trial = x0_free + rng.normal(size=nfree) * scales_free * init_scale
+            if np.any(trial < lb_free) or np.any(trial > ub_free):
+                continue
+            if np.isfinite(log_prob(trial)):
+                p0[i] = trial
+                failed = False
+                break
+        if failed:
+            raise RuntimeError( f"Could not initialize walker {i}")
+
+    # Run sampler
+    chain_file = os.path.join(data_dir, "mcmc_chain.h5")
+    backend = emcee.backends.HDFBackend(chain_file)
+    backend.reset(nwalkers, ndim)
+    sampler = emcee.EnsembleSampler( nwalkers, nfree, log_prob)
+    logger.info("Starting MCMC for %d steps", cfg.mcmc_steps)
+    sampler.run_mcmc(p0, cfg.mcmc_steps, progress=True)
+
+    # Diagnostics
+    logger.info( "Mean acceptance fraction: %.3f", np.mean(sampler.acceptance_fraction))
+    try:
+        tau = sampler.get_autocorr_time()
+        logger.info("Autocorrelation times: %s", tau)
+        logger.info( "Estimated effective sample sizes: %s", np.round(nwalkers * cfg.mcmc_steps / tau).astype(int))
+        discard = int(2 * np.max(tau))
+    except emcee.autocorr.AutocorrError:
+        logger.warning("Chain too short to estimate autocorrelation time.")
+        discard = int(0.1 * cfg.mcmc_steps)
+    if discard >= cfg.mcmc_steps:
+        raise RuntimeError("MCMC chain too short relative to autocorrelation time.")
+    logger.info("Discarding %d burn-in steps", discard)
+
+    # Reconstruct full-dimensional chain
+    free_samples = np.asarray(sampler.get_chain(discard=discard, flat=True))
+    if len(free_samples) == 0:
+        raise RuntimeError("No samples remaining after burn-in.")
+    samples = np.tile(x_fixed, (len(free_samples), 1))
+    samples[:, free_mask] = free_samples
+
+    # Save full chain to HDF5.
+    with h5py.File(chain_file, "w") as f:
+        f.create_dataset( "samples", data=samples, compression="gzip")
+        f.create_dataset("fixed_mask", data=fixed_mask)
+        f.attrs["nwalkers"] = nwalkers
+        f.attrs["ndim"] = ndim
+        f.attrs["nfree"] = nfree
+        f.attrs["discard"] = discard
+
+    # Posterior summaries
+    median = np.median(samples, axis=0)
+    lower = np.percentile(samples, 16, axis=0)
+    upper = np.percentile(samples, 84, axis=0)
+    system.update_parameters(median)
+    system.set_thaw(True)
+    system.set_freeze(True)
+
+    # Log parameter estimates
+    header = (
+        f"{'Parameter Name':<35}"
+        f"{'Median':>18}"
+        f"{'Lower':>18}"
+        f"{'Upper':>18}"
+    )
+    logger.info("MCMC parameter estimates:\n%s", header)
+    logger.info("-" * len(header))
+    for i, (name, med, lo, hi) in enumerate(zip( system.parameter_names, median[:npar], lower[:npar], upper[:npar])):
+        suffix = " (fixed)" if fixed_mask[i] else ""
+        logger.info( f"{name + suffix:<35}{med:>18.8g}{lo:>18.8g}{hi:>18.8g}")
+
+    # Plot
+    plot_mask = np.zeros(ndim, dtype=bool)
+    plot_mask[:npar] = True
+    plot_mask *= free_mask
+    physical_samples = samples[:, plot_mask]
+    physical_names = [name for name, include in zip(system.parameter_names, plot_mask[:npar]) if include]
+    if physical_samples.shape[1] > 0:
+        fig = corner.corner(
+            physical_samples,
+            labels=physical_names,
+            quantiles=[0.16, 0.50, 0.84],
+            show_titles=True,
+            title_fmt=".4g",
+            truths=median[plot_mask],
+        )
+        fig.savefig( os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight",)
+        plt.close(fig)
+    _plot_fit(system, plot_dir, "mcmc")
+    logger.info("MCMC complete.")
+
+    return sampler, samples
 
 
 def _get_jobdict_po(jdb):
@@ -548,6 +758,7 @@ def _plot_fit(system, plot_dir, i):
         fpp.plot_receiver(rx, pdir)
         fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
         fpp.plot_receiver_resid_vs_enc(rx, pdir)
+        fpp.plot_receiver_residuals(rx, pdir)
         for ot in rx.optics_tubes:
             if ot.allpad:
                 continue
@@ -599,45 +810,45 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
     # Save our template
-    # logger.info("Saving templates")
-    # with h5py.File(outfile, "a") as f:
-    #     system.save(f, "/", True)
-    # fpc.make_manifestdb(
-    #     system, "template", os.path.join(data_dir, "template.sqlite"), outfile
-    # )
+    logger.info("Saving templates")
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    fpc.make_manifestdb(
+        system, "template", os.path.join(data_dir, "template.sqlite"), outfile
+    )
 
     # Mark pad epochs as pad
     logger.info("Padding epochs")
     system.set_pad(cfg.pad_epochs, False)
 
     # Get obs list
-    # logger.info("Getting obslist")
-    # obslist = _get_obslist(ctx, cfg, system)
-    #
-    # # Set up per-obs jobs
-    # logger.info("Setting up per-obs jobs")
-    # jdb_path = os.path.join(data_dir, "jobdb.sqlite")
-    # jdb, open_jobs = ju.setup_jobs(
-    #     None,
-    #     jdb_path,
-    #     "per_obs",
-    #     _get_jobdict_po,
-    #     partial(_get_jobit_po, obslist=obslist, system=system),
-    #     _get_jobstr_po,
-    #     _get_tags_po,
-    #     [],
-    #     overwrite,
-    #     False,
-    #     None,
-    #     0,
-    #     False,
-    #     logger,
-    # )
-    # done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
-    # open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
-    #
-    # # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
-    # _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
+    logger.info("Getting obslist")
+    obslist = _get_obslist(ctx, cfg, system)
+
+    # Set up per-obs jobs
+    logger.info("Setting up per-obs jobs")
+    jdb_path = os.path.join(data_dir, "jobdb.sqlite")
+    jdb, open_jobs = ju.setup_jobs(
+        None,
+        jdb_path,
+        "per_obs",
+        _get_jobdict_po,
+        partial(_get_jobit_po, obslist=obslist, system=system),
+        _get_jobstr_po,
+        _get_tags_po,
+        [],
+        overwrite,
+        False,
+        None,
+        0,
+        False,
+        logger,
+    )
+    done_jobs = jdb.get_jobs(jclass="per_obs", jstate="done")
+    open_jobs, done_jobs = _check_jobs(system, jdb, done_jobs, open_jobs)
+
+    # Load in all obs and populate in per-obs mode, probably want some sort of parallelism here
+    _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
 
     # Pad empty if needed
     if cfg.pad_empty:
@@ -658,37 +869,25 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                         )
                     meas.pointing_model = system.pointing_models[pm_idx]
 
-    # Save our per-obs results
-    # logger.info("Saving per-obs")
-    # system.set_static(True)
-    # with h5py.File(outfile, "a") as f:
-    #     system.save(f, "/", True)
-    # fpc.make_per_obs_manifestdb(
-    #     system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
-    # )
+    # Setup nuisance
+    nuisance_params = fpc.NuisanceParams.from_system(system, cfg.nuisance_params, cfg.obs_time_thresh)
+    system.nuisance_params = nuisance_params
+    for pm in system.pointing_models:
+        pm.nuisance_params = nuisance_params
 
+    # Save our per-obs results
+    logger.info("Saving per-obs")
+    system.set_static(True)
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    fpc.make_per_obs_manifestdb(
+        system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
+    )
 
     # Setup fit params
-    params = system.parameters.copy()
-    bounds = [(-np.inf, np.inf)] * len(params)
-    scales = np.ones(len(params))
-    for name, par in cfg.parameters.items():
-        if name not in system.parameter_names:
-            logger.warning("Unknown parameter %s", name)
-            continue
-        idx = system.parameter_names.index(name)
-        params[idx] = float(par.get("init", params[idx]))
-        if par.get("static", False):
-            bounds[idx] = (params[idx], params[idx])
-            continue
-        bounds[idx] = tuple(float(b) for b in par.get("bounds", bounds[idx]))[:2] # type: ignore
-        lo, hi = bounds[idx]
-        if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
-            scales[idx] = hi - lo
-    
+    params, bounds, scales = fpc.setup_fit_params(system, cfg, system.nuisance_params)
     system.update_parameters(params)
-    logger.info(params)
-    logger.info(scales)
+    logger.info(params[:len(system.parameters)])
     
     system.set_thaw(True)
     system.set_freeze(True)
@@ -696,33 +895,36 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     _plot_fit(system, plot_dir, 0)
     
     # Fit for pointing model and focal planes
-    def scaled_objective(z, args):
-        return system.objective(z * scales, args)
-    scaled_bounds = [(lo / scale, hi / scale,) for scale, (lo, hi) in zip(scales, bounds)]
-
+    nresid = len(system.residuals)
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
         system.set_thaw(True)
-        x0 = system.parameters.copy()/scales
-        res = minimize(
-            scaled_objective,
-            x0,
-            args=(None,),
-            method="L-BFGS-B",
-            bounds=scaled_bounds,
-            # options={
-            #     # "eps": 1e-7,
-            #     "maxiter": 5000,
-            #     "ftol": 1e-12,
-            #     "gtol": 1e-8,
-            # }
-        )
-        system.update_parameters(res.x * scales)
-        logger.info(res.x * scales)
+        npar = len(system.parameters)
+        x0 = system.parameters_full.copy()
+        scales_use = scales
+        bounds_use = bounds
+        if i < cfg.activate_nuisance:
+            x0 = x0[:npar]
+            scales_use = scales[:npar]
+            bounds_use = bounds[:npar]
+    
+        res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares)
+        system.update_parameters(params_fit)
+        logger.info(res.message)
+        logger.info("Success: %s", res.success)
+        logger.info("Objective: %g", res.cost if cfg.least_squares else res.fun)
+        if cfg.least_squares:
+            logger.info("Optimality: %g", res.optimality)
+        changes = system.parameters - x0[:npar]
+        header = f"{'Parameter Name':<35} {'Optimized Value':>18} {'Change':>18}"
+        logger.info("Parameter changes:\n%s", header)
+        logger.info("-" * len(header))
+        for name, value, change in zip(system.parameter_names, system.parameters, changes):
+            logger.info(f"{name:<35} {value:>18.8g} {change:>18.8g}")
         system.set_thaw(True)
         system.set_freeze(True)
-        _plot_fit(system, plot_dir, i+1)
-
+        _plot_fit(system, plot_dir, i + 1)
+    
         # Cut outliers
         tot_cut = 0
         for rx in system.receivers:
@@ -739,65 +941,23 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                         else:
                             err = np.linalg.norm(meas.fpc_resid, axis=1)
                         err[~wmsk] = np.nan
-                        all_errs += [err]
-                        wmsks += [wmsk]
-                    errs_full  = np.hstack(all_errs)
-                    err_cuttoff = np.nanmean(errs_full) + cfg.outlier_sigma*np.nanstd(errs_full) 
+                        all_errs.append(err)
+                        wmsks.append(wmsk)
+                    errs_full = np.hstack(all_errs)
+                    err_cutoff = np.nanmean(errs_full) + cfg.outlier_sigma * np.nanstd(errs_full)
                     for meas, err, wmsk in zip(fp.focal_planes, all_errs, wmsks):
-                        mrmsk = err > err_cuttoff
-                        meas.weights[mrmsk] = 0
+                        mrmsk = err > err_cutoff
+                        # meas.weights[mrmsk] = 0
                         meas.wmsk[mrmsk] = False
                         tot_cut += np.sum(mrmsk[wmsk])
-        if tot_cut == 0:
+    
+        if tot_cut == 0 and i >= cfg.activate_nuisance:
             logger.info("None cut! Stopping optimization.")
             break
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
-        system.set_static(False)
-        ndim = len(system.parameters)
-    
-        # Create HDF5 backend
-        chain_file = os.path.join(data_dir, "mcmc_chain.h5")
-        backend = emcee.backends.HDFBackend(chain_file)
-    
-        # Run a fresh chain
-        system.set_thaw(True)
-        backend.reset(cfg.nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(
-            cfg.nwalkers,
-            ndim,
-            system.log_prob,
-            args=(cfg.cm_priors,),
-            backend=backend,
-        )
-        sampler.run_mcmc(system.parameters, cfg.mcmc_steps)
-        samples = sampler.get_chain( discard=int(0.1 * cfg.mcmc_steps), flat=True)
-        assert samples is not None
-    
-        # Update params
-        system.update_parameters(np.median(samples, axis=0))
-        lower = np.percentile(samples, 16, axis=0)
-        upper = np.percentile(samples, 84, axis=0)
-        _ = lower, upper
-        system.set_thaw(True)
-        system.set_freeze(True)
-
-        # Plot
-        _plot_fit(system, plot_dir, "mcmc")
-        labels = list(system.parameter_names)
-        fig = corner.corner(
-            samples,
-            labels=labels,
-            quantiles=[0.16, 0.50, 0.84],
-            show_titles=True,
-            title_fmt=".4f",
-            title_kwargs={"fontsize": 10},
-            label_kwargs={"fontsize": 10},
-            truths=np.median(samples, axis=0),
-        )
-        fig.savefig( os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight")
-        plt.close(fig)
+        _ = _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir)
 
     # Save
     system.set_static(True)
