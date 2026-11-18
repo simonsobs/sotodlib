@@ -29,6 +29,7 @@ import sqlalchemy as sqy
 import yaml
 from scipy.optimize import minimize
 from scipy.optimize import least_squares
+from scipy.sparse import csr_array
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
 from sotodlib.io.metadata import read_dataset
@@ -63,7 +64,6 @@ default_config = {
     "pad_empty": True,
     "parameters": {},
     "n_rounds": 3,
-    "cm_priors": {"sft_tol": 1e-5, "rot_tol": 1e4, "scl_tol": 0.1, "shr_tol": 0.01},
     "outlier_sigma": 20,
     "mcmc_steps": 0,
     "nwalkers": 32,
@@ -151,7 +151,7 @@ def _report_fit(res, cfg, system, npar, x0, report_static, report_nuisance):
         for name, a, ac, t, tc in zip(cfg.nuisance_params.keys(), avg, avg_change, tot, tot_change):
             logger.info(f"{name:<35} {a:>18.8g} {ac:>18.8g} {t:>18.8g} {tc:>18.8g}")
 
-def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsity, cm_fac):
+def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsity, cm_fac, **kwargs):
     if use_least_squares:
         lb = np.array([b[0] for b in bounds])
         ub = np.array([b[1] for b in bounds])
@@ -166,20 +166,21 @@ def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsi
             loss="linear", #"soft_l1",
             tr_solver="lsmr",
             verbose=2,
-            # xtol=1e-8,
+            **kwargs,
         )
 
         return res, res.x
 
     scaled_bounds = [(lo / scale, hi / scale) for (lo, hi), scale in zip(bounds, scales)]
     def scaled_objective(z):
-        return system.objective(z * scales, None, nresid, cm_fac)
+        return system.objective(z * scales, nresid, cm_fac)
 
     res = minimize(
         scaled_objective,
         x0 / scales,
         method="L-BFGS-B",
         bounds=scaled_bounds,
+        **kwargs,
     )
 
     return res, res.x * scales
@@ -234,7 +235,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         if np.any(x < lb) or np.any(x > ub):
             return -np.inf
         try:
-            value = system.log_prob(x, None, nresid, cfg.cm_fac)
+            value = system.log_prob(x, nresid, cfg.cm_fac)
         except (
             RuntimeError,
             AssertionError,
@@ -249,7 +250,6 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
 
     if not np.isfinite(current_logp):
         raise RuntimeError("Initial parameter vector has invalid log probability.")
-
     diagnostics = {
          "physical": {
              "bounds": 0,
@@ -1094,10 +1094,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                     for meas in fp.focal_planes:
                         idx = system.nuisance_params.obs_mapping[meas.meas_id]
                         ndet = len(meas.weights)
-                        jac_n[idx, :, n:(n+ndet)] = 1
+                        jac_n[idx, :, n:(n+ndet)] = meas.wmsk.astype(int)
                         n += ndet
         jac_sparsity[npar:,nresid:] = 1
-        jac_sparsity = jac_sparsity.T
+        jac_sparsity = csr_array(jac_sparsity.T, dtype=bool)
     
     system.set_thaw(True)
     system.set_freeze(True)
@@ -1127,7 +1127,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             bounds_fixed = [(val, val) for val in x0[:npar]]
             bounds_use = bounds_fixed + bounds[npar:]
             scales_use = scales
-            res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, jac_sparsity, cfg.cm_fac)
+            res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, jac_sparsity, cfg.cm_fac, max_nfev=25, xtol=1e-6, ftol=1e-4)
             system.update_parameters(params_fit)
             _report_fit(res, cfg, system, npar, x0, False, True)
             system.set_thaw(True)

@@ -2571,45 +2571,11 @@ class PointingSystem:
                     chisq += fp.chisq
         return chisq
 
-    def chisq_cm_prior(
-        self, sft_tol: float, rot_tol: float, scl_tol: float, shr_tol: float
-    ) -> float:
-        """
-        Compute the chisq of the full pointing system but with strong priors on to reject
-        any common mode transformations across the receiver.
-        These are rectangular priors defined by a tolerance against the null space of the affine transform.
-        Any common mode out of tolerance will return a chisq of infinity.
-
-        Parameters
-        ----------
-        sft_tol : float
-            Tolerance in shift away from 0.
-        rot_tol : float
-            Tolerance in rotation away from 0.
-        scl_tol : float
-            Tolerance in scale away from 1.
-        shr_tol : float
-            Tolerance in shear away from 0.
-        """
-        for rx in self.receivers:
-            if np.any(rx.cm_transform.shift > sft_tol):
-                return np.inf
-            if np.any(rx.cm_transform.rot > rot_tol):
-                return np.inf
-            if np.any(np.abs(rx.cm_transform.scale - 1) > scl_tol):
-                return np.inf
-            if np.any(rx.cm_transform.shear > shr_tol):
-                return np.inf
-        return self.chisq
-
-    def objective(self, params, cm_priors, nresid, cm_fac):
+    def objective(self, params, nresid, cm_fac):
         self.update_parameters(params)
         self.set_thaw(True)
         try:
-            if cm_priors is None:
-                chisq = self.chisq
-            else:
-                chisq = self.chisq_cm_prior(**cm_priors)
+            chisq = self.chisq
             if np.isfinite(chisq):
                 for rx in self.receivers:
                     chisq += np.sum((cm_fac*nresid*rx.cm_transform.shift)**2) + (cm_fac*nresid*rx.cm_transform.rot)**2
@@ -2618,6 +2584,7 @@ class PointingSystem:
             return 1e6
 
     def objective_resid(self, params, nresid, cm_fac):
+        print("obj")
         self.update_parameters(params)
         self.set_thaw(True)
         try:
@@ -2628,8 +2595,8 @@ class PointingSystem:
         except (RuntimeError, AssertionError):
             return np.full(nresid, 1e3)
 
-    def log_prob(self, params, cm_priors, nresid, cm_fac):
-        return -0.5 * self.objective(params, cm_priors, nresid, cm_fac)
+    def log_prob(self, params, nresid, cm_fac):
+        return -0.5 * self.objective(params, nresid, cm_fac)
 
     @overload
     def search(
