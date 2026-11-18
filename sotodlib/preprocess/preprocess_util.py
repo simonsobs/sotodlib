@@ -1635,9 +1635,6 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
                     if overwrite and dts in f_dest:
                         del f_dest[dts]
                     f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                    for member in f_src[dts]:
-                        if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                            f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
 
         if db_manager is not None:
             # Use the batch manager
