@@ -394,6 +394,9 @@ class NuisanceParams:
     transform_list : list[Transform]
         Each element is a nuisance transform that can be applied when computing `pm_data`.
         In the same order as par_list.
+    params_flat : Float[np.ndarray, "npar"]
+        (Property) Flattened array of all nuisance parameter values, concatenated
+        in `par_list` order and preserving the insertion order of each dictionary.
     """
     obs_mapping : dict[str, int]
     par_list : list[dict[str, float]]
@@ -427,6 +430,30 @@ class NuisanceParams:
 
     @classmethod
     def from_system(cls, system : PointingSystem, nuisance_pars: dict[str, float], threshold: float) -> NuisanceParams:
+        """
+        Construct nuisance parameters and transforms from a pointing system.
+
+        Observations are grouped into epochs using their measurement IDs
+        and timestamps. Each epoch is assigned a copy of `nuisance_pars`
+        and an identity transform. Multiple observation IDs belonging
+        to the same epoch map to the same nuisance parameter set.
+
+        Parameters
+        ----------
+        system : PointingSystem
+            Pointing system from which to collect observation IDs.
+        nuisance_pars : dict[str, float]
+            Initial nuisance parameter values assigned to each epoch.
+        threshold : float
+            Threshold passed to `epochs.group_obs` when grouping
+            observations into epochs.
+
+        Returns
+        -------
+        NuisanceParams
+            Nuisance parameter mapping, parameter sets, and identity
+            transforms corresponding to the observation epochs.
+        """
         obs_ids = []
         timestamps = []
         for rx in system.receivers:
@@ -443,8 +470,8 @@ class NuisanceParams:
         transform_list = [Transform.identity() for _ in range(len(obs_ids_split))]
         return cls(obs_mapping, par_list, transform_list)
 
-    def compute_transforms(self, system):
-        """
+    def compute_transforms(self, system: PointingSystem):
+        r"""
         Take in a system after a round of fitting and compute the nuisance transforms needed
         to make a clean focal plane. If there are existing nuisance transforms we assume that
         they were used to compute the current `pm_data` values and will be included in the net transform.
@@ -452,14 +479,53 @@ class NuisanceParams:
         We want to compute the transforms that reduce the obs-obs variance on `pm_data` without changing
         the average boresight pointing. To start lets assume we have `pm_data` and `pm_transform` for each `FocalPlane`
         and `cm_transform` for each `Receiver`. This we then compute `obs_transform` which is the common mode of `pm_transform`
-        for all `FocalPlane`s in a given observation. The transform that then lines up `pm_data` along obs (relative to the boresight)
-        is `nuisance_transform = ~(obs_transform * ~ cm_transform)` if we have some existing `nuisance_transform` then it was already
-        included in `pm_data = nuisance_transform_old(pointing_model(data))` so the new nuisance_transform should chain them as
-        `nuisance_transform = nuisance_transform_new * nuisance_transform_old` giving us:
-        `pm_data = nuisance_transform(pointing_model(data)) = (nuisance_transform_new * nuisance_transform_old)(pointing_model(data)) = nuisance_transform_new(pm_data_old)`
+        for all `FocalPlane`s in a given observation.
+        The transform that then lines up `pm_data` along obs (relative to the boresight) is:
+
+        $$
+        T_{\mathrm{nuisance}} = \left(T_{\mathrm{obs}} \circ T_{\mathrm{cm}}^{-1}\right)^{-1}
+        $$
+
+        if we have some existing `nuisance_transform` then it was already included in
+
+        $$
+        \texttt{pm\_data} = T_{\mathrm{nuisance,old}}(\texttt{pointing\_model(data)})
+        $$
+
+        so the new nuisance transform should chain them as
+
+        $$
+        T_{\mathrm{nuisance}} = T_{\mathrm{nuisance,new}} \circ T_{\mathrm{nuisance,old}}
+        $$
+
+        giving us:
+
+        $$
+        \begin{aligned}
+        \texttt{pm\_data}
+        &= T_{\mathrm{nuisance}}(\texttt{pointing\_model(data)}) \\
+        &= (T_{\mathrm{nuisance,new}} \circ T_{\mathrm{nuisance,old}})
+        (\texttt{pointing\_model(data)}) \\
+        &= T_{\mathrm{nuisance,new}}(\texttt{pm\_data\_old})
+        \end{aligned}
+        $$
 
         This function does assume that all `FocalPlane`s in an obs are in the same `Receiver`.
         If this is not true you set up some config wrong and should figure it out.
+
+        Parameters
+        ----------
+        system : PointingSystem
+            System after a round of fitting, containing the focal plane pointing
+            transforms (`pm_transform`) and receiver common-mode transforms
+            (`cm_transform`).
+
+
+        Raises
+        ------
+        ValueError
+            If there are obs split across multiple receivers or the total
+            number of focal planes in the system does not match the mapping.
         """
         rev_mapping = [[] for _ in range(len(self.transform_list))]
         for meas_id, idx in self.obs_mapping.items():
@@ -597,9 +663,10 @@ class PointingModel:
     force_zero_roll: bool
     pad: bool = False
 
+
     def apply_det(
         self,
-        meas,
+        meas: FocalPlane,
         tol: float = 2.42e-6,
         max_iter: int = 5,
     ) -> DetectorOffsets:
@@ -609,54 +676,52 @@ class PointingModel:
         The correction is computed from the supplied encoder values using
         `apply_pointing_model` and then propagated to each detector through
         quaternion rotations. The returned detector offsets remain in the
-        `xieta` coordinate system but have the pointing model corrections
-        removed.
+        `xieta` coordinate system but have the pointing model corrections removed.
 
         Focal plane distortions are removed iteratively by applying the
         forward pointing model, estimating the resulting distortion, and
         subtracting it from the detector offsets until convergence.
 
-        If the pointing model contains no parameters, the input detector
-        offsets are returned unchanged.
+        Nuisance parameters associated with the measurement are added to
+        the pointing model parameters before computing the correction.
+        The nuisance transform is applied to the detector offsets before returning.
 
-        When `force_zero_roll=True`, the encoder roll angle is ignored during
-        the correction and a zero-roll boresight solution is assumed.
+        If the pointing model contains no parameters, or if no detectors
+        are available for the inversion, the input detector offsets are
+        returned unchanged.
+
+        When `self.force_zero_roll=True`, the encoder roll angle is ignored
+        during the correction and a zero-roll boresight solution is assumed.
+
+        When `meas.fake_gamma=True`, detector polarization angles are ignored
+        and only detector positions (`xi`, `eta`) are propagated during the
+        iterative inversion. The returned detector offsets still contain
+        all three coordinates.
 
         Parameters
         ----------
-        det_off : DetectorOffsets
-            Detector offsets in the `xieta` coordinate system. These are the
-            detector positions from which the pointing correction will be removed.
-        det_enc : DetectorOffsets
-            Telescope encoder values in the `horizon` coordinate system.
-            These provide the boresight azimuth, elevation, and roll used to
-            evaluate the pointing model.
-        weights : Float[np.ndarray, "ndet"]
-            Detector weights. Only used to mask out nan of 0 weight detectors during
-            the inversion calculation. The output will still include all dets.
-        fake_gamma : bool
-            If True, ignore detector polarization angles and propagate only
-            detector position (`xi`, `eta`). If False, propagate the full
-            (`xi`, `eta`, `gamma`) coordinate set.
+        meas : FocalPlane
+            Focal plane measurement containing detector offsets, encoder
+            values, detector weights, and associated metadata. Only
+            detectors selected by `meas.wmsk` are included in the inversion.
         tol : float, default: 2.42e-6
-            RMS convergence tolerance for the iterative distortion removal, in radians.
+            RMS convergence tolerance for the iterative distortion removal,
+            in radians.
         max_iter : int, default: 5
             Maximum number of iterations for the distortion removal.
 
         Returns
         -------
-        det_pm : DetectorOffsets
-            A copy of `det_off` with the pointing-model correction removed.
+        DetectorOffsets
+            A copy of `meas.data` with the pointing-model correction removed.
             The returned object has the same metadata and detector ordering
             as the input but contains corrected detector coordinates.
 
         Raises
         ------
-        ValueError
-            If `det_off` and `det_enc` do not contain the same number of
-            detectors.
         RuntimeError
-            If the iterative distortion removal does not converge.
+            If the iterative distortion removal does not converge within
+            `max_iter` iterations.
         """
         to_ret = deepcopy(meas.data)
         if len(self.parameters) == 0:
@@ -788,6 +853,9 @@ class PointingModel:
             HDF5 file object containing the pointing model.
         path : str
             Path within the HDF5 file from which to load the pointing model.
+        nuisance_params : NuisanceParams
+            Nuisance parameters and transforms to associate with the
+            loaded pointing model.
 
         Returns
         -------
@@ -818,6 +886,17 @@ class Transform:
         The shift to apply as part of the transform
     affine : Float[np.ndarray, "ndim ndim"]
         The affine transformation matrix.
+    scale : Float[np.ndarray, "ndim"]
+        (Property) The scale along each axis.
+    shear : float
+        (Property) The shear parameter of the `xieta` portion of the
+        affine transformation.
+    rot : float
+        (Property) The rotation angle of the `xieta` plane.
+    decompose : tuple[Float[np.ndarray, "ndim"], float, float]
+        (Cached property) Decomposition of the affine transformation
+        into scale, shear, and rotation. Cache is cleared if `shift`
+        or `affine` is cleared.
     """
 
     shift: Float[np.ndarray, "ndim"]
@@ -919,34 +998,57 @@ class Transform:
 @dataclass
 class DetectorOffsets:
     """
-    Class for storing detector offsets in either `xieta`, `horizon`, 'fp', or 'ot' coordinates.
-    `xi`, `eta`, `gamma`, `az`, `el`, and `roll` are included as properties for convenience.
-    They will raise a `ValueError` if called with the wrong coordsys set.
+    Class for storing detector offsets in `xieta`, `horizon`, `fp`, or `ot`
+    coordinates. The `xi`, `eta`, `gamma`, `az`, `el`, and `roll` properties
+    provide convenient access to individual coordinates and raise a
+    `ValueError` if accessed when `coordsys` is incompatible.
+    
+    Cached properties are cleared when `xyz` is assigned to. 
 
     Attributes
     ----------
     xyz : Float[np.ndarray, "ndet 3"]
-        The `x` axis of the detector offsets.
-        For `xieta` this is `xi`.
-        For `horizon` this is `az`.
-        The `y` axis of the detector offsets.
-        For `xieta` this is `eta`.
-        For `horizon` this is `el`.
-        The `z` axis of the detector offsets.
-        For `xieta` this is `gamma`.
-        For `horizon` this is `roll`.
+        Detector coordinates. The meaning of each column depends on
+        `coordsys`:
+
+        - `xieta`: (`xi`, `eta`, `gamma`).
+        - `horizon`: (`az`, `el`, `roll`).
+        - `fp` and `ot`: Coordinates in the corresponding coordinate system.
     det_id : Shaped[np.ndarray, "ndet"]
-        The detector id for each element in `xyz`.
+        Detector ID associated with each row of `xyz`.
     split : Shaped[np.ndarray, "ndet"]
-        A string used to split up detectors when plotting.
-        Nominally this should be to seperate the four detectors
-        behind the same feedhorn.
+        String used to group detectors when plotting. Nominally, this
+        separates the four detectors behind the same feedhorn.
     center : Optional[Float[np.ndarray, "3"]]
-        The center of the detector offsets.
-        Can be `None` if unknown.
+        Center of the detector offsets, or `None` if unknown.
     coordsys : str
-        The coordinate system that these are in.
-        Should be `xieta` or `horizon`.
+        Coordinate system of the detector offsets. Must be one of
+        `xieta`, `horizon`, `fp`, or `ot`.
+    xi : Float[np.ndarray, "ndet"]
+        (Property) First coordinate of `xyz` when `coordsys="xieta"`.
+    eta : Float[np.ndarray, "ndet"]
+        (Property) Second coordinate of `xyz` when `coordsys="xieta"`.
+    gamma : Float[np.ndarray, "ndet"]
+        (Property) Third coordinate of `xyz` when `coordsys="xieta"`.
+    az : Float[np.ndarray, "ndet"]
+        (Property) First coordinate of `xyz` when `coordsys="horizon"`.
+    el : Float[np.ndarray, "ndet"]
+        (Property) Second coordinate of `xyz` when `coordsys="horizon"`.
+    roll : Float[np.ndarray, "ndet"]
+        (Property) Third coordinate of `xyz` when `coordsys="horizon"`.
+    ancil : AxisManager
+        (Cached property) Encoder ancillary data constructed from the
+        horizon coordinates. Contains `az_enc`, `el_enc`, `roll_enc`,
+        and `boresight_enc`, with angles converted to degrees.
+    fp : AxisManager
+        (Cached property) Focal plane coordinates containing `xi`, `eta`,
+        and `gamma`.
+    q_enc : Quaternion
+        (Cached property) Quaternion representing encoder pointing,
+        constructed from azimuth, elevation, and roll.
+    q_enc_zero_roll : Quaternion
+        (Cached property) Quaternion representing encoder pointing
+        with roll set to zero.
     """
 
     xyz: Float[np.ndarray, "ndet 3"]
@@ -963,6 +1065,8 @@ class DetectorOffsets:
         if name in ("xyz"):
             self.__dict__.pop("ancil", None)
             self.__dict__.pop("fp", None)
+            self.__dict__.pop("q_enc", None)
+            self.__dict__.pop("q_enc_zero_roll", None)
         return super().__setattr__(name, value)
 
     def __getitem__(self, key) -> DetectorOffsets:
@@ -1132,38 +1236,41 @@ class DetectorOffsets:
 @dataclass
 class FocalPlane:
     """
-    Container for a single focalplane measurement and its derived transforms.
+    Container for a single focal plane measurement and its derived transforms.
 
     A `FocalPlane` represents one measured realization of a focal plane
     (typically a single UFM) together with the information needed to compare
-    it against a reference template.  The class stores the measured detector
+    it against a reference template. The class stores the measured detector
     positions, encoder values, detector weights, and an optional pointing
-    model. From these inputs it can derive several useful properties:
+    model. From these inputs it can derive several useful quantities:
 
     - Pointing model corrected detector positions (`pm_data`).
     - The affine transform mapping the template onto the measured data
       (`transform`).
     - The transformed template (`transformed`).
-    - The affine transform after applying the pointing model
-      (`pm_transform`).
+    - The affine transform after applying the pointing model (`pm_transform`).
     - The transformed template in the pointing model corrected frame
       (`pm_transformed`).
+    - The transformed template in the focal plane collection frame
+      (`fpc_transformed`).
 
     Derived quantities can be evaluated dynamically or stored as static
     values. When `static=True`, the public properties return the frozen
-    values stored by `freeze`. When `static=False`, the quantities
-    are recomputed on access. If `autofreeze=True`, newly computed values
+    values stored by `freeze`. When `static=False`, the quantities are
+    recomputed on access. If `autofreeze=True`, newly computed values
     are automatically cached into the corresponding static fields.
+
+    Assigning a new value to `wmsk` clears the cached properties.
 
     Attributes
     ----------
     name : str
-        Human-readable identifier for the focal plane (ie. UFM name).
+        Human-readable identifier for the focal plane (e.g. UFM name).
     meas_id : str
         Identifier for the measurement from which this focal plane was
         constructed.
     data : DetectorOffsets
-        Measured detector offsets in focal-plane coordinates.
+        Measured detector offsets in focal plane coordinates.
     enc : DetectorOffsets
         Encoder values associated with the measurement. These are used when
         applying the pointing model and are typically stored in the
@@ -1171,6 +1278,9 @@ class FocalPlane:
     weights : Float[np.ndarray, "ndet"]
         Per-detector weights used when fitting transforms and combining
         measurements.
+    wmsk : Bool[np.ndarray, "ndet"]
+        Boolean mask selecting detectors included in fitting and pointing
+        model inversion.
     parent : FocalPlaneCollection
         The collection that this measurement belongs to.
     pointing_model : PointingModel
@@ -1185,7 +1295,9 @@ class FocalPlane:
         If True, ignore gamma when fitting and applying transforms,
         effectively treating the focal plane as two-dimensional.
     pm_data : DetectorOffsets
-        Measured detector offsets after application of the pointing model.
+        Pointing model corrected detector offsets. Dynamically computed
+        using `pointing_model.apply_det` or returned from the frozen
+        static value.
     transform : Transform
         Best-fit affine transform mapping `template` to `data`.
     transformed : DetectorOffsets
@@ -1194,18 +1306,35 @@ class FocalPlane:
         Best-fit affine transform mapping `template` to `pm_data`.
     pm_transformed : DetectorOffsets
         Template detector offsets after applying `pm_transform`.
+    fpc_transformed : DetectorOffsets
+        Template detector offsets after applying the parent collection's
+        transform.
     resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data` and `transformed`.
     pm_resid : Float[np.ndarray, "ndet 3"]
         Residuals between `pm_data` and `pm_transformed`.
+    fpc_resid : Float[np.ndarray, "ndet 3"]
+        Residuals between `pm_data` and `fpc_transformed`.
     template : DetectorOffsets
         Reference detector layout used as the transform source on sky.
+        Provided by `parent`.
     template_fp : DetectorOffsets
-        Reference detector layout used as the transform source in focal plane coords.
+        Reference detector layout used as the transform source in focal
+        plane coordinates. Provided by `parent`.
     template_ot : DetectorOffsets
-        Reference detector layout used as the transform source in OT coords.
+        Reference detector layout used as the transform source in OT
+        coordinates. Provided by `parent`.
+    data_msk : DetectorOffsets
+        (Cached property) Detector offsets selected by `wmsk`.
+    enc_msk : DetectorOffsets
+        (Cached property) Encoder values selected by `wmsk`.
+    template_msk : DetectorOffsets
+        (Cached property) Template detector offsets selected by `wmsk`.
+    weights_msk : Float[np.ndarray, "nmsk"]
+        (Cached property) Detector weights selected by `wmsk`.
+    pm_data_msk : DetectorOffsets
+        (Property) Pointing model corrected detector offsets selected by `wmsk`.
     """
-
     name: str
     meas_id: str
     data: DetectorOffsets
@@ -1678,7 +1807,7 @@ class FocalPlaneCollection:
     The collection operates on the pointing model corrected detector
     positions (`FocalPlane.pm_data`) from each measurement.
     Detector locations and weights are combined on a per-detector
-    basis, missing values should be filled with `nan`s.
+    basis, with missing values represented by `nan`s.
 
     As with `FocalPlane`, derived quantities can be evaluated dynamically
     or stored as static values. When `static=True`, the public properties
@@ -1698,9 +1827,11 @@ class FocalPlaneCollection:
     template : DetectorOffsets
         Reference detector layout used as the transform source.
     template_fp : DetectorOffsets
-        Reference detector layout used as the transform source in focal plane coords.
+        Reference detector layout used as the transform source in focal
+        plane coordinates.
     template_ot : DetectorOffsets
-        Reference detector layout used as the transform source in OT coords.
+        Reference detector layout used as the transform source in OT
+        coordinates.
     static : bool
         If True, return values from the frozen static fields instead of
         recomputing them.
@@ -1717,6 +1848,7 @@ class FocalPlaneCollection:
     data : DetectorOffsets
         Weighted-average detector offsets constructed from the
         pointing-model-corrected measurements in `focal_planes`.
+        Dynamically computed or retrieved from the frozen static value.
     weights : Float[np.ndarray, "ndet"]
         Combined detector weights obtained by summing the weights from all
         constituent measurements.
@@ -1726,6 +1858,22 @@ class FocalPlaneCollection:
         Template detector offsets after applying `transform`.
     resid : Float[np.ndarray, "ndet 3"]
         Residuals between `data` and `transformed`.
+    ndet : int
+        (Property) Number of detectors in the reference template.
+    nobs : int
+        (Property) Number of focal-plane measurements in the collection.
+    wmsk : Bool[np.ndarray, "ndet"]
+        (Property) Boolean mask selecting detectors with finite,
+        positive combined weights.
+    residuals : Float[np.ndarray, "ndet*nobs"]
+        (Property) Flattened array of weighted residual magnitudes for
+        all measurements. Residuals are computed relative to the
+        collection's transformed template, using the number of
+        coordinates determined by each measurement's `fake_gamma`
+        setting. Detectors excluded by their measurement mask contribute
+        zero.
+    chisq : float
+        (Property) Sum of squared values in `residuals`.
     """
 
     name: str
@@ -2040,10 +2188,6 @@ class OpticsTube:
     autofreeze : bool
         If True, cache dynamically computed quantities into their
         corresponding static fields.
-    allpad : bool
-        Flag indicating whether all focal-plane collections in the optics
-        tube are padded and should therefore be excluded from common-mode
-        calculations.
     cm_transform : Transform
         Common-mode transform derived from the transforms of all
         non-padded focal-plane collections.
@@ -2051,8 +2195,11 @@ class OpticsTube:
         Copy of the optics-tube common-mode transform with a receiver
         common mode removed. This quantity is not computed dynamically and
         is updated only through `remove_rx`.
+    allpad : bool
+        (Property) Flag indicating whether all focal-plane collections in the optics
+        tube are padded and should therefore be excluded from common-mode
+        calculations. Returns True if the collection is empty.
     """
-
     name: str
     focal_planes: list[FocalPlaneCollection]
     wafer_slots: list[str]
@@ -2277,12 +2424,12 @@ class Receiver:
     autofreeze : bool
         If True, cache dynamically computed quantities into their
         corresponding static fields.
-    allpad : bool
-        Flag indicating whether all optics tube are padded
-        and should therefore be excluded from fitting.
     cm_transform : Transform
         Receiver-level common-mode transform derived from the common-mode
         transforms of all optics tubes containing valid data.
+    allpad : bool
+        (Property) Flag indicating whether all optics tube are padded
+        and should therefore be excluded from fitting.
     """
 
     name: str
@@ -2472,36 +2619,76 @@ class Receiver:
 class PointingSystem:
     """
     Collection of epoch-dependent pointing models and receiver data.
-
-    A `PointingSystem` maintains a one-to-one correspondence between the
-    epochs in an `epochs.Era`, a set of `PointingModel`
-    instances, and a set of `Receiver` instances. The ordering of these
-    must be the same.
-
+    
+    A `PointingSystem` combines an observing era, a collection of pointing
+    models, and the corresponding receiver-level focal-plane data. It provides
+    a unified interface for managing pointing model parameters, evaluating
+    focal-plane residuals, calculating common-mode transforms, and optimizing
+    the complete pointing solution.
+    
+    Pointing model parameters are managed through `parameter_names` and
+    `parameter_map`. These define the independent parameters of the system
+    and specify which pointing models each parameter applies to. A parameter
+    may be shared across multiple epochs or restricted to a subset of epochs.
+    Nuisance parameters are managed separately through `NuisanceParams`.
+    
+    The receiver data are organized hierarchically:
+    `PointingSystem -> Receiver -> OpticsTube -> FocalPlaneCollection -> FocalPlane`.
+    
+    The system provides two objective functions for optimization:
+    
+    - `objective` evaluates the total chi-squared, including regularization
+      of receiver common-mode transforms.
+    - `objective_resid` returns the corresponding residual vector, allowing
+      least-squares optimizers to operate directly on the residuals.
+    
+    
     Attributes
     ----------
     era : epochs.Era
         Collection of observing epochs represented by the system.
     pointing_models : tuple[PointingModel, ...]
-        Pointing model associated with each epoch.
+        Pointing model associated with each epoch or epoch group. The ordering
+        must be consistent with the receiver and epoch organization.
     receivers : tuple[Receiver, ...]
-        Receiver and focal-plane data associated with each epoch.
+        Receiver and focal-plane data associated with each epoch or epoch
+        group. Each receiver contains its associated optics tubes and
+        focal-plane collections.
+    nuisance_params : NuisanceParams
+        Additional nuisance parameters used by the pointing models. These
+        parameters are managed separately from the primary pointing model
+        parameters.
     parameter_names : tuple[str, ...]
-        The names of all pointing model parameters.
-        Names with parenthesis apply only to the epochs within the parenthesis.
-        Names without parenthesis apply to all other epochs.
-    parameter_map : tuple[Integer[np.ndarray, "?npar_mapped"], ...]
-        Mapping between parameters and what pointing models to apply them to.
+        Names of the independent pointing model parameters. Names without
+        parentheses represent parameters shared across all applicable epochs.
+        Names with parentheses identify parameters restricted to the epochs
+        listed within the parentheses.
+    parameter_map : tuple[Integer[np.ndarray, "?npar"], ...]
+        Mapping between independent parameters and the indices of the
+        pointing models to which they apply. Each entry corresponds to the
+        parameter with the same index in `parameter_names`.
     calender_str : str
-        A serialized calendar yaml string.
+        Serialized calendar YAML string used to reconstruct the observing
+        calendar and associated era.
     state_meta : dict[str, str]
-        String based metadata used for later forensics.
+        String-based metadata associated with the current system state.
+        Used to preserve provenance and support subsequent data forensics.
     parameters : Float[np.ndarray, "npar"]
-        The current values of the parameters.
+        (Property) Current values of the independent pointing model parameters.
+        Values are extracted from the corresponding pointing models according
+        to `parameter_map`.
+    parameters_full : Float[np.ndarray, "n"]
+        (Property) Concatenation of the independent pointing model parameters and the
+        flattened nuisance parameter values.
+    n_data : int
+        (Property) Total number of residual measurements included in the system,
+        excluding padded focal-plane collections.
+    residuals : Float[np.ndarray, "n_data"]
+        (Property) Concatenated residual vector from all non-padded focal-plane collections.
     chisq : float
-        The chisq of the current system.
-        This computes the chisq from the residuals for each `FocalPlaneCollection`,
-        not the individual `FocalPlane` measurements.
+        (Property) Total chi-squared of the system, calculated from the residuals of
+        all non-padded focal-plane collections. Does not include the
+        receiver common-mode regularization penalty applied by `objective`.
     """
 
     era: epochs.Era
@@ -2587,14 +2774,38 @@ class PointingSystem:
         )
 
     def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
-        npar = len(self.parameters)
-        for val, par, par_map in zip(
-                new_pars[:npar], self.parameter_names, self.parameter_map
-        ):
+       """
+       Update the pointing model and nuisance parameter values.
+
+       The independent pointing model parameters are distributed to the
+       corresponding `PointingModel` instances according to `parameter_map`.
+       Parameters mapped to multiple pointing models are updated consistently
+       across all associated epochs.
+
+       If additional values are provided beyond the independent pointing
+       model parameters, they are passed to `NuisanceParams.update`.
+
+       Updating parameters modifies the underlying `PointingModel` instances
+       and `NuisanceParams` in place. It does not explicitly freeze or thaw
+       the derived quantities of the pointing system.
+
+       Parameters
+       ----------
+       new_pars : Float[np.ndarray, "npar"]
+           New parameter values. The first `len(parameter_names)` entries
+           correspond to the independent pointing model parameters. Any
+           remaining entries correspond to the flattened nuisance parameters.
+       """
+        npar = len(self.parameter_names)
+        if len(new_pars) < npar:
+            raise ValueError( f"Expected at least {npar} parameters, got {len(new_pars)}")
+        if len(new_pars) > npar + len(self.nuisance_params.params_flat):
+            raise ValueError("Too many parameters supplied")
+
+        for val, par, par_map in zip( new_pars[:npar], self.parameter_names, self.parameter_map):
             name = par.split("(")[0]
             for idx in par_map:
                 self.pointing_models[idx].parameters[name] = val
-
         if npar < len(new_pars):
             self.nuisance_params.update(new_pars[npar:])
 
@@ -2626,6 +2837,8 @@ class PointingSystem:
                     fpr = fp.residuals
                     resid[i:(i+len(fpr))] = fpr
                     i += len(fpr)
+        if i != n_data:
+            raise RuntimeError( f"Residual size mismatch: expected {n_data}, got {i}")
         return resid 
 
     @property
@@ -2639,7 +2852,41 @@ class PointingSystem:
                     chisq += fp.chisq
         return chisq
 
-    def objective(self, params, nresid, cm_fac):
+    def objective( self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> float:
+        """
+        Evaluate the total chi-squared objective function.
+
+        Updates the pointing model and nuisance parameters, thaws the
+        derived quantities throughout the pointing system, and evaluates
+        the total focal-plane chi-squared.
+
+        A regularization penalty is added for the receiver common-mode
+        transforms to discourage receiver-wide distortions. The penalty
+        includes the translational and rotational components of each
+        receiver common mode.
+
+        If a `RuntimeError` or `AssertionError` occurs during evaluation,
+        a large objective value of `1e6` is returned to indicate an
+        unsuccessful evaluation.
+
+        Parameters
+        ----------
+        params : Float[np.ndarray, "npar"]
+            Parameter values to evaluate, including nuisance parameters
+            when applicable.
+        nresid : int
+            Number of residual measurements used to scale the common-mode
+            regularization penalty.
+        cm_fac : float
+            Multiplicative factor controlling the strength of the
+            common-mode regularization penalty.
+
+        Returns
+        -------
+        float
+            Total objective value, consisting of the focal-plane chi-squared
+            and the receiver common-mode regularization penalty.
+        """
         self.update_parameters(params)
         self.set_thaw(True)
         try:
@@ -2651,19 +2898,73 @@ class PointingSystem:
         except (RuntimeError, AssertionError):
             return 1e6
 
-    def objective_resid(self, params, nresid, cm_fac):
-        print("obj")
-        self.update_parameters(params)
-        self.set_thaw(True)
-        try:
-            resid = [self.residuals,]
-            for rx in self.receivers:
-                resid += [(cm_fac * nresid * rx.cm_transform.shift).ravel(), np.atleast_1d(cm_fac*nresid * rx.cm_transform.rot).ravel()]
-            return np.hstack(resid)
-        except (RuntimeError, AssertionError):
-            return np.full(nresid, 1e3)
+    def objective_resid( self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> Float[np.ndarray, "nresid_full"]:
+        """
+        Evaluate the residual vector used by least-squares optimization.
 
-    def log_prob(self, params, nresid, cm_fac):
+        Updates the pointing model and nuisance parameters, thaws the
+        derived quantities throughout the pointing system, and evaluates
+        the focal-plane residuals.
+
+        Receiver common-mode shifts and rotations are appended to the
+        residual vector as regularization terms. These terms penalize
+        receiver-wide distortions and are scaled by `cm_fac` and `nresid`.
+
+        If a `RuntimeError` or `AssertionError` occurs during evaluation,
+        an array filled with `1e3` is returned.
+
+        Parameters
+        ----------
+        params : Float[np.ndarray, "npar"]
+            Parameter values to evaluate, including nuisance parameters
+            when applicable.
+        nresid : int
+            Number of focal-plane residual measurements used to scale the
+            common-mode regularization terms. Also determines the length
+            of the fallback residual vector if evaluation fails.
+        cm_fac : float
+            Multiplicative factor controlling the strength of the
+            common-mode regularization terms.
+
+        Returns
+        -------
+        Float[np.ndarray, "nresid"]
+            Concatenated residual vector containing the focal-plane
+            residuals followed by the receiver common-mode shift and
+            rotation regularization terms.
+        """
+         print("obj")
+         self.update_parameters(params)
+         self.set_thaw(True)
+         try:
+             resid = [self.residuals,]
+             for rx in self.receivers:
+                 resid += [(cm_fac * nresid * rx.cm_transform.shift).ravel(), np.atleast_1d(cm_fac*nresid * rx.cm_transform.rot).ravel()]
+             return np.hstack(resid)
+         except (RuntimeError, AssertionError):
+             return np.full(nresid, 1e3)
+
+    def log_prob(self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> float:
+       """
+       Calculate the log probability of the current parameter values.
+
+       This is defined as -0.5 times the objective function evaluated
+       at the supplied parameters.
+
+       Parameters
+       ----------
+       params : Float[np.ndarray, "npar"]
+           Parameter values to evaluate.
+       nresid : int
+           Number of residuals used to scale the common-mode penalty.
+       cm_fac : float
+           Scaling factor applied to the common-mode penalty.
+
+       Returns
+       -------
+       log_prob : float
+           Log probability of the supplied parameter values.
+       """
         return -0.5 * self.objective(params, nresid, cm_fac)
 
     @overload
@@ -2888,6 +3189,8 @@ class PointingSystem:
                             e._internal.data[field] for e in era.epochs if e.name in grp
                         ]
                         good = all(x == allf[0] for x in allf)
+                    if not good:
+                        raise ValueError(f"Inconsistent {field} values in {desc} group {grp}")
                 in_group = [d for d in dat if d.epoch in grp]
                 if len(in_group) < len(grp):
                     raise ValueError(f"Unknown epoch in {desc} group {grp}")
@@ -2913,7 +3216,7 @@ class PointingSystem:
             pars["version"] = pm_ver
             pm.parameters = pars
         par_names = np.unique(par_names).tolist()
-        par_map = [np.arange(len(pms), dtype=int).tolist()] * len(par_names)
+        par_map = [np.arange(len(pms), dtype=int).tolist() for _ in par_names]
         pm_epochs = [pm.epoch for pm in pms]
         par: str
         for par, groups in cfg.par_groups.items():
@@ -3049,7 +3352,7 @@ class PointingSystem:
         if f"{path}/nuisance" in f:
             nuisance_params = NuisanceParams.load(f, f"{path}/nuisance")
         else:
-            nuisance_params = NuisanceParams({}, [])
+            nuisance_params = NuisanceParams({}, [], [])
         pm_group = cast(h5py.Group, f[f"{path}/pointing_models"])
         pointing_models = tuple(
             PointingModel.load(f, f"{path}/pointing_models/{name}", nuisance_params)
