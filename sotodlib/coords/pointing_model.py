@@ -373,22 +373,22 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane):
         return focal_plane
 
     elif dist_model == 'optics':
-        if len(roll) > 1:
-            # Check that roll is ~stable and get typical value.
-            droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
-            roll_mean = roll[0] + droll.mean()
-            # Note a 5 degree tolerance here is pretty generous; this is
-            # meant to not choke on "type 3" obs, where there is a ~1 deg
-            # elevation nod during the scan.
-            assert droll.std() < 5 * DEG, \
-                "This distortion approximation does not work when roll varies significantly."
-        else:
-            roll_mean = roll[0]
+        # if len(roll) > 1:
+        #     # Check that roll is ~stable and get typical value.
+        #     droll = (roll - roll[0] + np.pi) % (2 * np.pi) - np.pi
+        #     roll_mean = roll[0] + droll.mean()
+        #     # Note a 5 degree tolerance here is pretty generous; this is
+        #     # meant to not choke on "type 3" obs, where there is a ~1 deg
+        #     # elevation nod during the scan.
+        #     assert droll.std() < 5 * DEG, \
+        #         "This distortion approximation does not work when roll varies significantly."
+        # else:
+        #     roll_mean = roll[0]
 
         # Rotate focal plane template xi-eta into the space of the
         # secondary mirror.
         xi1, eta1, _ = quat.decompose_xieta(
-            quat.euler(2, roll_mean)
+            quat.euler(2, roll)
             * quat.rotation_xieta(focal_plane.xi, focal_plane.eta))
 
         # Get distortion
@@ -398,7 +398,7 @@ def apply_lat_distortion_model(params, az, el, roll, focal_plane):
 
         # Apply distortion and return to un-rolled focal_plane.
         xi2, eta2, _ = quat.decompose_xieta(
-            quat.euler(2, -roll_mean)
+            quat.euler(2, -roll)
             * quat.rotation_xieta(xi1 + dxi, eta1 + deta))
 
         focal_plane.xi[:] = xi2
