@@ -87,7 +87,12 @@ def multilayer_preprocess_tod(obs_id: str,
         compress=compress,
     )
 
-    return out_dict_init, out_dict_proc, errors
+    if "stats" in aman:
+        stats = {k: aman.stats[k] for k in aman.stats._assignments.keys()}
+    else:
+        stats = None
+
+    return out_dict_init, out_dict_proc, errors, stats
 
 
 def _check_init_jobdb(
@@ -380,6 +385,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     db_init = pp_util.get_preprocess_db(configs_init, group_by, logger)
     db_proc = pp_util.get_preprocess_db(configs_proc, group_by, logger)
 
+    # get stats db
+    statsdb_path = configs_proc.get("statsdb", None)
+    if statsdb_path is not None:
+        statsdb = pp_util.get_preprocess_stats_db(statsdb_path, group_by)
+
     futures = []
     futures_dict = {}
     obs_errors = {}
@@ -405,6 +415,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     batch_size_init = configs_init['archive'].get('batch_size', 1)
     batch_size_proc = configs_proc['archive'].get('batch_size', 1)
+    
+    add_obs_cols = True
 
     pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
@@ -461,6 +473,29 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                                             _t.value = errors[0]
                                 else:
                                     j.jstate = JState.done
+                # update statsdb
+                if (
+                    errors[0] is None
+                    and statsdb_path is not None
+                    and stats is not None
+                ):
+                    if add_obs_cols == True:
+                        stats_keys = []
+                        for k, v in stats.items():
+                            if isinstance(v, int):
+                                t = "int"
+                            elif isinstance(v, float):
+                                t = "float"
+                            elif isinstance(v, str):
+                                t = "string"
+
+                            stats_keys.append(f"{k} {t}")
+
+                        statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
+                        add_obs_cols = False
+                    statsdb.update_obs((obs_id, *group), stats)
+    
+    
     if raise_error:
         n_obs_fail = 0
         n_groups_fail = 0
