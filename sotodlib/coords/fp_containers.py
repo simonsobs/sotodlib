@@ -248,21 +248,25 @@ def _transformed(
     return to_ret
 
 
-def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, attr_name: str):
+def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, template_name: str, weights_name: str, attr_name: str, apply_wmsk: bool = True):
     to_ret = Transform.identity()
     wmsk = self.wmsk
     if np.sum(wmsk) < 4:
         return to_ret
+    if apply_wmsk:
+        msk = wmsk
+    else:
+        msk = slice(None)
     affine, shift = mt.get_affine_two_stage(
-        self.template.xyz[wmsk, :2],
-        getattr(self, data_name).xyz[wmsk, :2],
-        self.weights[wmsk],
+        getattr(self, template_name).xyz[msk, :2],
+        getattr(self, data_name).xyz[msk, :2],
+        getattr(self, weights_name)[msk],
     )
     to_ret.shift[:2] = shift
     to_ret.affine[:2, :2] = affine
     if not self.fake_gamma:
         to_ret.affine[-1, -1], to_ret.shift[-1] = gamma_fit(
-            self.template.xyz[wmsk, 2], getattr(self, data_name).xyz[wmsk, 2]
+            getattr(self, template_name).xyz[msk, 2], getattr(self, data_name).xyz[msk, 2]
         )
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
@@ -529,11 +533,7 @@ class PointingModel:
 
     def apply_det(
         self,
-        det_off: DetectorOffsets,
-        det_enc: DetectorOffsets,
-        msk: Bool[np.ndarray, "ndet"],
-        meas_id: str,
-        fake_gamma: bool,
+        meas,
         tol: float = 2.42e-6,
         max_iter: int = 5,
     ) -> DetectorOffsets:
@@ -592,31 +592,30 @@ class PointingModel:
         RuntimeError
             If the iterative distortion removal does not converge.
         """
+        to_ret = deepcopy(meas.data)
         if len(self.parameters) == 0:
-            return det_off
-
-        if len(det_enc.xyz) != len(det_off.xyz):
-            raise ValueError(
-                "Detector offsets and encoder values must have same shape!"
-            )
+            return to_ret 
 
         # Apply nuisance
         params_use = deepcopy(self.parameters)
-        nuisance = self.nuisance_params[meas_id]
+        nuisance = self.nuisance_params[meas.meas_id]
         for key, val in nuisance.items():
             params_use[key] += val
 
         # Start with the input detector coordinates
-        if not np.any(msk):
-            return deepcopy(det_off)
-        estimate = det_off.xyz[msk].copy()
-        if fake_gamma:
+        if not np.any(meas.wmsk):
+            return to_ret 
+        estimate = meas.data_msk.xyz.copy()
+        if meas.fake_gamma:
             estimate = estimate[:, :2]
-        fp_target = det_off[msk]
-        to_ret = deepcopy(det_off)
-        fp = to_ret[msk].fp
-        det_enc_msk = det_enc[msk]
+        fp_target = meas.data_msk 
+        fp = meas.data_msk.fp
+        det_enc_msk = meas.enc_msk 
         ancil = det_enc_msk.ancil
+        if self.force_zero_roll:
+            q_enc = det_enc_msk.q_enc_zero_roll
+        else:
+            q_enc = det_enc_msk.q_enc
 
         err = np.inf
         alpha = 1.0
@@ -625,7 +624,7 @@ class PointingModel:
         for _ in range(max_iter):
             fp.xi = estimate[:, 0]
             fp.eta = estimate[:, 1]
-            if fake_gamma:
+            if meas.fake_gamma:
                 q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1])
             else:
                 q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1], estimate[:, 2])  # type: ignore[arg-type]
@@ -634,20 +633,14 @@ class PointingModel:
             # Apply the pointing model
             bs, fp_corrected = apply_pointing_model(None, params_use, ancil, fp)
             bs = cast(AxisManager, bs)
-            xi, eta, gamma = quat.decompose_xieta(
-                ~quat.euler(2, bs.roll)
-                * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
-                * quat.rotation_lonlat(-1 * det_enc_msk.az, det_enc_msk.el)
-                * quat.euler(2, (not self.force_zero_roll) * det_enc_msk.roll)
-                * q_fp
-            )
+            xi, eta, gamma = quat.decompose_xieta(~quat.euler(2, bs.roll) * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el) * q_enc * q_fp)
 
             if fp_corrected is None:
-                to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
+                to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
                 return to_ret
 
             # Estimate and remove focalplane distortion
-            if fake_gamma:
+            if meas.fake_gamma:
                 distortion = np.column_stack(
                     (fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta)
                 )
@@ -678,20 +671,15 @@ class PointingModel:
                 prev_distortion = distortion
                 prev_err = err
             if err < tol:
-                to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
+                to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
                 return to_ret
 
             # Update estimate of the undistorted fp
             estimate -= alpha * distortion
 
-        # logger.error(
-        #     f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
-        # )
         raise RuntimeError(
              f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
          )
-        # to_ret.xyz[msk] = np.column_stack((xi, eta, gamma))
-        # return to_ret
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -906,6 +894,7 @@ class DetectorOffsets:
     def __setattr__(self, name: str, value: Any, /) -> None:
         if name in ("xyz"):
             self.__dict__.pop("ancil", None)
+            self.__dict__.pop("fp", None)
         return super().__setattr__(name, value)
 
     def __getitem__(self, key) -> DetectorOffsets:
@@ -977,6 +966,14 @@ class DetectorOffsets:
         fp.wrap("eta", self.eta)
         fp.wrap("gamma", self.gamma)
         return fp
+
+    @cached_property
+    def q_enc(self):
+        return quat.rotation_lonlat(-1 * self.az, self.el) * quat.euler(2, self.roll)
+
+    @cached_property
+    def q_enc_zero_roll(self):
+        return quat.rotation_lonlat(-1 * self.az, self.el) * quat.euler(2, 0*self.roll)
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """Save detector offsets to an HDF5 ResultSet.
@@ -1171,6 +1168,14 @@ class FocalPlane:
     _pm_transformed_stat: DetectorOffsets = field(init=False)
     _fpc_transformed_stat: DetectorOffsets = field(init=False)
 
+    def __setattr__(self, name: str, value: Any, /) -> None:
+        if name in ("wmsk"):
+            self.__dict__.pop("data_msk", None)
+            self.__dict__.pop("enc_msk", None)
+            self.__dict__.pop("template_msk", None)
+            self.__dict__.pop("weights_msk", None)
+        return super().__setattr__(name, value)
+
     @property
     def template(self) -> DetectorOffsets:
         return self.parent.template
@@ -1182,6 +1187,26 @@ class FocalPlane:
     @property
     def template_ot(self) -> DetectorOffsets:
         return self.parent.template_ot
+
+    @cached_property
+    def data_msk(self) -> DetectorOffsets:
+        return self.data[self.wmsk]
+
+    @cached_property
+    def enc_msk(self) -> DetectorOffsets:
+        return self.enc[self.wmsk]
+
+    @cached_property
+    def template_msk(self) -> DetectorOffsets:
+        return self.template[self.wmsk]
+
+    @cached_property
+    def weights_msk(self) -> Float[np.ndarray, "nmsk"]:
+        return self.weights[self.wmsk]
+
+    @property
+    def pm_data_msk(self) -> DetectorOffsets:
+        return self.pm_data[self.wmsk]
 
     @classmethod
     def from_aman(
@@ -1387,16 +1412,14 @@ class FocalPlane:
 
     @property
     def _pm_data_dyn(self) -> DetectorOffsets:
-        to_ret = self.pointing_model.apply_det(
-            self.data, self.enc, self.wmsk, self.meas_id, self.fake_gamma
-        )
+        to_ret = self.pointing_model.apply_det( self)
         if self.autofreeze:
             self._pm_data_stat = to_ret
         return to_ret
 
     @property
     def _transform_dyn(self) -> Transform:
-        return _get_aff(self, "data", "_transform_stat")
+        return _get_aff(self, "data_msk", "template_msk", "weights_msk", "_transform_stat", False)
 
     @property
     def _transformed_dyn(self) -> DetectorOffsets:
@@ -1404,7 +1427,7 @@ class FocalPlane:
 
     @property
     def _pm_transform_dyn(self) -> Transform:
-        return _get_aff(self, "pm_data", "_pm_transform_stat")
+        return _get_aff(self, "pm_data_msk", "template_msk", "weights_msk", "_pm_transform_stat", False)
 
     @property
     def _pm_transformed_dyn(self) -> DetectorOffsets:
@@ -1658,6 +1681,7 @@ class FocalPlaneCollection:
     _weights_stat: Float[np.ndarray, "ndet"] = field(init=False)
     _transform_stat: Transform = field(init=False)
     _transformed_stat: DetectorOffsets = field(init=False)
+    _residual_buffer: Float[np.ndarray, "n_data"] = field(init=False)
 
     def __getitem__(self, key):
         fp_ids = [fp.meas_id for fp in self.focal_planes]
@@ -1699,16 +1723,31 @@ class FocalPlaneCollection:
         self.static = static
 
     @property
+    def ndet(self) -> int:
+        return len(self.template.xyz)
+
+    @property
+    def nobs(self) -> int:
+        return len(self.focal_planes)
+
+    @property
     def residuals(self) -> Float[np.ndarray, "ndet*nobs"]:
-        residuals = []
+        n_data = self.ndet*self.nobs
+        if n_data == 0:
+            return np.empty(0)
+        if "_residual_buffer" in self.__dict__ and len(self._residual_buffer) == n_data:
+            resid = self._residual_buffer
+        else:
+            resid = np.empty(n_data)
+            self._residual_buffer = resid
+        i = 0
         for meas in self.focal_planes:
             ndim = 3 - int(meas.fake_gamma)
             r = np.linalg.norm(meas.fpc_resid[:, :ndim], axis=1) * meas.weights
             r[~meas.wmsk] = 0
-            residuals.append(r)
-        if not residuals:
-            return np.empty(0)
-        to_ret = np.nan_to_num(np.concatenate(residuals), copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
+            resid[i:(i+len(r))] = r
+            i += len(r)
+        to_ret = np.nan_to_num(resid, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
         if to_ret is None:
             raise TypeError
         return to_ret
@@ -1742,7 +1781,7 @@ class FocalPlaneCollection:
 
     @property
     def _transform_dyn(self) -> Transform:
-        return _get_aff(self, "data", "_transform_stat")
+        return _get_aff(self, "data", "template", "weights", "_transform_stat", True)
 
     @property
     def _transformed_dyn(self) -> DetectorOffsets:
@@ -2405,6 +2444,7 @@ class PointingSystem:
     parameter_map: tuple[Integer[np.ndarray, "?npar"], ...]
     calender_str: str
     state_meta: dict[str, str]
+    _residual_buffer: Float[np.ndarray, "n_data"] = field(init=False)
 
     def __post_init__(self):
         # Force consistancy
@@ -2491,15 +2531,34 @@ class PointingSystem:
             self.nuisance_params.update(new_pars[npar:])
 
     @property
-    def residuals(self) -> Float[np.ndarray, "n_data"]:
-        residuals = []
+    def n_data(self) -> int:
+        n = 0
         for rx in self.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
                     if fp.pad:
                         continue
-                    residuals.append(fp.residuals)
-        return np.concatenate(residuals)
+                    n += fp.ndet*fp.nobs
+        return n
+
+    @property
+    def residuals(self) -> Float[np.ndarray, "n_data"]:
+        n_data = self.n_data
+        if "_residual_buffer" in self.__dict__ and len(self._residual_buffer) == n_data:
+            resid = self._residual_buffer
+        else:
+            resid = np.empty(n_data)
+            self._residual_buffer = resid
+        i = 0
+        for rx in self.receivers:
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    if fp.pad:
+                        continue
+                    fpr = fp.residuals
+                    resid[i:(i+len(fpr))] = fpr
+                    i += len(fpr)
+        return resid 
 
     @property
     def chisq(self) -> float:
@@ -2543,7 +2602,7 @@ class PointingSystem:
                 return np.inf
         return self.chisq
 
-    def objective(self, params, cm_priors, nresid):
+    def objective(self, params, cm_priors, nresid, cm_fac):
         self.update_parameters(params)
         self.set_thaw(True)
         try:
@@ -2553,24 +2612,24 @@ class PointingSystem:
                 chisq = self.chisq_cm_prior(**cm_priors)
             if np.isfinite(chisq):
                 for rx in self.receivers:
-                    chisq += np.sum((nresid*rx.cm_transform.shift)**2) + (nresid*rx.cm_transform.rot)**2
+                    chisq += np.sum((cm_fac*nresid*rx.cm_transform.shift)**2) + (cm_fac*nresid*rx.cm_transform.rot)**2
             return chisq
         except (RuntimeError, AssertionError):
             return 1e6
 
-    def objective_resid(self, params, nresid):
+    def objective_resid(self, params, nresid, cm_fac):
         self.update_parameters(params)
         self.set_thaw(True)
         try:
             resid = [self.residuals,]
             for rx in self.receivers:
-                resid += [nresid*rx.cm_transform.shift.tolist(), nresid*rx.cm_transform.rot]
+                resid += [(cm_fac * nresid * rx.cm_transform.shift).ravel(), np.atleast_1d(cm_fac*nresid * rx.cm_transform.rot).ravel()]
             return np.hstack(resid)
         except (RuntimeError, AssertionError):
             return np.full(nresid, 1e3)
 
-    def log_prob(self, params, cm_priors, nresid):
-        return -0.5 * self.objective(params, cm_priors, nresid)
+    def log_prob(self, params, cm_priors, nresid, cm_fac):
+        return -0.5 * self.objective(params, cm_priors, nresid, cm_fac)
 
     @overload
     def search(
