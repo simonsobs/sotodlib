@@ -948,6 +948,7 @@ def _plot_fit(system, plot_dir, i):
         os.makedirs(pdir, exist_ok=True)
         fpp.plot_receiver(rx, pdir)
         fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
+        fpp.plot_receiver_nuisance_displacements(rx, system.nuisance_params, cfg.nuisanse_plot, [(None, None)], pdir)
         fpp.plot_receiver_resid_vs_enc(rx, pdir)
         fpp.plot_receiver_residuals(rx, pdir)
         for ot in rx.optics_tubes:
@@ -1126,7 +1127,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             bounds_fixed = [(val, val) for val in x0[:npar]]
             bounds_use = bounds_fixed + bounds[npar:]
             scales_use = scales
-            res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, jac_sparsity, cfg.cm__fac)
+            res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, jac_sparsity, cfg.cm_fac)
             system.update_parameters(params_fit)
             _report_fit(res, cfg, system, npar, x0, False, True)
             system.set_thaw(True)

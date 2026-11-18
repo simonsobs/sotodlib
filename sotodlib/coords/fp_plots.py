@@ -15,7 +15,7 @@ from .fp_containers import (
     FocalPlaneCollection,
     OpticsTube,
     Receiver,
-    PointingSystem,
+    NuisanceParams,
 )
 
 
@@ -619,6 +619,75 @@ def plot_receiver(
     plt.close(fig)
 
 
+def plot_displacements(
+    x0: np.ndarray,
+    y0: np.ndarray,
+    dx: np.ndarray,
+    dy: np.ndarray,
+    colorbys: list[tuple[Optional[str], Optional[np.ndarray]]],
+    output_dir: str,
+    filename_prefix: str,
+    title_prefix: str,
+    plot_scale: float,
+    scale_str: str,
+    figsize: tuple[float, float] = (14, 14),
+):
+    """
+    Plot displacement vectors, optionally colored by additional quantities.
+
+    Parameters
+    ----------
+    x0, y0 : np.ndarray
+        Starting coordinates of each displacement vector.
+    dx, dy : np.ndarray
+        Displacement components before plotting scale is applied.
+    colorbys : list[tuple[Optional[str], Optional[np.ndarray]]]
+        Quantities used to color the arrows.
+    output_dir : str
+        Directory in which to save the plots.
+    filename_prefix : str
+        Prefix used for output filenames.
+    title_prefix : str
+        Prefix used for plot titles.
+    plot_scale : float
+        Multiplicative scale applied to dx and dy.
+    scale_str : str
+        Description of the displacement scale for plot titles.
+    figsize : tuple[float, float], default=(14, 14)
+        Figure dimensions in inches.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    dx = np.asarray(dx) * plot_scale
+    dy = np.asarray(dy) * plot_scale
+    nobs = len(dx)
+    for name, color_data in colorbys:
+        fig, ax = plt.subplots( figsize=figsize, constrained_layout=True)
+
+        if name is None:
+            ax.quiver( x0, y0, dx, dy, angles="xy", scale_units="xy",)
+            title = f"{title_prefix} Observation Displacements"
+            fname = f"{filename_prefix}_displacements.png"
+        else:
+            if color_data is None:
+                raise ValueError(f"{name} specified without data")
+            if len(color_data) != nobs:
+                raise ValueError( f"{name}: expected {nobs} values but got {len(color_data)}")
+            q = ax.quiver( x0, y0, dx, dy, color_data, angles="xy", scale_units="xy", cmap="viridis")
+            fig.colorbar(q, ax=ax, label=name)
+            title = (
+                f"{title_prefix} Observation Displacements by {name}\n"
+                f"{scale_str}"
+            )
+            fname = f"{filename_prefix}_displacements_{name}.png"
+        ax.set_title(title)
+        ax.set_xlabel("Xi (rad)")
+        ax.set_ylabel("Eta (rad)")
+        ax.set_aspect("equal")
+        fig.savefig( os.path.join(output_dir, fname), dpi=200, bbox_inches="tight",)
+        plt.close(fig)
+
+
+
 def plot_receiver_displacements(
     receiver: Receiver,
     colorbys: list[tuple[Optional[str], Optional[np.ndarray]]],
@@ -640,87 +709,139 @@ def plot_receiver_displacements(
         Receiver containing solved focal-plane collections.
     colorbys : list[tuple[Optional[str], Optional[np.ndarray]]]
         Quantities used to color the arrows. Each array must contain one
-        value per measurement in the receiver. Passing
-        ``(None, None)`` produces an uncolored plot.
+        value per measurement in the receiver. Passing (None, None)
+        produces an uncolored plot.
     output_dir : str
         Directory in which to save the plots.
     figsize : tuple[float, float], default=(14, 14)
         Figure dimensions in inches.
     """
-    os.makedirs(output_dir, exist_ok=True)
-
     arcmin_per_rad = 180 * 60 / np.pi
     plot_scale = 0.01 * arcmin_per_rad
     scale_str = "1 arcmin = 0.01 rad"
-
     x0 = []
     y0 = []
     dx = []
     dy = []
     for ot in receiver.optics_tubes:
         for fp in ot.focal_planes:
-            if fp.pad:
+            if fp.pad or fp.template.center is None:
                 continue
-            if fp.template.center is None:
-                continue
-            xc = fp.template.center[0]
-            yc = fp.template.center[1]
+            xc, yc = fp.template.center[:2]
             for meas in fp.focal_planes:
-                msk = np.isfinite(meas.weights) * (meas.weights > 0)
+                msk = np.isfinite(meas.weights) & (meas.weights > 0)
                 if np.sum(msk) == 0:
                     continue
-                disp_x = np.nanmedian(
-                    meas.pm_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0]
-                )
-                disp_y = np.nanmedian(
-                    meas.pm_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1]
-                )
+                disp_x = np.nanmedian(meas.pm_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0])
+                disp_y = np.nanmedian(meas.pm_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1])
                 x0.append(xc)
                 y0.append(yc)
                 dx.append(disp_x)
                 dy.append(disp_y)
+
+    plot_displacements(
+        x0=np.asarray(x0),
+        y0=np.asarray(y0),
+        dx=np.asarray(dx),
+        dy=np.asarray(dy),
+        colorbys=colorbys,
+        output_dir=output_dir,
+        filename_prefix=receiver.name,
+        title_prefix=receiver.name,
+        plot_scale=plot_scale,
+        scale_str=scale_str,
+        figsize=figsize,
+    )
+
+
+def plot_receiver_nuisance_displacements(
+    receiver: Receiver,
+    nuisance_params: NuisanceParams,
+    params_to_plot: list[tuple[str, str, Optional[str], str, float]],
+    colorbys: list[tuple[Optional[str], Optional[np.ndarray]]],
+    output_dir: str,
+    figsize: tuple[float, float] = (14, 14),
+):
+    """
+    Plot observation-by-observation focal-plane displacements using
+    fitted nuisance parameters.
+
+    Parameters
+    ----------
+    receiver : Receiver
+        Receiver containing the focal-plane measurements.
+    nuisance_params : NuisanceParams
+        Per-observation nuisance parameters.
+    params_to_plot : list[tuple[str, str, Optional[str], str, float]]
+        Parameter combinations to plot. Each tuple contains:
+          - x: Nuisance parameter name for dx.
+          - y: Nuisance parameter name for dy.
+          - rot: Optional nuisance parameter name for rotation.
+          - xy_units: Units of the x and y parameters.
+          - scale: Parameter value corresponding to 0.01 rad.
+    colorbys : list[tuple[Optional[str], Optional[np.ndarray]]]
+        Quantities used to color the arrows. Each array must contain one
+        value per measurement in the receiver. Passing (None, None)
+        produces an uncolored plot.
+    output_dir : str
+        Directory in which to save the plots.
+    figsize : tuple[float, float], default=(14, 14)
+        Figure dimensions in inches.
+    """
+    if len(params_to_plot) == 0:
+        return
+    x0 = []
+    y0 = []
+    obs_ids = []
+    for ot in receiver.optics_tubes:
+        for fp in ot.focal_planes:
+            if fp.pad or fp.template.center is None:
+                continue
+            xc, yc = fp.template.center[:2]
+            for meas in fp.focal_planes:
+                msk = np.isfinite(meas.weights) * (meas.weights > 0)
+                if np.sum(msk) == 0:
+                    continue
+                x0.append(xc)
+                y0.append(yc)
+                obs_ids.append(meas.meas_id)
     x0 = np.asarray(x0)
     y0 = np.asarray(y0)
-    dx = np.asarray(dx) * plot_scale
-    dy = np.asarray(dy) * plot_scale
-    nobs = len(dx)
-
-    for name, color_data in colorbys:
-        fig, ax = plt.subplots(
+    for x_name, y_name, rot_name, xy_units, scale in params_to_plot:
+        dx = []
+        dy = []
+        for obs_id in obs_ids:
+            pars = nuisance_params[obs_id]
+            if x_name not in pars or y_name not in pars:
+                raise ValueError(f"Missing nuisance parameters {x_name!r} or {y_name!r} for observation {obs_id}")
+            disp_x = pars[x_name]
+            disp_y = pars[y_name]
+            if rot_name is not None:
+                if rot_name not in pars:
+                    raise ValueError( f"Missing rotation parameter {rot_name!r} for observation {obs_id}")
+                theta = pars[rot_name]
+                cos_theta = np.cos(theta)
+                sin_theta = np.sin(theta)
+                disp_x, disp_y = (cos_theta * disp_x - sin_theta * disp_y, sin_theta * disp_x + cos_theta * disp_y)
+            dx.append(disp_x)
+            dy.append(disp_y)
+        param_names = f"{x_name}, {y_name}"
+        if rot_name is not None:
+            param_names += f", {rot_name}"
+        label = f"{receiver.name} {param_names}"
+        plot_displacements(
+            x0=x0,
+            y0=y0,
+            dx=np.asarray(dx),
+            dy=np.asarray(dy),
+            colorbys=colorbys,
+            output_dir=output_dir,
+            filename_prefix=label.replace(" ", "_").replace(", ", "_"),
+            title_prefix=label,
+            plot_scale=0.01 / scale,
+            scale_str=f"{scale:g} {xy_units} = .01 rad",
             figsize=figsize,
-            constrained_layout=True,
         )
-        if name is None:
-            ax.quiver(x0, y0, dx, dy, angles="xy", scale_units="xy")
-            title = f"{receiver.name} Observation Displacements"
-            fname = f"{receiver.name}_displacements.png"
-        else:
-            if color_data is None:
-                raise ValueError(f"{name} specified without data")
-            if len(color_data) != nobs:
-                raise ValueError(
-                    f"{name}: expected {nobs} values but got {len(color_data)}"
-                )
-            q = ax.quiver(
-                x0,
-                y0,
-                dx,
-                dy,
-                color_data,
-                angles="xy",
-                scale_units="xy",
-                cmap="viridis",
-            )
-            fig.colorbar(q, ax=ax, label=name)
-            title = f"{receiver.name} Observation Displacements by {name}\n{scale_str}"
-            fname = f"{receiver.name}_displacements_{name}.png"
-        ax.set_title(title)
-        ax.set_xlabel("Xi (rad)")
-        ax.set_ylabel("Eta (rad)")
-        ax.set_aspect("equal")
-        fig.savefig(os.path.join(output_dir, fname), dpi=200, bbox_inches="tight")
-        plt.close(fig)
-
 
 def plot_receiver_resid_vs_enc(
     receiver: Receiver,
