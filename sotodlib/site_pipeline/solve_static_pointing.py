@@ -72,6 +72,7 @@ default_config = {
     "obs_time_thresh": 180,
     "nuisance_scale": 10,
     "activate_nuisance": 1,
+    "activate_nuisance_transforms": 1,
     "least_squares": True,
     "cm_fac": 1e-3,
     "proposal_factor": 1e-2,
@@ -459,7 +460,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
 
         fig.savefig( os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight")
         plt.close(fig)
-    _plot_fit(system, plot_dir, "mcmc")
+    _plot_fit(system, plot_dir, "mcmc", cfg)
     logger.info("Gibbs MCMC complete")
 
     # Save the chain.
@@ -939,7 +940,7 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
     return open_jobs, done_jobs
 
 
-def _plot_fit(system, plot_dir, i):
+def _plot_fit(system, plot_dir, i, cfg):
     logger.info("Plotting fitted focal-plane collections for round %s", i)
     for rx in system.receivers:
         if rx.allpad:
@@ -949,6 +950,7 @@ def _plot_fit(system, plot_dir, i):
         fpp.plot_receiver(rx, pdir)
         fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
         fpp.plot_receiver_nuisance_displacements(rx, system.nuisance_params, cfg.nuisanse_plot, [(None, None)], pdir)
+        fpp.plot_receiver_nuisance_transform_displacements(rx, system.nuisance_params, [(None, None)], pdir)
         fpp.plot_receiver_resid_vs_enc(rx, pdir)
         fpp.plot_receiver_residuals(rx, pdir)
         for ot in rx.optics_tubes:
@@ -1131,8 +1133,14 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             system.update_parameters(params_fit)
             _report_fit(res, cfg, system, npar, x0, False, True)
             system.set_thaw(True)
+
+        # Now do the fp nuisance transforms
+        if i+1 >= cfg.activate_nuisance_transforms:
+            system.nuisance_params.compute_transforms(system)
+
+        # Freeze and plot
         system.set_freeze(True)
-        _plot_fit(system, plot_dir, i + 1)
+        _plot_fit(system, plot_dir, "i + 1", cfg)
     
         # Cut outliers
         tot_cut = 0

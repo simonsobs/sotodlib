@@ -843,6 +843,84 @@ def plot_receiver_nuisance_displacements(
             figsize=figsize,
         )
 
+
+def plot_receiver_nuisance_transform_displacements(
+    receiver: Receiver,
+    nuisance_params: NuisanceParams,
+    colorbys: list[tuple[Optional[str], Optional[np.ndarray]]],
+    output_dir: str,
+    figsize: tuple[float, float] = (14, 14),
+):
+    """
+    Plot observation-by-observation focal-plane displacements using
+    the nuisance transforms stored in NuisanceParams.
+
+    Each arrow corresponds to one FocalPlane measurement. Its location
+    is given by the associated focal-plane template center, and its
+    direction is given by the translation component of the observation's
+    nuisance transform, rotated by the transform rotation angle.
+
+    The first two elements of `transform.shift` are interpreted as dx
+    and dy, in radians. The displacement is rotated by `transform.rot`.
+
+    Parameters
+    ----------
+    receiver : Receiver
+        Receiver containing the focal-plane measurements.
+    nuisance_params : NuisanceParams
+        Per-observation nuisance parameters and transforms.
+    colorbys : list[tuple[Optional[str], Optional[np.ndarray]]]
+        Quantities used to color the arrows. Each array must contain one
+        value per measurement in the receiver. Passing (None, None)
+        produces an uncolored plot.
+    output_dir : str
+        Directory in which to save the plots.
+    figsize : tuple[float, float], default=(14, 14)
+        Figure dimensions in inches.
+    """
+    arcmin_per_rad = 180 * 60 / np.pi
+    plot_scale = 0.01 * arcmin_per_rad
+    scale_str = "1 arcmin = 0.01 rad"
+
+    x0 = []
+    y0 = []
+    dx = []
+    dy = []
+
+    for ot in receiver.optics_tubes:
+        for fp in ot.focal_planes:
+            if fp.pad or fp.template.center is None:
+                continue
+            xc, yc = fp.template.center[:2]
+            for meas in fp.focal_planes:
+                msk = np.isfinite(meas.weights) & (meas.weights > 0)
+                if np.sum(msk) == 0:
+                    continue
+                _, transform = nuisance_params[meas.meas_id]
+                disp_x, disp_y = transform.shift[:2]
+                theta = transform.rot
+                cos_theta = np.cos(theta)
+                sin_theta = np.sin(theta)
+                disp_x, disp_y = ( cos_theta * disp_x - sin_theta * disp_y, sin_theta * disp_x + cos_theta * disp_y)
+                x0.append(xc)
+                y0.append(yc)
+                dx.append(disp_x)
+                dy.append(disp_y)
+
+    plot_displacements(
+        x0=np.asarray(x0),
+        y0=np.asarray(y0),
+        dx=np.asarray(dx),
+        dy=np.asarray(dy),
+        colorbys=colorbys,
+        output_dir=output_dir,
+        filename_prefix=f"{receiver.name}_transforms",
+        title_prefix=f"{receiver.name} Nuisance Transforms",
+        plot_scale=plot_scale,
+        scale_str=scale_str,
+        figsize=figsize,
+    )
+
 def plot_receiver_resid_vs_enc(
     receiver: Receiver,
     output_dir: str,

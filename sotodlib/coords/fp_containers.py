@@ -378,7 +378,7 @@ class StaticOrCached(Generic[T]):
 @dataclass
 class NuisanceParams:
     """
-    Map and store of per observation nuicance parameters.
+    Map and store of per observation nuisance parameters and transforms.
     Can be indexed directly by `obs_id`.
 
     Attributes
@@ -391,14 +391,19 @@ class NuisanceParams:
         for one observation, but `obs_mapping`
         can map multiple `obs_id`s to one row here
         to account for LAT OTs having seperate `obs_id`s.
+    transform_list : list[Transform]
+        Each element is a nuisance transform that can be applied when computing `pm_data`.
+        In the same order as par_list.
     """
     obs_mapping : dict[str, int]
     par_list : list[dict[str, float]]
+    transform_list : list[Transform]
 
-    def __getitem__(self, key) -> dict[str, float]:
+    def __getitem__(self, key) -> tuple[dict[str, float], Transform]:
         if key not in self.obs_mapping:
-            return {}
-        return self.par_list[self.obs_mapping[key]]
+            return {}, Transform.identity()
+        idx = self.obs_mapping[key]
+        return self.par_list[idx], self.transform_list[idx]
 
     @property
     def params_flat(self) -> Float[np.ndarray, "npar"]:
@@ -435,7 +440,59 @@ class NuisanceParams:
         for i, obs_list in enumerate(obs_ids_split):
             obs_mapping.update({obs_id : i for obs_id in obs_list})
         par_list = [nuisance_pars.copy() for _ in range(len(obs_ids_split))]
-        return cls(obs_mapping, par_list)
+        transform_list = [Transform.identity() for _ in range(len(obs_ids_split))]
+        return cls(obs_mapping, par_list, transform_list)
+
+    def compute_transforms(self, system):
+        """
+        Take in a system after a round of fitting and compute the nuisance transforms needed
+        to make a clean focal plane. If there are existing nuisance transforms we assume that
+        they were used to compute the current `pm_data` values and will be included in the net transform.
+
+        We want to compute the transforms that reduce the obs-obs variance on `pm_data` without changing
+        the average boresight pointing. To start lets assume we have `pm_data` and `pm_transform` for each `FocalPlane`
+        and `cm_transform` for each `Receiver`. This we then compute `obs_transform` which is the common mode of `pm_transform`
+        for all `FocalPlane`s in a given observation. The transform that then lines up `pm_data` along obs (relative to the boresight)
+        is `nuisance_transform = ~(obs_transform * ~ cm_transform)` if we have some existing `nuisance_transform` then it was already
+        included in `pm_data = nuisance_transform_old(pointing_model(data))` so the new nuisance_transform should chain them as
+        `nuisance_transform = nuisance_transform_new * nuisance_transform_old` giving us:
+        `pm_data = nuisance_transform(pointing_model(data)) = (nuisance_transform_new * nuisance_transform_old)(pointing_model(data)) = nuisance_transform_new(pm_data_old)`
+
+        This function does assume that all `FocalPlane`s in an obs are in the same `Receiver`.
+        If this is not true you set up some config wrong and should figure it out.
+        """
+        rev_mapping = [[] for _ in range(len(self.transform_list))]
+        for meas_id, idx in self.obs_mapping.items():
+            rev_mapping[idx] += [meas_id]
+        done_idx = set()
+        for rx in system.receivers:
+            rx_aff_inv, rx_sft_inv = mt.invert_transform(rx.cm_transform.affine, rx.cm_transform.shift)
+            affs = {}
+            sfts = {}
+            rx_ids = []
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    for meas in fp.focal_planes:
+                        affs[meas.meas_id] = meas.pm_transform.affine
+                        sfts[meas.meas_id] = meas.pm_transform.shift
+                        rx_ids += [meas.meas_id]
+            rx_ids = np.array(rx_ids)
+            for i, meas_ids in enumerate(rev_mapping):
+                if i in done_idx:
+                    continue
+                inrx = np.isin(meas_ids, rx_ids)
+                if not np.all(inrx):
+                    if np.any(inrx):
+                        raise ValueError(f"Somehow obs_ids {meas_ids} are not all in the same Receiver!")
+                    continue
+                cm_aff, cm_shift = mt.get_common_mode([affs[mid] for mid in meas_ids], [sfts[mid] for mid in meas_ids], -2, False, fast=True)
+                n_aff, n_sft = mt.invert_transform(mt.compose_transforms(cm_aff, cm_shift, rx_aff_inv, rx_sft_inv))
+                trf_old = self.transform_list[i]
+                n_aff, n_sft = mt.compose_transforms(trf_old.affine, trf_old.shift, n_aff, n_sft)
+                self.transform_list[i] = Transform(n_aff, n_sft)
+                done_idx.add(i)
+        if len(done_idx) != len(self.transform_list):
+            raise ValueError("Not all obs were completed! Check your receiver objects!")
 
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
@@ -470,6 +527,10 @@ class NuisanceParams:
         data["par_value"] = par_value
         write_dataset(metadata.ResultSet.from_friend(data), f, os.path.join(path, "par_list"), overwrite=overwrite)
 
+        _ = _create_group(f, os.path.join(path, "transform_list"), overwrite)
+        for i, trf in enumerate(self.transform_list):
+            trf.save(f, os.path.join(path, "transform_list", f"{i}"), overwrite)
+
     @classmethod
     def load(cls, f: h5py.File, path: str) -> Self:
         """
@@ -499,8 +560,13 @@ class NuisanceParams:
         for row in data:
             name = row["par_name"]
             par_list[int(row["par_idx"])][str(name)] = float(row["par_value"])
+        
+        if os.path.join(path, "transform_list") in f:
+            transform_list = [Transform.load(f, os.path.join(path, "transform_list", f"{i}")) for i in range(len(par_list))]
+        else:
+            transform_list = [Transform.identity() for _ in range(len(par_list))]
 
-        return cls(obs_mapping, par_list)
+        return cls(obs_mapping, par_list, transform_list)
 
 @dataclass
 class PointingModel:
@@ -598,8 +664,8 @@ class PointingModel:
 
         # Apply nuisance
         params_use = deepcopy(self.parameters)
-        nuisance = self.nuisance_params[meas.meas_id]
-        for key, val in nuisance.items():
+        npars, ntrf = self.nuisance_params[meas.meas_id]
+        for key, val in npars.items():
             params_use[key] += val
 
         # Start with the input detector coordinates
@@ -637,6 +703,7 @@ class PointingModel:
 
             if fp_corrected is None:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
+                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
                 return to_ret
 
             # Estimate and remove focalplane distortion
@@ -672,6 +739,7 @@ class PointingModel:
                 prev_err = err
             if err < tol:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
+                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
                 return to_ret
 
             # Update estimate of the undistorted fp
@@ -2767,7 +2835,7 @@ class PointingSystem:
             raise ValueError(
                 "Era is either missing or has inconsistent values for ws_mapping"
             )
-        nuisance_params = NuisanceParams({}, [])
+        nuisance_params = NuisanceParams({}, [], [])
         rxs = []
         pms = []
         for epoch in era.epochs:
