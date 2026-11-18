@@ -368,18 +368,17 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
     logger.info("Physical acceptance fraction: %.3f", physical_fraction)
     logger.info("Nuisance acceptance fraction: %.3f", nuisance_fraction)
 
-    # Estimate autocorrelation time
-    # try:
-    #     tau = emcee.autocorr.integrated_time( samples, quiet=True)
-    #     discard = int(2 * np.nanmax(tau))
-    #     logger.info("Autocorrelation times: %s", tau)
-    #     logger.info( "Estimated effective sample sizes: %s", np.round(cfg.mcmc_steps / tau).astype(int))
-    #     if np.isnan(discard):
-    #         logger.warning("Estimated autocorrelation time is nan")
-    #         discard = int(0.1 * cfg.mcmc_steps)
-    # except emcee.autocorr.AutocorrError:
-        # logger.warning( "Chain too short to estimate autocorrelation time.")
-    discard = int(0.1 * cfg.mcmc_steps)
+    try:
+        tau = emcee.autocorr.integrated_time(samples, quiet=True)
+        discard = int(2 * np.nanmax(tau))
+        logger.info("Autocorrelation times: %s", tau)
+        logger.info( "Estimated effective sample sizes: %s", np.round(cfg.mcmc_steps / tau).astype(int))
+    except emcee.autocorr.AutocorrError:
+        logger.warning( "Chain too short to estimate autocorrelation time.")
+        discard = int(0.1 * cfg.mcmc_steps)
+    except ValueError:
+        logger.warning("Estimating autocorrelation time raised a ValueError.")
+        discard = int(0.1 * cfg.mcmc_steps)
 
     if discard >= cfg.mcmc_steps:
         raise RuntimeError( "MCMC chain too short relative to autocorrelation time.")
@@ -389,20 +388,6 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
 
     if len(posterior_samples) == 0:
         raise RuntimeError("No samples remaining after burn-in.")
-
-    # Save the chain.
-    chain_file = os.path.join(data_dir, "mcmc_chain.h5")
-
-    with h5py.File(chain_file, "w") as f:
-        f.create_dataset( "samples", data=samples, compression="gzip")
-        f.create_dataset( "posterior_samples", data=posterior_samples, compression="gzip")
-        f.create_dataset("fixed_mask", data=fixed_mask)
-        f.attrs["ndim"] = ndim
-        f.attrs["npar"] = npar
-        f.attrs["nuisance_params"] = nnuisance
-        f.attrs["discard"] = discard
-        f.attrs["physical_acceptance"] = physical_fraction
-        f.attrs["nuisance_acceptance"] = nuisance_fraction
 
     # Posterior summaries
     median = np.median(posterior_samples, axis=0)
@@ -476,6 +461,23 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         plt.close(fig)
     _plot_fit(system, plot_dir, "mcmc")
     logger.info("Gibbs MCMC complete")
+
+    # Save the chain.
+    logger.info("Saving MCMC")
+    system.set_static(True)
+    outfile = os.path.join(data_dir, "static_pointing_mcmc.h5")
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+        group = f.create_group("chain")
+        group.create_dataset( "samples", data=samples, compression="gzip")
+        group.create_dataset( "posterior_samples", data=posterior_samples, compression="gzip")
+        group.create_dataset("fixed_mask", data=fixed_mask)
+        group.attrs["ndim"] = ndim
+        group.attrs["npar"] = npar
+        group.attrs["nuisance_params"] = nnuisance
+        group.attrs["discard"] = discard
+        group.attrs["physical_acceptance"] = physical_fraction
+        group.attrs["nuisance_acceptance"] = nuisance_fraction
 
     return samples, posterior_samples
 
@@ -1162,19 +1164,18 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         if tot_cut == 0 and i >= cfg.activate_nuisance:
             logger.info("None cut! Stopping optimization.")
             break
+    logger.info("Done fitting!")
+
+    # Save
+    logger.info("Saving final fit")
+    system.set_static(True)
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    fpc.make_manifestdb(system, "transformed", os.path.join(data_dir, "focal_plane.sqlite"), outfile)
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
         _ = _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir)
-
-    # Save
-    system.set_static(True)
-    with h5py.File(outfile, "a") as f:
-        system.save(f, "/", True)
-    fpc.make_manifestdb(
-        system, "transformed", os.path.join(data_dir, "focal_plane.sqlite"), outfile
-    )
-
 
 def main():
     # Load arguments
