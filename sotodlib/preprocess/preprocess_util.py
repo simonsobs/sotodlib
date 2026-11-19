@@ -17,7 +17,7 @@ from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
-from sotodlib.site_pipeline.jobdb import JState
+from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.core.util import H5ContextManager
 
 from .. import core
