@@ -20,7 +20,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 from sotodlib.coords.helpers import _valid_arg
-from sotodlib.site_pipeline import util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib import core
 from sotodlib.coords import pointing_model as pm
 from sotodlib.coords import fp_containers as fpc
@@ -826,7 +827,7 @@ def main(config_path: str):
     shutil.copy(config_path, os.path.join(save_dir, "config.yaml"))
     
     # Initialize Logger
-    logger = sp_util.init_logger(__name__, "Solve pointing_model")
+    logger = init_logger(__name__, "Solve pointing_model")
     logpath = os.path.join(save_dir, "pointing_model.log")
     logfile = logging.FileHandler(logpath)
     logger.addHandler(logfile)
@@ -976,7 +977,8 @@ def main(config_path: str):
         objective_model_func_lmfit_joint,
         fit_params,
         method=fit_method,
-        nan_policy="omit",
+        #nan_policy="omit",
+        nan_policy='omit',
         args=(pm_version, epochs, xieta_model, fit_method, use_weights),
         **config.get("fit_options", {}),
     )
@@ -2441,4 +2443,4 @@ class ModelFitsPlotter:
 ############
 
 if __name__ == "__main__":
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
