@@ -11,8 +11,8 @@ import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
@@ -94,8 +94,8 @@ class ObsBookTooShort(Exception):
 # database schema #
 ###################
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
+
 
 class Observations(Base):
     """

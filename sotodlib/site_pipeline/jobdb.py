@@ -73,7 +73,12 @@ Delete some jobs::
 """
 
 import sqlalchemy as sqy
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship, aliased
+try:
+    from sqlalchemy.orm import declarative_base
+except ImportError:
+    # Deprecated since SQLAlchemy 2.0, keep for backwards compatibility
+    from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship, aliased
 from contextlib import contextmanager
 import argparse
 import enum
@@ -119,8 +124,8 @@ class JState(enum.Enum):
         return list(cls.__members__.keys())
 
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
+
 
 class Job(Base):
     __tablename__ = 'jobs'

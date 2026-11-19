@@ -3,7 +3,7 @@ import logging
 import os
 from typing import Optional, Any, Union
 from sqlalchemy import create_engine, exc
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
@@ -815,8 +815,7 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
             owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
         return owners
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 class AtomicInfo(Base):
     __tablename__ = "atomic"
