@@ -44,7 +44,7 @@ _DEFAULT_CONFIG = {
     'tolerate_missing_extra_files': False,
     'ignore_fixed_tones': False,
 }
-
+    
 
 class _compact_list(list):
     # list with abbreviated repr.
@@ -374,7 +374,7 @@ class BookScanner:
             if n_fixed_tone > 0 and not self.config['ignore_fixed_tones']:
                 # Yes, "ignore" just means don't even talk about it.
                 self.logger.warning(f'Suppressing {n_fixed_tone} fixed tones '
-                                    f'in {stream_id}')
+                                 f'in {stream_id}')
             detset_rows.append((detset, dets))
 
             for index in range(meta['file_count']):
