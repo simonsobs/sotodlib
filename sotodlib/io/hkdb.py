@@ -14,18 +14,15 @@ import fnmatch
 import hashlib
 
 import sqlalchemy as db
-try:
-    from sqlalchemy.orm import declarative_base
-except ImportError:
-    # Deprecated since SQLAlchemy 2.0, keep for backwards compatibility
-    from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
 from typing import Union, List, Optional, Dict, Any
 import so3g
 from spt3g import core as spt3g_core
 from tqdm.auto import tqdm
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
 Session = sessionmaker()
 
 log = logging.getLogger(__name__)
