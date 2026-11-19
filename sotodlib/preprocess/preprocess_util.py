@@ -1375,7 +1375,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             os.path.exists(configs_init['archive']['index'])
             and not db_init_exist
         ):
-            logger.warn(f"{obs_id}: {group} not found in init db and skip missing={skip_missing}")
+            logger.warning(f"{obs_id}: {group} not found in init db and skip missing={skip_missing}")
             return None, None, None, (PreprocessErrors.SkipMissingError, None, None)
         # proc db exists but entry not in proc db
         if (
@@ -1383,7 +1383,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             and os.path.exists(configs_proc['archive']['index'])
             and not db_proc_exist
         ):
-            logger.warn(f"{obs_id}: {group} not found in proc db and skip missing={skip_missing}")
+            logger.warning(f"{obs_id}: {group} not found in proc db and skip missing={skip_missing}")
             return None, None, None, (PreprocessErrors.SkipMissingError, None, None)
 
     # Cannot run if proc db exists but init db does not
