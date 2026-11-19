@@ -31,7 +31,7 @@ dependencies = [
   "flacarray>=0.3.4",
   "h5py",
   "mapcat",
-  "sqlalchemy",
+  "sqlalchemy>=2.0.0",
 ]
 dynamic=["version"]
 classifiers = [
