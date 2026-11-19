@@ -149,7 +149,7 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 )
             if overwrite or not found:
                 with jdb.locked(job) as j:
-                    j.jstate = "open"
+                    j.jstate = JState.open
                     for _t in j._tags:
                         if _t.key == "error":
                             _t.value = None
