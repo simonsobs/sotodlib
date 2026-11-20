@@ -552,12 +552,12 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
         }
 
         if cfg.apply_cal_correction:
-            for iva in ivas.values():
+            for dset, iva in ivas.items():
                 # Run R_L correction if analysis version is old...
                 if getattr(iva, "analysis_version", 0) == 0:
-                    # This will edit IVA dicts in place
+                    # recompute_ivpars returns a corrected copy.
                     logger.debug("Recomputing IV analysis for %s", obs_id)
-                    tpc.recompute_ivpars(iva, cfg.param_correction_config)
+                    ivas[dset] = tpc.recompute_ivpars(iva, cfg.param_correction_config)
 
         if cfg.fit_tau:
             for dset, bsa in bsas.items():
