@@ -282,7 +282,7 @@ def _get_aff(
 
 
 def setup_fit_params(
-    system: PointingSystem, cfg: Namespace, nuisance_params: NuisanceParams
+    system: PointingSystem, cfg: Namespace, old_system: Optional[PointingSystem]
 ) -> tuple[np.ndarray, list[tuple[float, float]], np.ndarray]:
     """
     Set up fit parameters, including nuisance parameters.
@@ -293,8 +293,12 @@ def setup_fit_params(
         Pointing system containing the non-nuisance parameters.
     cfg : Namespace
         Configuration containing parameter initial values, bounds and static flags.
-    nuisance_params : NuisanceParams
-        Per-observation nuisance parameters.
+    old_system : Optional[PointingSystem]
+        If not `None` then initial static and nuisance params/transforms
+        will be pulled from this depending on if `cfg.pars_from_old`,
+        `cfg.nuisance_from_old`, and `cfg.nuisance_transform_from_old` are True.
+        For static params this can be overwridden by setting `overwrite_old = True`
+        in the parameter config dict.
 
     Returns
     -------
@@ -305,6 +309,10 @@ def setup_fit_params(
     scales : np.ndarray
         Parameter scales, including nuisance parameter scales.
     """
+    old_names = []
+    if old_system is not None:
+        old_names = old_system.parameter_names
+
     # Setup non-nuisance fit parameters
     params = system.parameters.copy()
     bounds = [(-np.inf, np.inf)] * len(params)
@@ -323,12 +331,30 @@ def setup_fit_params(
         lo, hi = bounds[idx]
         if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
             scales[idx] = hi - lo
+        if (
+            cfg.pars_from_old
+            and not par.get("overwrite_old", False)
+            and name in old_names
+            and old_system is not None
+        ):
+            par[idx] = old_system.parameters[old_names.index(name)]
 
     # Setup nuisance fit parameters
     nuisance_values = []
     nuisance_bounds = []
     nuisance_scales = []
-    for par_dict in nuisance_params.par_list:
+    for meas_id, nidx in system.nuisance_params.obs_mapping.items():
+        if old_system is not None and meas_id in old_system.nuisance_params.obs_mapping:
+            oidx = old_system.nuisance_params.obs_mapping[meas_id]
+            if cfg.nuisance_from_old:
+                system.nuisance_params.par_list[nidx] = (
+                    old_system.nuisance_params.par_list[oidx]
+                )
+            if cfg.nuisance_transform_from_old:
+                system.nuisance_params.transform_list[nidx] = (
+                    old_system.nuisance_params.transform_list[oidx]
+                )
+        par_dict = system.nuisance_params.par_list[nidx]
         for name, value in par_dict.items():
             if name not in system.parameter_names:
                 logger.warning(
@@ -354,6 +380,8 @@ def setup_fit_params(
     params = np.concatenate([params, np.asarray(nuisance_values)])
     bounds.extend(nuisance_bounds)
     scales = np.concatenate([scales, np.asarray(nuisance_scales)])
+
+    system.update_parameters(params)
 
     return params, bounds, scales
 
@@ -3029,7 +3057,7 @@ class PointingSystem:
             residuals followed by the receiver common-mode shift and
             rotation regularization terms.
         """
-        print('.', end='', flush=True)
+        print(".", end="", flush=True)
         self.update_parameters(params)
         self.set_thaw(True)
         try:

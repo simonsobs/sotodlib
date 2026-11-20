@@ -76,6 +76,9 @@ default_config = {
     "least_squares": True,
     "cm_fac": 1e-3,
     "proposal_factor": 1e-2,
+    "pars_from_old": True,
+    "nuisance_from_old": True,
+    "nuisance_transform_from_old": False,
 }
 
 
@@ -1117,8 +1120,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # )
 
     # Setup fit params
-    params, bounds, scales = fpc.setup_fit_params(system, cfg, system.nuisance_params)
-    system.update_parameters(params)
+    params, bounds, scales = fpc.setup_fit_params(system, cfg, old_system)
     logger.info(params[: len(system.parameters)])
     npar = len(system.parameters)
     nresid = len(system.residuals)
