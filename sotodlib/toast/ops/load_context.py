@@ -1,18 +1,17 @@
 # Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import os
+import copy
 import re
+import sqlite3
 import yaml
 from datetime import datetime, timezone
 
 import numpy as np
-import traitlets
 from astropy import units as u
 from astropy.table import Column, QTable
 
 import toast
-from toast.dist import distribute_uniform
 from toast.timing import function_timer, Timer
 from toast.traits import (
     trait_docs,
@@ -26,7 +25,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger
+from toast.utils import Logger, replace_byte_arrays
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -34,9 +33,9 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
-from ...preprocess import Pipeline as PreProcPipe
 
-from ..instrument import SOFocalplane, SOSite
+from ..instrument import SOSite
+from ..hkmanager import HKManager
 
 from .load_context_utils import (
     compute_boresight_pointing,
@@ -45,6 +44,7 @@ from .load_context_utils import (
     open_context,
     distribute_detector_data,
     distribute_detector_props,
+    ax_name_fp_subst,
 )
 
 
@@ -60,8 +60,22 @@ class LoadContext(Operator):
 
     The traits starting with an "ax_*" prefix indicate the axis manager names
     that should be mapped to the standard toast shared and detdata objects.
-    For ax_flags tuples, a negative bit value indicates that the flag data
+    For `ax_flags` tuples, a negative bit value indicates that the flag data
     should first be inverted before combined.
+
+    For all of the "ax_*" traits, the names may additionally include substitution
+    strings enclosed in '{}' that contain the name of a focalplane detector_data
+    key.  For example, the shared smurfgap flags are named after the UFM (array
+    name).  So you can import the correct field name for all observations with:
+
+    .. code-block:: python
+
+        ax_flags=[
+            (
+                "smurfgaps_ufm_{det_info:wafer:array}",
+                defaults.shared_mask_invalid
+            ),
+        ]
 
     Additional nested axismanager data is grouped into detdata, shared, or
     metadata objects based on whether they use detector / sample axes.  The
@@ -111,15 +125,58 @@ class LoadContext(Operator):
         help="Text file containing observation IDs to load",
     )
 
+    hk_site_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load site housekeeping from this path",
+    )
+
+    hk_site_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for site housekeeping",
+    )
+
+    hk_site_fields = List(list(), help="Restrict loading to only these site fields")
+
+    hk_site_aliases = Dict(dict(), help="Optional convenience aliases for site fields")
+
+    hk_platform_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load telescope platform housekeeping from this path",
+    )
+
+    hk_platform_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for telescope platform housekeeping",
+    )
+
+    hk_platform_fields = List(
+        list(), help="Restrict loading to only these platform fields"
+    )
+
+    hk_platform_aliases = Dict(
+        dict(), help="Optional convenience aliases for platform fields"
+    )
+
     preprocess_config = Unicode(
         None,
         allow_none=True,
-        help="Apply pre-processing with this configuration",
+        help="Apply site-pipeline pre-processing with this configuration",
+    )
+
+    ignore_preprocess_archive = Bool(
+        True,
+        help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
     observations = List(list(), help="List of observation IDs to load")
 
     readout_ids = List(list(), help="Only load this list of readout_id values")
+
+    stream_ids = List(list(), help="Only load this list of stream_id values")
 
     detsets = List(list(), help="Only load this list of detset values")
 
@@ -140,7 +197,10 @@ class LoadContext(Operator):
     )
 
     ax_flags = List(
-        [],
+        [
+            ("smurfgaps_ufm_{det_info:wafer:array}", defaults.shared_mask_invalid),
+            ("acu_drops", defaults.shared_mask_invalid)
+        ],
         help="Tuples of (field, bit value) merged to shared_flags",
     )
 
@@ -173,10 +233,22 @@ class LoadContext(Operator):
         help="Field with boresight Roll",
     )
 
+    ax_boresight_angle = Unicode(
+        "ancil:boresight_enc",
+        allow_none=True,
+        help="Field with boresight rotation angle (included in roll)",
+    )
+
     ax_hwp_angle = Unicode(
         "hwp_angle",
         allow_none=True,
         help="Field with HWP angle",
+    )
+
+    ax_corotator_angle = Unicode(
+        "ancil:corotator_enc",
+        allow_none=True,
+        help="Field with corotator angle",
     )
 
     ax_pathsep = Unicode(
@@ -200,7 +272,7 @@ class LoadContext(Operator):
     telescope_name = Unicode("UNKNOWN", help="Name of the telescope")
 
     detset_key = Unicode(
-        None,
+        "pixel",
         allow_none=True,
         help="Column of the focalplane detector_data to use for data distribution",
     )
@@ -250,19 +322,19 @@ class LoadContext(Operator):
     )
 
     corotator_angle = Unicode(
-        None,
+        "corotator_angle",
         allow_none=True,
         help="Observation shared key for corotator_angle (if it is used)",
     )
 
     boresight_angle = Unicode(
-        None,
+        "boresight_angle",
         allow_none=True,
         help="Observation shared key for boresight rotation angle (if it is used)",
     )
 
     hwp_angle = Unicode(
-        None,
+        defaults.hwp_angle,
         allow_none=True,
         help="Observation shared key for HWP angle (if it is used)",
     )
@@ -270,6 +342,10 @@ class LoadContext(Operator):
     analytic_bandpass = Bool(False, help="Add analytic bandpass to each detector")
 
     bandwidth = Float(0.2, help="Fractional bandwith used in analytic bandpass")
+
+    daq_units = Bool(
+        False, help="If True, convert raw data to original int32 DAQ units"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -282,6 +358,11 @@ class LoadContext(Operator):
 
         comm = data.comm
 
+        if self.combine_wafers:
+            msg = "Combining multiple wafers in a single observation is"
+            msg += " currently broken"
+            raise NotImplementedError(msg)
+
         if self.context is None:
             if self.context_file is None:
                 msg = "Either the context or context_file must be specified"
@@ -291,12 +372,22 @@ class LoadContext(Operator):
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
 
-        # Build our detector selection dictionary
+        if self.daq_units and self.preprocess_config is not None:
+            msg = "Cannot convert raw signal to DAQ units if passing data through preprocessing"
+            raise RuntimeError(msg)
+
+        # Build our detector selection dictionary.  Merge our explicit traits
+        # with any pre-existing detector selection.
         dets_select = None
         if len(self.dets_select) > 0:
             # Use the full dictionary provided by the user
             dets_select = self.dets_select
-        elif len(self.readout_ids) > 0 or len(self.bands) > 0 or len(self.detsets) > 0:
+        elif (
+            len(self.readout_ids) > 0
+            or len(self.bands) > 0
+            or len(self.detsets) > 0
+            or len(self.stream_ids) > 0
+        ):
             # We have some selection, build the dictionary
             dets_select = dict()
             if len(self.readout_ids) > 0:
@@ -305,6 +396,18 @@ class LoadContext(Operator):
                 dets_select["band"] = list(self.bands)
             if len(self.detsets) > 0:
                 dets_select["detset"] = list(self.detsets)
+            if len(self.stream_ids) > 0:
+                dets_select["stream_id"] = list(self.stream_ids)
+
+        # Get any selection of wafers
+        keep_wafers = None
+        if dets_select is not None and "stream_id" in dets_select:
+            if isinstance(dets_select["stream_id"], (list, tuple, set)):
+                keep_wafers = set(dets_select["stream_id"])
+            else:
+                # Scalar
+                keep_wafers = set()
+                keep_wafers.add(dets_select["stream_id"])
 
         # One global process queries the observation metadata and computes
         # the observation distribution among process groups.
@@ -327,57 +430,159 @@ class LoadContext(Operator):
                             olist.append(line.strip())
             if comm.comm_world is not None:
                 olist = comm.comm_world.bcast(olist, root=0)
-            self.observations = olist
+            self._raw_observations = olist
+        else:
+            self._raw_observations = self.observations
+
+        # Construct the set of wafer-observations we are using
+        self._observations = dict()
+        wfobs_pat = re.compile(r"(.*)[-_](ufm.*)")
+        for rawobs in self._raw_observations:
+            mat = wfobs_pat.match(rawobs)
+            if mat is None:
+                # This is a whole observation, match any wafer
+                self._observations[rawobs] = None
+            else:
+                # This is a single wafer
+                mat_obs = mat.group(1)
+                mat_wf = mat.group(2)
+                if mat_obs not in self._observations:
+                    self._observations[mat_obs] = set()
+                self._observations[mat_obs].add(mat_wf)
 
         obs_props = None
         preproc_conf = None
         if comm.world_rank == 0:
-            obs_props = list()
-            obs_list = self.observations
+            obs_list = list(sorted(self._observations.keys()))
             if self.preprocess_config is not None:
                 with open(self.preprocess_config, "r") as f:
                     preproc_conf = yaml.safe_load(f)
+
+            # Query the obsdb directly so that we only have one DB query,
+            # rather than doing one query per observation.
+            sort_by = ["obs_id"]
+            if len(obs_list) > 0:
+                query_str = "obs.obs_id IN ("
+                for oid in obs_list:
+                    query_str += f"'{oid}',"
+                query_str = query_str.rstrip(",")
+                query_str += ")"
+            else:
+                query_str = "1"
+
+            # If we are using preprocessing, load the archive DB and cut any
+            # observations or wafer slots that do not exist.
+            preproc_lookup = None
+            if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
+                preproc_lookup = dict()
+                preproc_db = preproc_conf["archive"]["index"]
+                con = sqlite3.connect(preproc_db)
+                cur = con.cursor()
+                res = cur.execute('select "obs:obs_id","dets:wafer_slot" from map')
+                for row in res.fetchall():
+                    obid = row[0]
+                    wslot = row[1]
+                    if obid not in preproc_lookup:
+                        preproc_lookup[obid] = set()
+                    preproc_lookup[obid].add(wslot)
+                del res
+                del cur
+                con.close()
+                del con
+
+            # Open the databases and query
             ctx = open_context(context=self.context, context_file=self.context_file)
+            query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
+
+            # Build up the list of observing session properties, and optionally
+            # only keep observations that match a regex.
+            pat = None
             if self.observation_regex is not None:
-                # Match against the full list of observation IDs
-                obs_list = []
                 pat = re.compile(self.observation_regex)
-                all_obs = ctx.obsdb.query()
-                for result in all_obs:
-                    if pat.match(result["obs_id"]) is not None:
-                        obs_list.append(result["obs_id"])
-
-            for iobs, obs_id in enumerate(obs_list):
-                meta = ctx.get_meta(obs_id=obs_id, dets=dets_select)
-                if self.combine_wafers:
-                    # Place all wafers into a single session
-                    oprops = dict()
-                    oprops["name"] = obs_id
-                    oprops["session_name"] = obs_id
-                    oprops["wafer"] = "all"
-                    oprops["duration"] = meta["obs_info"]["duration"]
-                    oprops["n_det"] = len(meta["dets"].vals)
-                    obs_props.append(oprops)
+            session_props = list()
+            for row in query_result:
+                obs_id = str(row["obs_id"])
+                if pat is not None and pat.match(obs_id) is None:
+                    continue
+                # If we are using preprocessing, only keep obs_ids and wafer slots that
+                # exist in the preprocessing archive.
+                raw_wafer_slots = list(row["wafer_slots_list"].split(","))
+                raw_stream_ids = list(row["stream_ids_list"].split(","))
+                if preproc_lookup is not None:
+                    if obs_id not in preproc_lookup:
+                        msg = f"Requested obs_id {obs_id} does not exist in "
+                        msg += f"preprocessing archive {preproc_db}.  Skipping."
+                        log.warning(msg)
+                        continue
+                    wafer_slots = list()
+                    stream_ids = list()
+                    for ws, sid in zip(raw_wafer_slots, raw_stream_ids):
+                        if ws not in preproc_lookup[obs_id]:
+                            msg = f"Wafer slot {obs_id}:{ws} not in preprocessing"
+                            msg += f" archive {preproc_db}.  Skipping."
+                            log.warning(msg)
+                        else:
+                            wafer_slots.append(ws)
+                            stream_ids.append(sid)
                 else:
-                    # Get list of wafers from meta...
-                    duration = meta["obs_info"]["duration"]
-                    selected_wafers = list(
-                        sorted(set(meta["det_info"][self.ax_detinfo_wafer_key]))
-                    )
-                    for wf in selected_wafers:
-                        oprops = dict()
-                        oprops["name"] = f"{obs_id}_{wf}"
-                        oprops["session_name"] = obs_id
-                        oprops["wafer"] = wf
-                        oprops["duration"] = duration
+                    wafer_slots = raw_wafer_slots
+                    stream_ids = raw_stream_ids
 
-                        # Get number of dets in this wafer
-                        oprops["n_det"] = np.count_nonzero(
-                            meta["det_info"][self.ax_detinfo_wafer_key] == wf
-                        )
-                        obs_props.append(oprops)
+                # If we have an input list of specific wafer-observations, prune the
+                # list of stream_ids now.
+                if self._observations[obs_id] is None:
+                    # Keep everything
+                    keep_stream_ids = stream_ids
+                else:
+                    keep_stream_ids = list()
+                    for sid in stream_ids:
+                        if sid in self._observations[obs_id]:
+                            keep_stream_ids.append(sid)
+                if len(keep_stream_ids) == 0:
+                    # No wafers for this obs
+                    continue
+                sprops = dict()
+                sprops["session_name"] = obs_id
+                sprops["session_start"] = float(row["start_time"])
+                sprops["session_stop"] = float(row["stop_time"])
+                sprops["n_samples"] = int(row["n_samples"])
+                sprops["tele_name"] = str(row["telescope"])
+                sprops["n_wafers"] = int(row["wafer_count"])
+                sprops["wafer_slots"] = wafer_slots
+                sprops["wafers"] = keep_stream_ids
+                session_props.append(sprops)
+
+            # Close the databases
             if self.context_file is not None:
                 del ctx
+
+            # Now construct the list of observation properties, either with all wafers
+            # in a single observation or one observation per wafer.
+            obs_props = list()
+            for sprops in session_props:
+                if self.combine_wafers:
+                    # Place all wafers into a single observation
+                    oprops = dict(sprops)
+                    oprops["name"] = oprops["session_name"]
+                    oprops["wafer"] = "all"
+                    if keep_wafers is not None:
+                        new_wafers = list()
+                        for wf in oprops["wafers"]:
+                            if wf in keep_wafers:
+                                new_wafers.append(wf)
+                        oprops["n_wafers"] = len(new_wafers)
+                        oprops["wafers"] = new_wafers
+                    if oprops["n_wafers"] > 0:
+                        obs_props.append(oprops)
+                else:
+                    # One observation per wafer
+                    for wf in sprops["wafers"]:
+                        if (keep_wafers is None) or (wf in keep_wafers):
+                            oprops = dict(sprops)
+                            oprops["n_wafers"] = 1
+                            oprops["name"] = f"{oprops['session_name']}_{wf}"
+                            oprops["wafer"] = wf
+                            obs_props.append(oprops)
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
@@ -395,7 +600,7 @@ class LoadContext(Operator):
         # Distribute observations among groups- we use the detector-seconds
         # for load balancing.
 
-        obs_sizes = [int(x["n_det"] * x["duration"]) for x in obs_props]
+        obs_sizes = [int(x["n_wafers"] * x["n_samples"]) for x in obs_props]
         groupdist = distribute_discrete(obs_sizes, comm.ngroups)
         group_firstobs = groupdist[comm.group].offset
         group_numobs = groupdist[comm.group].n_elem
@@ -403,12 +608,13 @@ class LoadContext(Operator):
         # Every group loads its observations
         for obindx in range(group_firstobs, group_firstobs + group_numobs):
             obs_name = obs_props[obindx]["name"]
+            n_samp = obs_props[obindx]["n_samples"]
             otimer = Timer()
             otimer.start()
 
             # If we have an observation with a specific wafer, modify the detector
             # selection dictionary to include only that wafer.
-            obs_dets_select = dets_select
+            obs_dets_select = copy.deepcopy(dets_select)
             if obs_props[obindx]["wafer"] != "all":
                 if obs_dets_select is None:
                     obs_dets_select = dict()
@@ -416,7 +622,12 @@ class LoadContext(Operator):
 
             # One process in the group loads the metadata, builds the focalplane
             # model, and broadcasts to the rest of the group.
-            obs_meta, det_props, n_samp = self._load_metadata(
+            #
+            # FIXME: in the case of multiple wafers per observation, each wafer
+            # reader needs to do this step, in order to pull in unique metadata
+            # that is per-wafer and merge.
+            #
+            obs_meta, det_props = self._load_metadata(
                 obs_name,
                 obs_props[obindx]["session_name"],
                 comm.comm_group,
@@ -439,10 +650,51 @@ class LoadContext(Operator):
                 telescope,
                 n_samp,
                 fp_flags,
+                obs_meta,
             )
 
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
+
+            # Report number of cut detectors
+            local_cut = np.count_nonzero(
+                [y for x, y in ob.local_detector_flags.items()]
+            )
+            if ob.comm.comm_group is None:
+                all_cut = local_cut
+            else:
+                all_cut = ob.comm.comm_group.gather(local_cut, root=0)
+                if ob.comm.group_rank == 0:
+                    tot_cut = np.sum(all_cut)
+                    msg = f"LoadContext {ob.name} {tot_cut} / "
+                    msg += f"{len(ob.all_detectors)} dets trimmed on read"
+                    log.debug(msg)
+
+            # Now that all metadata has been loaded, ensure that all byte strings
+            # are converted to unicode arrays.
+            ob._internal = replace_byte_arrays(ob._internal)
+
+            # Optionally load housekeeping data
+            if self.hk_site_root is not None or self.hk_platform_root is not None:
+                hk_timer = Timer()
+                hk_timer.start()
+                ob.hk = HKManager(
+                    ob.comm.comm_group,
+                    ob.shared[self.times].data,
+                    site_root=self.hk_site_root,
+                    site_db=self.hk_site_db,
+                    site_fields=self.hk_site_fields,
+                    site_aliases=self.hk_site_aliases,
+                    plat_root=self.hk_platform_root,
+                    plat_db=self.hk_platform_db,
+                    plat_fields=self.hk_platform_fields,
+                    plat_aliases=self.hk_platform_aliases,
+                )
+                log.debug_rank(
+                    f"LoadContext {obs_name} load House Keeping in",
+                    comm=comm.comm_group,
+                    timer=hk_timer,
+                )
 
             # Compute the boresight pointing and observatory position
             if have_pointing:
@@ -483,7 +735,7 @@ class LoadContext(Operator):
                 to cut detectors when loading.
 
         Returns:
-            (tuple):  The (observation metadata, detector property table, samples)
+            (tuple):  The (observation metadata, detector property table)
                 for the observation.
 
         """
@@ -497,24 +749,17 @@ class LoadContext(Operator):
 
         det_props = None
         obs_meta = None
-        n_samp = None
+
+        # FIXME: This only works if there is one wafer per observation (and
+        # hence one reader).
         if rank == 0:
             # Load metadata
+            msg = f"LoadContext {obs_name} metadata using dets_select={dets_select}"
+            log.debug(msg)
             ctx = open_context(context=self.context, context_file=self.context_file)
             meta = ctx.get_meta(session_name, dets=dets_select)
             if self.context_file is not None:
                 del ctx
-            n_samp = meta["samps"].count
-
-            if self.preprocess_config is not None:
-                # Cut detectors with preprocessing
-                prepipe = PreProcPipe(
-                    preproc_conf["process_pipe"],
-                    logger=log,
-                )
-                for process in prepipe:
-                    log.debug(f"Preprocess selecting on {process.name}")
-                    process.select(meta)
 
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
@@ -536,6 +781,30 @@ class LoadContext(Operator):
                 data=fp_cols[f"det_info{self.ax_pathsep}readout_id"].data,
             )
 
+            # If the det_id is included in the detector properties (i.e. detmatch
+            # was loaded), then also extract the pixel and band to include in the
+            # focalplane table.
+            det_id_key = f"det_info{self.ax_pathsep}det_id"
+            if det_id_key in fp_cols:
+                det_pat = re.compile(r".*_(.*)_(.*)[ABD]")
+                pixel_names = list()
+                band_names = list()
+                for d in fp_cols[det_id_key].data:
+                    mat = det_pat.match(d)
+                    if mat is None:
+                        msg = f"det_id '{d}' does not match expected regex {det_pat}"
+                        raise RuntimeError(msg)
+                    band_names.append(mat.group(1))
+                    pixel_names.append(mat.group(2))
+                fp_cols["pixel"] = Column(
+                    name="pixel",
+                    data=pixel_names,
+                )
+                fp_cols["band"] = Column(
+                    name="band",
+                    data=band_names,
+                )
+
             if self.analytic_bandpass:
                 # Add bandpass information to the focalplane
                 try:
@@ -544,7 +813,11 @@ class LoadContext(Operator):
                     band = fp_cols[
                         f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}bandpass"
                     ].data
-                freq = [float(b[1:]) for b in band]
+
+                fpat = re.compile(r"^f[\d]+$")
+                freq = [
+                    float(b[1:]) if fpat.match(b) is not None else 0.0 for b in band
+                ]
                 bandcenter = np.array(freq) * u.GHz
                 bandwidth = bandcenter * self.bandwidth
                 fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
@@ -569,14 +842,13 @@ class LoadContext(Operator):
         if gcomm is not None:
             obs_meta = gcomm.bcast(obs_meta, root=0)
             det_props = gcomm.bcast(det_props, root=0)
-            n_samp = gcomm.bcast(n_samp, root=0)
 
         log.debug_rank(
             f"LoadContext {obs_name} metadata bcast took",
             comm=gcomm,
             timer=timer,
         )
-        return (obs_meta, det_props, n_samp)
+        return (obs_meta, det_props)
 
     @function_timer
     def _create_obs_instrument(self, obs_name, gcomm, det_props):
@@ -604,6 +876,7 @@ class LoadContext(Operator):
         xi_key = f"focal_plane{self.ax_pathsep}xi"
         eta_key = f"focal_plane{self.ax_pathsep}eta"
         gamma_key = f"focal_plane{self.ax_pathsep}gamma"
+        wafer_type_key = f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}type"
 
         fp_flags = dict()
         if xi_key in det_props.colnames:
@@ -633,6 +906,13 @@ class LoadContext(Operator):
                 np.array([0, 0, 0, 1], dtype=np.float64),
                 len(det_props[f"det_info{self.ax_pathsep}readout_id"]),
             ).reshape((-1, 4))
+
+        # Flag non-optical detectors with the processing mask
+        if wafer_type_key in det_props.colnames:
+            fp_dark = det_props[wafer_type_key] != "OPTC"
+            for dname, dark in zip(det_props["name"], fp_dark):
+                if dark:
+                    fp_flags[dname] |= defaults.det_mask_processing
 
         # Do we have any good detectors left?
         n_good = 0
@@ -664,9 +944,45 @@ class LoadContext(Operator):
             sample_rate=1.0 * u.Hz,
         )
 
-        # For now, this should be good enough position for instruments near the
-        # S.O. location.
-        site = SOSite()
+        # Use the default observatory location
+        raw_site = so3g.proj.coords.SITES["_default"]
+        tele_lon_deg = raw_site.lon
+        tele_lat_deg = raw_site.lat
+        tele_alt_m = raw_site.elev
+
+        # Construct a toast weather object.  If we had metadata containing the
+        # current conditions (temperature, PWV, wind, etc) we could use it here.
+        # For now, we use the EarthlySite.typical_weather so that our pointing
+        # corrections are the same as other parts of the code.  For the weather
+        # parameters not in this dictionary, we use the toast-bundled MERRA-2
+        # data for the Atacama.  We add this MERRA-2 data later once we have the
+        # observing session start time.
+
+        site_temp_celsius = raw_site.typical_weather["temperature"]
+        site_humidity = raw_site.typical_weather["humidity"]
+        site_pressure = raw_site.typical_weather["pressure"]
+
+        site_weather = toast.weather.Weather(
+            time=None,
+            ice_water=None,
+            liquid_water=None,
+            pwv=None,
+            humidity=None,
+            surface_pressure=site_pressure * u.mbar,
+            surface_temperature=site_temp_celsius * u.Celsius,
+            air_temperature=site_temp_celsius * u.Celsius,
+            west_wind=None,
+            south_wind=None,
+        )
+        site_weather.relative_humidity = site_humidity
+
+        site = SOSite(
+            name="SO",
+            lat=tele_lat_deg * u.degree,
+            lon=tele_lon_deg * u.degree,
+            alt=tele_alt_m * u.meter,
+            weather=site_weather,
+        )
 
         telescope = toast.instrument.Telescope(
             self.telescope_name, focalplane=focalplane, site=site
@@ -675,7 +991,7 @@ class LoadContext(Operator):
 
     @function_timer
     def _create_observation(
-        self, obs_name, session_name, comm, telescope, n_samp, fp_flags
+        self, obs_name, session_name, comm, telescope, n_samp, fp_flags, meta
     ):
         """Create the observation.
 
@@ -689,6 +1005,7 @@ class LoadContext(Operator):
             telescope (Telescope):  The Telescope for this observation.
             n_samp (int):  The number of samples in the observation.
             fp_flags (dict):  The per-detector flags to apply.
+            meta (dict):  The observation metadata to populate.
 
         Returns:
             (tuple):  The (Observation, have_pointing), where the second
@@ -732,8 +1049,14 @@ class LoadContext(Operator):
             dtype=np.float64,
         )
 
+        fp_array = telescope.focalplane.detector_data
+        ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
+        ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
+        ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+
         have_pointing = True
-        if self.ax_boresight_az is None:
+        if ax_boresight_az is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -741,7 +1064,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.float64,
             )
-        if self.ax_boresight_el is None:
+        if ax_boresight_el is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -749,7 +1072,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.float64,
             )
-        if self.ax_boresight_roll is None:
+        if ax_boresight_roll is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -769,24 +1092,6 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples, 4),
                 dtype=np.float64,
             )
-        if self.hwp_angle is not None and self.ax_hwp_angle is not None:
-            ob.shared.create_column(
-                self.hwp_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-        if self.boresight_angle is not None:
-            ob.shared.create_column(
-                self.boresight_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-        if self.corotator_angle is not None:
-            ob.shared.create_column(
-                self.corotator_angle,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
         ob.shared.create_column(
             self.shared_flags,
             shape=(ob.n_local_samples,),
@@ -803,11 +1108,19 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples, 3),
                 dtype=np.float64,
             )
-        if self.ax_det_signal is not None:
-            ob.detdata.create(
-                self.det_data, dtype=np.float64, units=self.det_data_units
-            )
+        if ax_det_signal is not None:
+            if self.daq_units:
+                ob.detdata.create(
+                    self.det_data, dtype=np.int32, units=u.dimensionless_unscaled
+                )
+            else:
+                ob.detdata.create(
+                    self.det_data, dtype=np.float64, units=self.det_data_units
+                )
             ob.detdata.create(self.det_flags, dtype=np.uint8)
+
+        if meta is not None:
+            ob.update(meta)
 
         log.debug_rank(
             f"LoadContext {obs_name} allocate Observation in",
@@ -863,7 +1176,8 @@ class LoadContext(Operator):
             gcomm,
             wafer_readers,
             wafer_dets,
-            pconf=pconf,
+            preconfig=pconf,
+            ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
         )
@@ -875,17 +1189,38 @@ class LoadContext(Operator):
         )
 
         # Track the fields we are extracting
-        shared_ax_to_obs = {self.ax_times: self.times}
+        fp_array = ob.telescope.focalplane.detector_data
+        ax_times = ax_name_fp_subst(self.ax_times, fp_array)
+        ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
+        ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
+        ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+        ax_boresight_angle = ax_name_fp_subst(self.ax_boresight_angle, fp_array)
+        ax_corotator_angle = ax_name_fp_subst(self.ax_corotator_angle, fp_array)
+        ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
+        ax_flags = list()
+        for axname, bit in self.ax_flags:
+            full_name = ax_name_fp_subst(axname, fp_array)
+            ax_flags.append((full_name, bit))
+        ax_det_flags = list()
+        for axname, bit in self.ax_det_flags:
+            full_name = ax_name_fp_subst(axname, fp_array)
+            ax_det_flags.append((full_name, bit))
+
+        shared_ax_to_obs = {ax_times: self.times}
         if have_pointing:
-            shared_ax_to_obs[self.ax_boresight_az] = self.azimuth
-            shared_ax_to_obs[self.ax_boresight_el] = self.elevation
-            shared_ax_to_obs[self.ax_boresight_roll] = self.roll
-        if self.hwp_angle is not None and self.ax_hwp_angle is not None:
-            shared_ax_to_obs[self.ax_hwp_angle] = self.hwp_angle
-        shared_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_flags}
-        shared_flag_fields = {x[0]: abs(x[1]) for x in self.ax_flags}
-        det_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_det_flags}
-        det_flag_fields = {x[0]: abs(x[1]) for x in self.ax_det_flags}
+            shared_ax_to_obs[ax_boresight_az] = self.azimuth
+            shared_ax_to_obs[ax_boresight_el] = self.elevation
+            shared_ax_to_obs[ax_boresight_roll] = self.roll
+        if self.hwp_angle is not None and ax_hwp_angle is not None:
+            shared_ax_to_obs[ax_hwp_angle] = self.hwp_angle
+        if self.boresight_angle is not None and ax_boresight_angle is not None:
+            shared_ax_to_obs[ax_boresight_angle] = self.boresight_angle
+        if self.corotator_angle is not None and ax_corotator_angle is not None:
+            shared_ax_to_obs[ax_corotator_angle] = self.corotator_angle
+        shared_flag_invert = {x[0]: (x[1] < 0) for x in ax_flags}
+        shared_flag_fields = {x[0]: abs(x[1]) for x in ax_flags}
+        det_flag_invert = {x[0]: (x[1] < 0) for x in ax_det_flags}
+        det_flag_fields = {x[0]: abs(x[1]) for x in ax_det_flags}
 
         # The results of the recursive parsing
         extra_meta = dict()
@@ -897,8 +1232,15 @@ class LoadContext(Operator):
         # populate in the observation.  Since all wafers have the same
         # ancil data (and the same field names, just with different
         # detectors), we can just do this on one process and broadcast
-        # the result
+        # the result.
+        #
+        # FIXME:  In the case of multiple wafers (and readers) per
+        # observation, every reader must parse every wafer and merge
+        # all the metadata information.
+        #
         temp_shared = None
+        restricted_samps = None
+        ax_shift = None
         if ob.comm.group_rank == 0:
             first_wafer = list(axwafers.keys())[0]
             self._parse_data(
@@ -917,6 +1259,13 @@ class LoadContext(Operator):
             )
             temp_shared = {x: None for x, y in shared_data.items()}
 
+            # Does the axis manager have a truncated number of samples?
+            restricted_samps = axwafers[first_wafer][self.axis_sample].count
+            if restricted_samps != ob.n_local_samples:
+                ax_shift = axwafers[first_wafer][self.axis_sample].offset
+            else:
+                ax_shift = 0
+
         if gcomm is not None:
             extra_meta = gcomm.bcast(extra_meta, root=0)
             temp_shared = gcomm.bcast(temp_shared, root=0)
@@ -924,6 +1273,8 @@ class LoadContext(Operator):
                 shared_data = temp_shared
             det_data = gcomm.bcast(det_data, root=0)
             interval_data = gcomm.bcast(interval_data, root=0)
+            restricted_samps = gcomm.bcast(restricted_samps, root=0)
+            ax_shift = gcomm.bcast(ax_shift, root=0)
 
         # Add extra metadata that was discovered.
         ob.update(extra_meta)
@@ -941,9 +1292,48 @@ class LoadContext(Operator):
             )
 
         # Collectively store shared data.  All readers have a full copy of
-        # this data, but we only set this from rank zero.
+        # this data, but we only set this from rank zero.  If there are
+        # cut samples at the beginning and end, ensure that timestamps are
+        # always valid.
+
+        # Some optional fields may not exist yet in the observation.  We create
+        # these on-demand if they are in the data.
         for shr_obs_name, shrbuf in shared_data.items():
-            ob.shared[shr_obs_name].set(shrbuf, fromrank=0)
+            bf = shrbuf
+            if shr_obs_name == self.times and restricted_samps != ob.n_local_samples:
+                if rank == 0:
+                    msg = f"Axman samples {restricted_samps} != {ob.n_local_samples}"
+                    msg += ", extrapolating timestamps"
+                    log.debug(msg)
+                    bf = np.zeros(ob.n_local_samples, dtype=np.float64)
+                    (rate, dt, _, _, _) = toast.utils.rate_from_times(shrbuf)
+                    bf[ax_shift : ax_shift + restricted_samps] = shrbuf
+                    bf[0:ax_shift] = shrbuf[0] + dt * np.arange(
+                        -ax_shift, 0, 1, dtype=np.float64
+                    )
+                    end_gap = ob.n_local_samples - restricted_samps - ax_shift
+                    bf[ax_shift + restricted_samps :] = shrbuf[-1] + dt * np.arange(
+                        1, end_gap + 1, 1, dtype=np.float64
+                    )
+            if shr_obs_name == self.hwp_angle:
+                ob.shared.create_column(
+                    self.hwp_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if shr_obs_name == self.boresight_angle:
+                ob.shared.create_column(
+                    self.boresight_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if shr_obs_name == self.corotator_angle:
+                ob.shared.create_column(
+                    self.corotator_angle,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            ob.shared[shr_obs_name].set(bf, fromrank=0)
 
         log.debug_rank(
             f"LoadContext {ob.name} Shared data copy took",
@@ -965,6 +1355,28 @@ class LoadContext(Operator):
             ob.shared[self.times].data[-1]
         ).astimezone(timezone.utc)
 
+        # Update site weather, now that we have the observing time.
+        sim_atacama = toast.weather.SimWeather(
+            time=ob.session.start,
+            name="atacama",
+            median_weather=True,
+        )
+        old_weather = ob.telescope.site.weather
+        new_weather = toast.weather.Weather(
+            time=sim_atacama.time,
+            ice_water=sim_atacama.ice_water,
+            liquid_water=sim_atacama.liquid_water,
+            pwv=sim_atacama.pwv,
+            humidity=sim_atacama.humidity,
+            surface_pressure=old_weather.surface_pressure,
+            surface_temperature=old_weather.surface_temperature,
+            air_temperature=old_weather.air_temperature,
+            west_wind=sim_atacama.west_wind,
+            south_wind=sim_atacama.south_wind,
+        )
+        new_weather.relative_humidity = old_weather.relative_humidity
+        ob.telescope.site.weather = new_weather
+
         log.debug_rank(
             f"LoadContext {ob.name} sample rate calculation took",
             comm=gcomm,
@@ -972,25 +1384,40 @@ class LoadContext(Operator):
         )
 
         # Distribute detector data
-        for field, (ax_field, ax_dtype, mask) in det_data.items():
-            do_invert = False
-            if ax_field in det_flag_invert:
-                do_invert = det_flag_invert[ax_field]
-            distribute_detector_data(
-                ob,
-                field,
-                axwafers,
-                ax_field,
-                ax_dtype,
-                wafer_readers,
-                wafer_proc_dets,
-                proc_wafer_dets,
-                is_flag=(mask is not None),
-                flag_invert=do_invert,
-                flag_mask=mask,
-            )
+        for field, merge_list in det_data.items():
+            for ax_field, ax_dtype, mask in merge_list:
+                do_invert = False
+                if ax_field in det_flag_invert:
+                    do_invert = det_flag_invert[ax_field]
+                distribute_detector_data(
+                    ob,
+                    field,
+                    axwafers,
+                    self.axis_detector,
+                    self.axis_sample,
+                    ax_field,
+                    ax_dtype,
+                    wafer_readers,
+                    wafer_proc_dets,
+                    proc_wafer_dets,
+                    str(self.ax_pathsep),
+                    is_flag=(mask is not None),
+                    flag_invert=do_invert,
+                    flag_mask=mask,
+                    daq_units=self.daq_units,
+                )
 
-        # Original wafer data no longer needed
+        # Original wafer data no longer needed.  AxisManager does not seem to
+        # have a clean destructor, so do it manually.
+        def _ax_del_children(ax):
+            for k in list(ax.keys()):
+                if isinstance(ax[k], AxisManager):
+                    _ax_del_children(ax[k])
+                del ax[k]
+
+        for wfname in list(axwafers.keys()):
+            _ax_del_children(axwafers[wfname])
+            del axwafers[wfname]
         del axwafers
 
         log.debug_rank(
@@ -1050,6 +1477,21 @@ class LoadContext(Operator):
             None
 
         """
+
+        def _valid_meta(obj):
+            # Check that the object is an allowed type before adding it to the metadata
+            if np.isscalar(obj):
+                return True
+            if isinstance(obj, np.ndarray):
+                return True
+            if isinstance(obj, (list, set, dict, tuple, str)):
+                return True
+            return False
+
+        # Find the per-observation names we might be using
+        fp_array = obs.telescope.focalplane.detector_data
+        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+
         # Some metadata has already been parsed, but some new values
         # may only show up when reading data, so we need to handle those
         # as well.
@@ -1117,7 +1559,7 @@ class LoadContext(Operator):
                 if len(field_axes) == 0:
                     # This data is not associated with an axis.  If it does not
                     # yet exist in the observation metadata, then add it.
-                    if key not in mcur:
+                    if _valid_meta(axman[key]):
                         mext[key] = axman[key]
                 elif field_axes[0] == self.axis_detector:
                     if len(field_axes) == 1:
@@ -1128,7 +1570,8 @@ class LoadContext(Operator):
                         # This must be some per-detector derived data- add to the
                         # observation dictionary
                         if data_key not in mcur:
-                            mext[key] = axman[key]
+                            if _valid_meta(axman[key]):
+                                mext[key] = axman[key]
                     elif field_axes[1] == self.axis_sample:
                         # This is detector data.  See if it is one of the standard
                         # fields we are parsing.
@@ -1138,15 +1581,19 @@ class LoadContext(Operator):
                         else:
                             # This is a RangesMatrix of flags
                             dt = np.dtype(np.uint8)
-                        if data_key == self.ax_det_signal:
+                        if data_key == ax_det_signal:
                             # Detector signal
-                            det_data[self.det_data] = (key, dt, None)
+                            det_data[self.det_data] = [(data_key, dt, None)]
                         elif data_key in det_flag_fields:
                             # One of the flag fields
-                            det_data[self.det_flags] = (
-                                key,
-                                dt,
-                                det_flag_fields[data_key],
+                            if self.det_flags not in det_data:
+                                det_data[self.det_flags] = list()
+                            det_data[self.det_flags].append(
+                                (
+                                    data_key,
+                                    dt,
+                                    det_flag_fields[data_key],
+                                )
                             )
                         else:
                             # Some other kind of detector data.  Ignore this for now,
@@ -1158,7 +1605,8 @@ class LoadContext(Operator):
                     else:
                         # Must be some other type of object...
                         if data_key not in mcur:
-                            mext[key] = axman[key]
+                            if _valid_meta(axman[key]):
+                                mext[key] = axman[key]
                 elif field_axes[0] == self.axis_sample:
                     # This is shared data
                     if isinstance(axman[key], so3g.proj.Ranges):
@@ -1196,7 +1644,8 @@ class LoadContext(Operator):
                 else:
                     # Some other object...
                     if data_key not in mcur:
-                        mext[key] = axman[key]
+                        if _valid_meta(axman[key]):
+                            mext[key] = axman[key]
 
         # Clean up any dictionaries that we created if they were empty
         if created_meta_extra and len(mext) == 0:

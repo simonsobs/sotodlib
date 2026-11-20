@@ -12,12 +12,13 @@ then back to 'U' type on load from HDF5.  See
 http://docs.h5py.org/en/stable/strings.html for a little more info.
 
 """
-
+from contextlib import nullcontext
 import numpy as np
 import h5py
 
-from sotodlib.core import AxisManager
+from sotodlib.core import AxisManager, LabelAxis
 from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+from sotodlib.core.util import H5ContextManager
 import warnings
 
 def write_dataset(data, filename, address, overwrite=False, mode='a'):
@@ -44,13 +45,13 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
         raise TypeError("I do not know how to write type %s" % data.__class__)
 
     if isinstance(filename, str):
-        context = h5py.File(filename, mode)
+        context = H5ContextManager(filename, mode=mode)
     else:
         # Wrap in a nullcontext so that the block below doesn't
         # close the File on exit.
         fout = filename
         filename = fout.filename
-        context = _nullcontext(fout)
+        context = nullcontext(fout)
 
     with context as fout:
         if address in fout:
@@ -112,17 +113,38 @@ class AxisManagerHdfLoader(LoaderInterface):
 
 
 class ResultSetHdfLoader(LoaderInterface):
-    def _prefilter_data(self, data_in, key_map={}):
-        """When a dataset is loaded and converted to a structured numpy
-        array, this function is called before the data are returned to
-        the user.  The key_map can be used to rename fields, on load.
+    def _check_key_map(self, key_map, data_in):
+        """Check that all keys in key_map are valid fields in data_in."""
+        for key in key_map.keys():
+            if key not in data_in.dtype.names:
+                raise KeyError(f"{key} not included inside dataset with keys"
+                               f"{data_in.dtype.names}")
+
+    def _prefilter_data(self, data_in, load_fields=None):
+        """When a dataset is loaded and converted to a structured numpy array,
+        this function is called before the data are returned to the user. If
+        'load_fields' has data for this instance, this function adds any fields
+        specified within to the key map and checks that these fields are all
+        valid fields in data_in.
 
         This function may be extended in subclasses, but you will
         likely want to call the super() handler before doing
-        additional processing.  The loading functions do not pass in
-        key_map -- this is for the exclusive use of subclasses.
-
+        additional processing.
         """
+        key_map = {}
+        if load_fields is not None:
+            for field in load_fields:
+                if isinstance(field, dict):
+                    key_map.update(field)
+                else:
+                    key_map[field] = field
+
+            for k in data_in.dtype.names:
+                if k not in key_map.keys():
+                    key_map[k] = None
+
+            self._check_key_map(key_map, data_in)
+
         return _decode_array(data_in, key_map=key_map)
 
     def _populate(self, data, keys=None, row_order=None):
@@ -192,7 +214,7 @@ class ResultSetHdfLoader(LoaderInterface):
                     dataset = load_params[idx]['dataset']
                     if dataset is not last_dataset:
                         data = fin[dataset][()]
-                        data = self._prefilter_data(data)
+                        data = self._prefilter_data(data, **kwargs)
                         last_dataset = dataset
 
                     # Dereference the extrinsic axis request.  Every
@@ -220,6 +242,25 @@ class ResultSetHdfLoader(LoaderInterface):
                                                   row_order=mask.nonzero()[0])
         return results
 
+class EnmapLoader(LoaderInterface):
+    """Load an enmap, wrapping it in an AxisManager for compatibility
+    with the loading system. The map itself will show up as the "map"
+    member. If the "fields" member of load_params is set, then it labels
+    the first axis of the resulting enmap. This is useful when multiple
+    logically different maps have been stacked, such as the moon and sun
+    sidelobe masks."""
+    def from_loadspec(self, load_params, **kwargs):
+        from pixell import enmap
+        map   = enmap.read_map(load_params["filename"])
+        aman  = AxisManager()
+        if "fields" in load_params:
+            # Optionally label the first axis. Useful when multiple logically
+            # different maps have been stacked, e.g. moon and sun sidelobe masks
+            fields = load_params["fields"].split(",")
+            aman.wrap("map", map, [(0, LabelAxis("fields", fields))])
+        else:
+            aman.wrap("map", map)
+        return aman
 
 def _decode_array(data_in, key_map={}):
     """Converts a structured numpy array to a structured numpy array,
@@ -263,21 +304,10 @@ def _decode_array(data_in, key_map={}):
     return output
 
 
-# Starting in Python 3.7, this can be had from contextlib.
-class _nullcontext:
-    def __init__(self, enter_result=None):
-        self.enter_result = enter_result
-
-    def __enter__(self):
-        return self.enter_result
-
-    def __exit__(self, *excinfo):
-        pass
-
-
 SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
 SuperLoader.register_metadata('AxisManagerHdf', AxisManagerHdfLoader)
 SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
+SuperLoader.register_metadata("Enmap", EnmapLoader)
 
 # The old name... remove some day.
 SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)

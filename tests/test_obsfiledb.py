@@ -136,6 +136,27 @@ class TestObsFileDB(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             db.lookup_file('notx/../x/' + target, resolve_paths=False)
 
+    def test_100_diff_patch(self):
+        db0 = self.get_simple_db()
+        db1 = self.get_simple_db()
+        pd = metadata.obsfiledb.diff_obsfiledbs(db0, db1)
+        assert not pd['different']
+
+        db0 = self.get_simple_db(n_obs=2, n_detsets=2, n_dets=4)
+        db1 = self.get_simple_db(n_obs=3, n_detsets=3, n_dets=5)
+
+        pd = metadata.obsfiledb.diff_obsfiledbs(db1, db0)
+        assert pd['different']
+        assert not pd['patchable']
+
+        pd = metadata.obsfiledb.diff_obsfiledbs(db0, db1)
+        assert pd['different']
+        assert pd['patchable']
+
+        metadata.obsfiledb.patch_obsfiledb(pd['patch_data'], db0)
+        pd = metadata.obsfiledb.diff_obsfiledbs(db0, db1)
+        assert not pd['different']
+
 
 if __name__ == '__main__':
     unittest.main()

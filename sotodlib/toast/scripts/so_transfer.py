@@ -52,26 +52,31 @@ pixell.fft.engine = "fftw"
 
 def reduce_input(job, otherargs, runargs, data):
     """Apply cuts and compute noise model on original data."""
+    job_ops = job.operators
+
     wrk.create_az_intervals(job, otherargs, runargs, data)
     wrk.apply_readout_filter(job, otherargs, runargs, data)
+    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
     wrk.select_pointing(job, otherargs, runargs, data)
 
-    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
-    wrk.simple_deglitch(job, otherargs, runargs, data)
+    # Preprocess data to get flags / cuts
+    wrk.preprocess(job, otherargs, runargs, data)
 
-    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
-    wrk.flag_noise_outliers(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
-
-    wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
     wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
 
-    data = wrk.demodulate(job, otherargs, runargs, data)
+    if job_ops.demodulate.enabled:
+        save_weights = job_ops.weights_radec
+        data = wrk.demodulate(job, otherargs, runargs, data)
+        job_ops.weights_radec = save_weights
+
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
+    wrk.noise_estimation(job, otherargs, runargs, data)
 
     wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
@@ -110,36 +115,28 @@ def reduce_realization(job, otherargs, runargs, data):
     """Apply data reduction to a single realization."""
     log = toast.utils.Logger.get()
     job_ops = job.operators
+    save_weights = job_ops.weights_radec
 
     cleanup = False
     if otherargs.simulate_demodulated:
-        # We are simulating already-demodulated data.  Most processing
-        # is done prior to demodulation and downsampling, and when running
-        # in this case it is assumed to have neglible transfer function
-        # contribution to the post-demodulated data.
+        # We are simulating already-demodulated data.
         if not job_ops.demodulate.enabled:
             msg = "Cannot start realizations with demodulated data, "
             msg += "since demodulation is disabled."
             raise RuntimeError(msg)
-        #
-        # Note:  Additional agressive high-pass here?
-        #
         processed_data = data
     else:
-        wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
         wrk.filter_hwpss(job, otherargs, runargs, data)
-        wrk.filter_common_mode(job, otherargs, runargs, data)
-        wrk.filter_ground(job, otherargs, runargs, data)
-        wrk.filter_poly1d(job, otherargs, runargs, data)
-        wrk.filter_poly2d(job, otherargs, runargs, data)
         if job_ops.demodulate.enabled:
             cleanup = True
             processed_data = wrk.demodulate(job, otherargs, runargs, data)
         else:
             processed_data = data
-        #
-        # Note:  Additional agressive high-pass here?
-        #
+
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
 
     if job.operators.splits.enabled:
         wrk.splits(job, otherargs, runargs, processed_data)
@@ -151,6 +148,8 @@ def reduce_realization(job, otherargs, runargs, data):
     if cleanup:
         processed_data.close()
     del processed_data
+
+    job_ops.weights_radec = save_weights
 
 
 def signal_realizations(job, otherargs, runargs, data):
@@ -176,6 +175,16 @@ def signal_realizations(job, otherargs, runargs, data):
             comm=data.comm.comm_world,
         )
         map_binner.full_pointing = True
+
+    if (
+        (job_ops.demodulate.enabled and job_ops.demodulate.purge)
+        and not otherargs.simulate_demodulated
+    ):
+        log.warning_rank(
+            "Demodulation configured to purge original data.  Overriding.",
+            comm=data.comm.comm_world,
+        )
+        job_ops.demodulate.purge = False
 
     # Get the file for each realization
     realizations = dict()
@@ -255,7 +264,7 @@ def main():
     env = toast.utils.Environment.get()
     log = toast.utils.Logger.get()
     gt = toast.timing.GlobalTimers.get()
-    gt.start("toast_so_sat (total)")
+    gt.start("toast_so_transfer (total)")
     timer = toast.timing.Timer()
     timer.start()
 
@@ -308,6 +317,19 @@ def main():
         default=None,
         help="YAML file containing signal realizations to process",
     )
+    parser.add_argument(
+        "--preprocess_copy",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Perform preprocessing on a copy of the data.",
+    )
+    parser.add_argument(
+        "--log_config",
+        required=False,
+        default=None,
+        help="Dump out config log to this yaml file",
+    )
 
     # FIXME:  Add an extra option here to specify a file of additional
     # per observation weight factors.
@@ -325,17 +347,12 @@ def main():
     wrk.setup_az_intervals(operators)
     wrk.setup_diff_noise_estimation(operators)
     wrk.setup_readout_filter(operators)
+    wrk.setup_deconvolve_detector_timeconstant(operators)
     wrk.setup_pointing(operators)
 
     # Processing that might be used.
-    wrk.setup_simple_jumpcorrect(operators)
-    wrk.setup_simple_deglitch(operators)
+    wrk.setup_preprocess(parser, operators)
 
-    wrk.setup_flag_diff_noise_outliers(operators)
-    wrk.setup_flag_noise_outliers(operators)
-    wrk.setup_deconvolve_detector_timeconstant(operators)
-
-    wrk.setup_filter_hwpss(operators)
     wrk.setup_filter_common_mode(operators)
     wrk.setup_filter_ground(operators)
     wrk.setup_filter_poly1d(operators)
@@ -362,8 +379,8 @@ def main():
             os.makedirs(otherargs.out_dir, exist_ok=True)
 
     # Log the config that was actually used at runtime.
-    outlog = os.path.join(otherargs.out_dir, "config_log.yaml")
-    toast.config.dump_yaml(outlog, config, comm=comm)
+    if otherargs.log_config is not None:
+        toast.config.dump_yaml(otherargs.log_config, config, comm=comm)
 
     # If this is a dry run, exit
     if otherargs.dry_run:

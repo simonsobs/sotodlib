@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 Simons Observatory.
+# Copyright (c) 2020-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Tools for saving Level-3 Book format data.
 
@@ -252,16 +252,13 @@ def export_obs_ancil(
 
     output = list()
     for ifrm, frmint in enumerate(obs.intervals[frame_intervals]):
-        slc = slice(frmint.first, frmint.last + 1, 1)
+        slc = slice(frmint.first, frmint.last, 1)
         # Construct the Scan frame
         frame = c3g.G3Frame(c3g.G3FrameType.Scan)
         frame["book_id"] = c3g.G3String(book_id)
         frame["sample_range"] = c3g.G3VectorInt(
             np.array(
-                [
-                    frmint.first,
-                    frmint.last + 1,
-                ],
+                [frmint.first, frmint.last],
                 dtype=np.int64,
             )
         )
@@ -372,7 +369,7 @@ def export_obs_data(
     output = list()
 
     for ifrm, frmint in enumerate(wafer_obs[0].intervals[frame_intervals]):
-        slc = slice(frmint.first, frmint.last + 1, 1)
+        slc = slice(frmint.first, frmint.last, 1)
 
         # Get the timestamps from the first observation
         g3times = t3g.to_g3_time(wafer_obs[0].shared[times].data[slc])
@@ -393,7 +390,7 @@ def export_obs_data(
         dts.quanta = np.ones(len(det_names))
         dts.options(enable=0)
         dts_temp = np.zeros(
-            (len(det_names), frmint.last - frmint.first + 1),
+            (len(det_names), frmint.last - frmint.first),
             dtype=wafer_obs[0].detdata[det_data].dtype,
         )
 
@@ -402,7 +399,7 @@ def export_obs_data(
         fts.times = g3times
         fts.options(enable=0)
         fts_temp = np.zeros(
-            (len(det_names), frmint.last - frmint.first + 1), dtype=np.int32
+            (len(det_names), frmint.last - frmint.first), dtype=np.int32
         )
 
         # Timestream units
@@ -411,8 +408,13 @@ def export_obs_data(
 
         # Fill the data
         for iob, ob in enumerate(wafer_obs):
-            dts_temp[wafer_indices[iob], :] = ob.detdata[det_data][:, slc] * uscale
-            fts_temp[wafer_indices[iob], :] = ob.detdata[det_flags][:, slc]
+            for idet, det in enumerate(ob.all_detectors):
+                dts_temp[wafer_indices[iob][idet], :] = ob.detdata[det_data][
+                    idet, slc
+                ] * uscale
+                fts_temp[wafer_indices[iob][idet], :] = ob.detdata[det_flags][
+                    idet, slc
+                ]
 
         dts.data = dts_temp
         # dts.options(enable=1)

@@ -7,6 +7,7 @@ import shutil
 import logging
 from pathlib import Path
 from glob import glob
+import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -16,7 +17,6 @@ from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
 
-import sotodlib
 from .bookbinder import BookBinder, TimeCodeBinder
 from .load_smurf import (
     G3tSmurf,
@@ -30,7 +30,7 @@ from .load_smurf import (
 from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
-from ..site_pipeline.util import init_logger
+from ..site_pipeline.utils.logging import init_logger
 
 
 ####################
@@ -52,6 +52,10 @@ VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 # file patterns excluded from smurf books
 SMURF_EXCLUDE_PATTERNS = ["*.dat", "*_mask.txt", "*_freq.txt"]
 
+# file size limits
+MAX_OBS_LVL2_SIZE = 10 # Gb per level 2 file
+MAX_OPER_LVL2_SIZE = 5 # Gb per level 2 file
+
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
     pass
@@ -72,6 +76,19 @@ class OverlapObsError(Exception):
     """Exception raised when we find observations that could be registered to
     multiple books"""
     pass
+
+class FileTooLargeError(Exception):
+    """Exception raised when we find level 2 files that are larger than our
+    maximum allowable sizes"""
+    pass
+
+MIN_OBS_BOOK_DURATION = 60
+class ObsBookTooShort(Exception):
+    """Exception raised when asked to bind an observation book less than
+    MIN_OBS_BOOK_DURATION long. We throw an exception instead of not registering them so
+    that we can set them as won't bind, and then get the files passed into stray."""
+    pass
+
 
 ###################
 # database schema #
@@ -147,14 +164,30 @@ class Books(Base):
 
 # convenient decorator to repeat a method over all data sources
 def loop_over_tubes(method):
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self, *args, **kwargs) -> tuple[list | None, list[tuple[str, Exception]] | None]:
         outs = []
+        errors = []
         for tube in self.tubes:
-            x = method(self, tube, *args, **kwargs)
+            try:
+                x = method(self, tube, *args, **kwargs)
+            except ValueError as e:
+                # We want to try the other tubes even if we do error out on one.
+                # Return errors as values here and taise them at the end of the script.
+                # It's the callers responsibility to handle those errors.
+                self.logger.error(f"Error in {method.__name__} for tube {tube}: {e}, skipping tube")
+                errors.append((tube, e))
+                continue
             if x is not None:
                 outs.extend(x)
-        if len(outs)>0:
-            return outs        
+
+        if not outs:
+            outs = None
+        
+        if not errors:
+            errors = None
+
+        return outs, errors
+        
     return wrapper
 
 
@@ -243,6 +276,7 @@ class Imprinter:
         self.daq_node = self.config.get("daq_node")        
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
+        self.require_hwp = self.config.get("require_hwp", True)
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         self.lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
@@ -266,15 +300,23 @@ class Imprinter:
                     self.logger.warning(f"Tube {tube} missing wafer_slots "
                     "entry. Are you using an old configuration format?")
                     continue
-                
-            for slot in self.tube_configs[tube]['wafer_slots']:
+
+            for slot_int, slot in enumerate(self.tube_configs[tube]['wafer_slots']):
+                assert 'wafer_slot' in slot, f"wafer_slot entry missing in {slot}"
+                assert slot['wafer_slot'] == f"ws{slot_int}", f"wafer_slot {slot} out of order"
                 if slot['stream_id'].lower() == 'none':
                     self.tubes[tube]['slots'].append(
                         f"NONE_{slot['wafer_slot']}"
                     )
                 else:
                     self.tubes[tube]['slots'].append(slot['stream_id'])
-                                        
+            
+            # check for duplicate stream_ids
+            if len(self.tubes[tube]['slots']) != len(set(self.tubes[tube]['slots'])):
+                for slot in self.tube_configs[tube]['wafer_slots']:
+                    if self.tubes[tube]['slots'].count(slot['stream_id']) > 1:
+                        assert 'wafer' in slot, f"Duplicate stream-id {slot['stream_id']} requires wafer information"
+                                    
         # raise error if database does not exist
         if not op.exists(self.db_path):
             if not make_db:
@@ -658,16 +700,44 @@ class Imprinter:
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, 
+        max_ctime=None,
     ):
         """get the appropriate bookbinder for the book based on its type"""
 
         if book.type in ["obs", "oper"]:
             book_path = self.get_book_abs_path(book)
 
+            if book.type == "obs":
+                book_dur = (book.stop-book.start).total_seconds()
+                if book_dur < MIN_OBS_BOOK_DURATION:
+                    raise ObsBookTooShort(
+                        f"{book.bid} only {book_dur} seconds long. Too short for "
+                        f"an observation book"
+                    )
+
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
             # a dictionary of {stream_id: [file_paths]}
             filedb = self.get_files_for_book(book)
+
+            # check if any of the files are too large. This is before
+            # readout id checking because that one usually also raises
+            # but for these we want to delete level 2 files
+            if book.type == "obs":
+                file_limit = MAX_OBS_LVL2_SIZE
+            else:
+                file_limit = MAX_OPER_LVL2_SIZE
+            for _, flist in filedb.items():
+                sz = np.array([os.path.getsize(f)/1e9 for f in flist])
+                if np.any(sz > file_limit):
+                    msg = "Files in book are too large:\n"
+                    msg += "\n".join( [
+                        f"{f},{round(s,2)} GB" for f,s in zip(flist, sz)
+                    ])
+                    raise FileTooLargeError(msg)
+
             obsdb = self.get_g3tsmurf_obs_for_book(book)
             readout_ids = self.get_readout_ids_for_book(book)
             hk_fields = self.config.get('hk_fields')
@@ -683,6 +753,8 @@ class Imprinter:
                 allow_bad_timing=allow_bad_timing,
                 require_hwp=require_hwp,
                 require_acu=require_acu,
+                require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime,
             )
             return bookbinder
 
@@ -730,18 +802,104 @@ class Imprinter:
                 f"binder for book type {book.type} not implemented"
             )
 
-    def bind_book(
+    def _run_book_binding(
         self,
         book,
         session=None,
         message="",
-        test_mode=False,
         pbar=False,
         ignore_tags=False,
         ancil_drop_duplicates=False,
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, max_ctime=None,
+        check_configs={}
+    ):
+        """Function that calls book-binding but does not update the database 
+        this is implemented so be able to run things in parallel
+        """
+        if session is None:
+            session = self.get_session()
+        # get book id and book object, depending on whether book id is given or not
+        if isinstance(book, Books):
+            bid = book.bid
+        elif isinstance(book, str):
+            bid = book
+            book = self.get_book(bid, session=session)
+        else:
+            raise NotImplementedError
+        # check whether book exists in the database
+        if not self.book_exists(bid, session=session):
+            raise BookExistsError(f"Book {bid} does not exist in the database")
+        # check whether book is already bound
+        if (book.status == BOUND) :
+            raise BookBoundError(f"Book {bid} is already bound")
+        assert book.type in VALID_OBSTYPES
+
+        err = None
+        binder = None
+        try:
+            # find appropriate binder for the book type
+            binder = self._get_binder_for_book(
+                book, 
+                ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
+                require_acu=require_acu,
+                require_hwp=require_hwp,
+                require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime
+            )
+            binder.bind(pbar=pbar)
+            
+            # write M_index file
+            if book.type in ['obs', 'oper']:
+                tc = self.tube_configs[book.tel_tube]
+            else:
+                tc = {}
+            binder.write_M_files(self.daq_node, tc)
+
+            if book.type in ['obs', 'oper']:
+                # check that detectors books were written out correctly
+                self.logger.info("Checking Book {}".format(book.bid))
+                check = BookScanner(
+                    self.get_book_abs_path(book), config=check_configs
+                )
+                check.go()
+
+            self.logger.info("Book {} bound".format(book.bid))
+            status = BOUND
+            
+        except Exception as e:
+            self.logger.error("Book {} failed".format(book.bid))
+            err_msg = traceback.format_exc()
+            self.logger.error(err_msg)
+            message = f"{message}\ntrace={err_msg}" if message else err_msg
+            status = FAILED
+            err = e
+            
+        ## bookbinder creates a log file and holds the connection open. 
+        ## Doesn't matter during normal operations but make some fixing operations annoying
+        if binder is not None:
+            binder.close()
+
+        return book.bid, status, message, err
+
+    def bind_book(
+        self,
+        book,
+        session=None,
+        message="",
+        pbar=False,
+        ignore_tags=False,
+        ancil_drop_duplicates=False,
+        allow_bad_timing=False,
+        require_hwp=None,
+        require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, max_ctime=None,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -765,82 +923,48 @@ class Imprinter:
             expected to be turned on by hand.
         allow_bad_timing: if true, will bind books even if the timing is low 
             precision
+        require_hwp: bool, optional
+            if True, requires that we find HWP data before binding the book. 
+            hard-coded to False if self.daq_node is lat
+        require_acu: bool, optional
+            if True, requires that we have ACU data and that it has no dropouts 
+            longer than 10s
+        require_monotonic_times: bool, optional
+            if True, requires that all HK data is monotonically increasing, 
+            should never be set to False for obs books but less important for 
+            oper books if there were ACU aggregation issues
+        min_ctime: float, optional
+            if not None, cuts the book down to have this minimum ctime
+        max_ctime: float, optional
+            if not None, cuts the book down to have this maximum ctime
         check_configs: dict
             additional non-default configurations to send to check book
         """
         if session is None:
             session = self.get_session()
-        # get book id and book object, depending on whether book id is given or not
-        if isinstance(book, Books):
-            bid = book.bid
-        elif isinstance(book, str):
-            bid = book
-            book = self.get_book(bid, session=session)
-        else:
-            raise NotImplementedError
-        # check whether book exists in the database
-        if not self.book_exists(bid, session=session):
-            raise BookExistsError(f"Book {bid} does not exist in the database")
-        # check whether book is already bound
-        if (book.status == BOUND) and (not test_mode):
-            raise BookBoundError(f"Book {bid} is already bound")
-        assert book.type in VALID_OBSTYPES
+        if require_hwp is None:
+            require_hwp = self.require_hwp
+        bid, status, message, err = self._run_book_binding(
+            book,
+            session=session,
+            message=message,
+            pbar=pbar,
+            ignore_tags=ignore_tags,
+            ancil_drop_duplicates=ancil_drop_duplicates,
+            allow_bad_timing=allow_bad_timing,
+            require_hwp=require_hwp,
+            require_acu=require_acu,
+            require_monotonic_times=require_monotonic_times,
+            min_ctime=min_ctime, max_ctime=max_ctime,
+            check_configs=check_configs
+        )
+        book = session.query(Books).filter(Books.bid == bid).one()
+        book.status = status
+        book.message = message
+        session.commit()
+        if status == FAILED:
+            raise err
 
-        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
-        ## or if we ever plan to run the SATs without HWPs
-        if 'lat' in self.daq_node:
-            require_hwp = False
-
-        try:
-            # find appropriate binder for the book type
-            binder = self._get_binder_for_book(
-                book, 
-                ignore_tags=ignore_tags,
-                ancil_drop_duplicates=ancil_drop_duplicates,
-                allow_bad_timing=allow_bad_timing,
-                require_acu=require_acu,
-                require_hwp=require_hwp,
-            )
-            binder.bind(pbar=pbar)
-            
-            # write M_index file
-            if book.type in ['obs', 'oper']:
-                tc = self.tube_configs[book.tel_tube]
-            else:
-                tc = {}
-            binder.write_M_files(self.daq_node, tc)
-
-            if book.type in ['obs', 'oper']:
-                # check that detectors books were written out correctly
-                self.logger.info("Checking Book {}".format(book.bid))
-                check = BookScanner(
-                    self.get_book_abs_path(book), config=check_configs
-                )
-                check.go()
-
-            # not sure if this is the best place to update
-            book.status = BOUND
-            
-            self.logger.info("Book {} bound".format(book.bid))
-            book.message = message
-            if not test_mode:
-                session.commit()
-            else:
-                session.rollback()
-        except Exception as e:
-            session.rollback()
-            book.status = FAILED
-            self.logger.error("Book {} failed".format(book.bid))
-            err_msg = traceback.format_exc()
-            self.logger.error(err_msg)
-            message = f"{message}\ntrace={err_msg}" if message else err_msg
-            book.message = message
-
-            if not test_mode:
-                session.commit()
-            else:
-                session.rollback()
-            raise e
 
     def get_book(self, bid, session=None):
         """Get book from database.
@@ -1066,6 +1190,32 @@ class Imprinter:
         )
         return q
 
+    def _attempt_incomplete_fix(self, incomplete_obs):
+        """
+        For a list of (likely) incomplete level 2 observations, see if a new level2
+        observation has been streamed from the same slot and, if so, force the 
+        completion of the previous observation.
+        """
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        for obs in incomplete_obs:
+            if obs.stop is not None:
+                ## edge case wont fix
+                continue
+            next_obs = g3session.query(G3tObservations).filter(
+                G3tObservations.stream_id == obs.stream_id,
+                G3tObservations.timestamp > obs.timestamp,
+            ).order_by(G3tObservations.timestamp).first()
+            if next_obs is not None:
+                ## we've streamed again on this readout slot.
+                ## older obs should be closed
+                self.logger.warning(
+                    f"{obs} is incomplete but we have streamed {next_obs} "
+                    "from the same slot. Attempting to set stop time"
+                )
+                SMURF.update_observation_files(
+                    obs, g3session, force_stop=True
+                )    
+
     @loop_over_tubes
     def update_bookdb_from_g3tsmurf(
         self,
@@ -1077,7 +1227,8 @@ class Imprinter:
         stream_ids=None,
         force_single_stream=False,
         return_obsset=False,
-        incomplete_timeouts = (3,6),
+        delay_warning = 3,
+        delay_error = 6,
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1101,12 +1252,21 @@ class Imprinter:
         return_obsset: boolean
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
-        incomplete_timeouts: tuple
-            hours for raising a (warning, error) if incomplete observations are
-            found in the g3tsmurf database
+        delay_warning: float, optional
+            if max_ctime - SMURF.final_time > delay_warning: print warning about stale 
+            databases. Additionally, for any incomplete observations (obs), if max_ctime 
+            - obs.timestamp > delay_warning: look to see if a new stream has been started 
+            for obs.stream_id and force completion of the earlier obs.
+            delay_warning is specified in hours.
+        delay_error: float, optional
+            if max_ctime - SMURF.final_time > delay_error: raise an error about stale 
+            databases. Additionally, for any incomplete observations (obs), if max_ctime 
+            - obs.timestamp > delay_error: raise error about incomplete obseravtions.
+            delay_error is specified in hours.
         """
         if not self.build_det:
             return
+
         session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         # set sensible ctime range is none is given
         if min_ctime is None:
@@ -1120,7 +1280,7 @@ class Imprinter:
 
         # get wafers
         if stream_ids is None:
-            streams = self.tubes[tube].get("slots")
+            streams = list(set(self.tubes[tube].get("slots"))) ## use unique stream_ids
             if streams is None:
                 raise ValueError(
                     f"Imprinter missing slot / stream_id" " information for {source}"
@@ -1134,24 +1294,50 @@ class Imprinter:
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
         )
+        ## this will catch suprsync drops and hk/g3tsmurf databases not being updated
         if final_time < max_ctime:
+            if max_ctime - final_time > 3600*delay_error:
+                raise ValueError(
+                   f"G3tSMURF + HK databases are stale. Last updates were "
+                    f"more than {delay_error} hours in the past."
+                )
+            if max_ctime - final_time > 3600*delay_warning:
+                self.logger.warning(
+                    f"G3tSMURF + HK databases are stale. Last updates were "
+                    f"more than {delay_warning} hours in the past."
+                )
             max_ctime = final_time
+
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
         q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
 
-        # if we have incomplete observations in our stream_id list we cannot
+        ## if incomplete observations are more than 3 hours in the past, try and
+        ## set these to complete by seeing if we've streamed from that slot again
+        if q_incomplete.count() > 0:
+            incomplete_obs = q_incomplete.all()
+            new_ctime = min([obs.timestamp for obs in incomplete_obs])
+            if max_ctime - new_ctime > 3600*delay_warning:
+                self.logger.warning(
+                    f"Found {q_incomplete.count()} incomplete observations "
+                    f"more than {delay_warning} hours in the past."
+                    " Will attempt to complete these observations"
+                )
+                self._attempt_incomplete_fix(incomplete_obs)
+                q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
+            
+        # if we still have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            if max_ctime - new_ctime > 3600*incomplete_timeouts[1]:
+            if max_ctime - new_ctime > 3600*delay_error:
                 raise ValueError(
                     f"Found {q_incomplete.count()} incomplete observations. "
                     f"New max ctime would be {new_ctime}. More than "
-                    f"{incomplete_timeouts[1]} hours in the past."
+                    f"{delay_error} hours in the past."
                 )
-            elif max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
+            elif max_ctime - new_ctime > 3600*delay_warning:
                 level = self.logger.warning
             else:
                 level = self.logger.debug
@@ -1463,8 +1649,8 @@ class Imprinter:
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
-                self.logger.warning(
-                    f"Found {sum(checks)} channels without readout_id. Were fixed tones running?"
+                self.logger.info(
+                    f"Found {sum(checks)} channels without readout_id. Assume fixed tones are running."
                 )
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
@@ -1479,7 +1665,7 @@ class Imprinter:
         -----------
         book : Books
             book object
-        book_path : path
+        book_path : str
             Output path of book
 
         Returns
@@ -1604,10 +1790,17 @@ class Imprinter:
                 return False, e
         return True, None
             
-    def check_book_in_librarian(self, book, n_copies=1, raise_on_error=True):
+    def check_book_in_librarian(
+        self, 
+        book, 
+        n_copies=1, 
+        n_tries=1,
+        raise_on_error=True
+    ):
         """have the librarian validate the books is stored offsite. returns true
         if at least n_copies are storied offsite.
         """
+        self.logger.info(f"Checking {book.bid} in librarian")
         if self.librarian is None:
             self._librarian_connect()
         try:
@@ -1617,6 +1810,21 @@ class Imprinter:
             ) >= n_copies
             if not in_lib:
                 self.logger.info(f"received response from librarian {resp}")
+                if n_tries > 1:
+                    if book.type == 'smurf':
+                        wait=30
+                    else: 
+                        wait=5
+                    self.logger.warning(
+                        f"Waiting {wait} seconds and trying book {book.bid} "
+                        "with the librarian again"
+                    )
+                    time.sleep(wait)
+                    return self.check_book_in_librarian(
+                        book, n_copies=n_copies, 
+                        n_tries=n_tries-1, 
+                        raise_on_error=raise_on_error
+                    )
         except Exception as e:
             if raise_on_error:
                 raise e
@@ -1629,7 +1837,7 @@ class Imprinter:
         return in_lib
         
     def delete_level2_files(self, book, verify_with_librarian=True,        
-        n_copies_in_lib=2, dry_run=True):
+        n_copies_in_lib=2, n_tries=1, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1650,7 +1858,8 @@ class Imprinter:
             return 1
         if verify_with_librarian:
             in_lib = self.check_book_in_librarian(
-                book, n_copies=n_copies_in_lib, raise_on_error=False
+                book, n_copies=n_copies_in_lib, n_tries=n_tries,
+                raise_on_error=False
             )
             if not in_lib:
                 self.logger.warning(
@@ -1759,6 +1968,7 @@ class Imprinter:
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
+            return 4
         book.status = DONE
         self.session.commit()
         return 0
@@ -1796,7 +2006,6 @@ class Imprinter:
 #####################
 # Utility functions #
 #####################
-
 
 _primary_idx_map = {}
 

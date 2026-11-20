@@ -14,9 +14,9 @@ from detmap.makemap import MapMaker
 from sotodlib import core
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
 from sotodlib.io.metadata import write_dataset, read_dataset
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 
-logger = util.init_logger(__name__)
+logger = init_logger(__name__)
 
 def parse_args():
     parser = ArgumentParser()

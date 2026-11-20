@@ -111,18 +111,17 @@ class DataPackaging:
             return []
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
+        htc = os.path.join(self.HK.hkarchive_path, str(timecode))
         flist = []
 
-        if not os.path.exists(stc) and not os.path.exists(ttc):
-            return flist
-        if os.path.exists(ttc) and 'suprsync' in os.listdir(ttc):
-            for root, _, files in os.walk(os.path.join(ttc, 'suprsync')):
-                for name in files:
-                    flist.append(os.path.join(ttc, root, name))
-        if os.path.exists(stc) and 'suprsync' in os.listdir(stc):
-            for root, _, files in os.walk(os.path.join(stc, 'suprsync')):
-                for name in files:
-                    flist.append(os.path.join(stc, root, name))
+        for tc_root in [stc, ttc, htc]:
+            if os.path.exists(tc_root) and 'suprsync' in os.listdir(tc_root):
+                for root, _, files in os.walk(
+                    os.path.join(tc_root, 'suprsync')
+                ):
+                    for name in files:
+                        flist.append(os.path.join(tc_root, root, name))
+
         return flist
 
     def check_hk_registered(self, timecode, complete):
@@ -283,7 +282,7 @@ class DataPackaging:
                     if len(status.tags)==0:
                         no_tags += 1
                     else:
-                        msg += f"\Trying to add {fpath} to database"
+                        msg += f"\nTrying to add {fpath} to database"
                         self.SMURF.add_file( 
                             fpath, self.g3session, overwrite=True
                         )
@@ -309,8 +308,8 @@ class DataPackaging:
         )
         if incomplete.count() > 0:
             ic_list = incomplete.all()
-            """Check if these are actually incomplete, imprinter incomplete checker
-            includes making sure the stop isn't beyond max ctime. 
+            """Check if these are actually incomplete, imprinter incomplete 
+            checker includes making sure the stop isn't beyond max ctime. 
             """
             obs_list = []
             for obs in ic_list:
@@ -497,10 +496,13 @@ class DataPackaging:
         if books != 0:
             complete[0] = False
             complete[1] += f"Have {books} unbound or failed books in timecode \n"
+        if complete[0]:
+            complete[1] += f"Timecode {timecode} is complete"
         return complete
 
     def books_in_timecode(
-        self, timecode, include_wont_fix=False, include_hk=True
+        self, timecode, include_wont_fix=False, include_hk=True,
+        include_level2_deleted=True,
     ):
         min_ctime = timecode*1e5
         max_ctime = (timecode+1)*1e5
@@ -513,6 +515,8 @@ class DataPackaging:
             q = q.filter(Books.status != WONT_BIND)
         if not include_hk:
             q = q.filter(Books.type != 'hk')
+        if not include_level2_deleted:
+            q = q.filter(not_(Books.lvl2_deleted))
         return q.all()
 
     def file_list_from_database(
@@ -560,13 +564,23 @@ class DataPackaging:
                 for k in flist:
                     x.extend(flist[k])
                 flist=x
-            file_list.extend(flist)
+            ## annoying edge case catcher because we use datetimes in
+            ## book.start and book.stop
+            for f in flist:
+                if f"/{timecode}/" not in f:
+                    self.logger.info(
+                        f"Not adding {f} to file list because it is not in "
+                        f"the {timecode} folder"
+                    )
+                    continue
+                file_list.append(f)
         # add suprsync files 
         file_list.extend( self.get_suprsync_files(timecode) )
         return file_list, deletable
 
     def verify_timecode_deletable(
         self, timecode, verify_with_librarian=True, include_hk=True,
+        raise_extra_db_files=False,
     ):
         """
         Checkes that all books in that timecode are uploaded to the librarian 
@@ -575,11 +589,15 @@ class DataPackaging:
         Steps for checking:
 
         1. Walk the file system and build up a list of all files there
-        2. Go book by book within timecode and build up the list of level 2 
-        files that went into it using the databases. Add any files in suprsync 
-        folders into this list since they aren't book bound but we'd like them 
-        to be deleted 
+        2. Go book by book within timecode and build up the list of level 2
+           files that went into it using the databases. Add any files in
+           suprsync folders into this list since they aren't book bound but
+           we'd like them to be deleted
         3. Compare the two lists and make sure they're the same.
+
+        If raise_extra_db_files is False, don't raise an error if we find files in
+        the database but not on disk. In the last 1 year, this has only happened 
+        when a previous cleanup script failed for a locked database
         """
         deletable = [True, ""]
 
@@ -610,7 +628,8 @@ class DataPackaging:
         if len(missed_files) == 0 and len(extra_files) == 0:
             self.logger.info(f"Timecode {timecode} has complete coverage")
         if len(missed_files)>0:
-            msg = f"Files on disk but not in database {len(missed_files)}:\n"
+            msg = f"Files on disk but not marked as uploaded in database"
+            msg += f" {len(missed_files)}:\n"
             for f in missed_files:
                 msg += f"\t{f}\n"
             self.logger.warning(msg)
@@ -620,22 +639,47 @@ class DataPackaging:
             msg = f"Files in database but not on disk: {extra_files}"
             for f in missed_files:
                 msg += f"\t{f}\n"
-            self.logger.error(msg)
-            deletable[0] = False
-            deletable[1] += msg
+            if raise_extra_db_files:
+                self.logger.error(msg)
+                deletable[0] = False
+                deletable[1] += msg
+            else:
+                self.logger.warning(msg)
+                deletable[0] = True
+                deletable[1] += msg
+        if deletable[0]:
+            deletable[1] += f"Timecode {timecode} is deletable"
         return deletable
 
     def delete_timecode_level2(
         self, timecode, dry_run=True, include_hk=True, 
         verify_with_librarian=True,
     ):
-        book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        book_list = self.books_in_timecode(
+            timecode, include_hk=include_hk, 
+            include_level2_deleted=False,
+        )
+        good_to_delete = []
         books_not_deleted = []
 
         for book in book_list:
+            if verify_with_librarian:
+                in_lib = self.imprint.check_book_in_librarian(
+                    book, n_copies=2, n_tries=2,
+                    raise_on_error=False
+                )
+                if in_lib:
+                    good_to_delete.append(book)
+                else:
+                    books_not_deleted.append(book)   
+            else:
+                good_to_delete.append(book)    
+        
+        for book in good_to_delete:
+            # verify false here because, if true, we just checked it
             stat = self.imprint.delete_level2_files(
-                book, verify_with_librarian=verify_with_librarian,
-                n_copies_in_lib=2, dry_run=dry_run
+                book, verify_with_librarian=False,
+                dry_run=dry_run,
             )
             if stat > 0:
                 books_not_deleted.append(book)    
@@ -645,8 +689,8 @@ class DataPackaging:
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
-            return False, ""
-        return True, ""
+            return False, msg
+        return True, f"Level 2 deleted for Timecode {timecode}"
 
     
     def delete_timecode_staged(
@@ -676,8 +720,8 @@ class DataPackaging:
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
-            return False, "msg"
-        return True, ""
+            return False, msg
+        return True, f"Staged deleted for Timecode {timecode}"
     
     def check_and_delete_timecode(
         self, timecode, include_hk=True, verify_with_librarian=True
@@ -700,16 +744,17 @@ class DataPackaging:
             timecode, dry_run=False, include_hk=include_hk,
             verify_with_librarian=verify_with_librarian,
         )
+        return check
 
+    def cleanup_level2_folders(self, timecode):
         if not self.imprint.build_det:
-            return check
+            return 
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
-
-        if os.path.exists(stc): 
-            if len(os.listdir(stc)) == 0 or just_suprsync(stc):
-                shutil.rmtree(stc)
-        if os.path.exists(ttc):
-            if len(os.listdir(ttc)) == 0 or just_suprsync(ttc):
-                shutil.rmtree(ttc)
-        return check
+        htc = os.path.join(self.HK.hkarchive_path, str(timecode))
+        
+        for tc_root in [stc, ttc, htc]:
+            if os.path.exists(tc_root): 
+                if len(os.listdir(tc_root)) == 0 or just_suprsync(tc_root):
+                    shutil.rmtree(tc_root)
+        return 

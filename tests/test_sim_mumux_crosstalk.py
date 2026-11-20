@@ -1,10 +1,9 @@
 # Copyright (c) 2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-"""Check functionality of the muMUX crosstalk simulation
+"""Check functionality of the muMUX crosstalk simulation"""
 
-"""
-
+import os
 import unittest
 
 import astropy.units as u
@@ -18,14 +17,13 @@ try:
 
     import sotodlib.toast as sotoast
     import sotodlib.toast.ops as so_ops
+    from sotodlib.toast.ops import detmap_available, pos_to_chi, jbolo_available
+
     toast_available = True
 except ImportError as e:
     toast_available = False
 
-from ._helpers import (calibration_schedule, close_data_and_comm,
-                      simulation_test_data)
-
-from sotodlib.toast.ops import detmap_available, pos_to_chi
+from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
 
 
 class SimMuMUXCrosstalkTest(unittest.TestCase):
@@ -34,9 +32,16 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
-        if not detmap_available:
+        if not detmap_available or not jbolo_available:
             print(
-                "DetMap cannot be imported- skipping muMUX unit tests",
+                "DetMap / jbolo cannot be imported- skipping muMUX unit tests",
+                flush=True,
+            )
+            return
+
+        if "JBOLO_PATH" not in os.environ or "JBOLO_MODELS_PATH" not in os.environ:
+            print(
+                "JBOLO environment variables not set- skipping muMUX unit tests",
                 flush=True,
             )
             return
@@ -78,42 +83,55 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
 
         # Make a copy of the data for reference
 
-        signal0 = data.obs[0].detdata["signal"].data.copy()
+        toast.ops.Copy(detdata=[("signal", "input")]).apply(data)
 
         # Simple test just confirms that the operator functions
 
         so_ops.SimMuMUXCrosstalk(
-            name="sim_mumux_crosstalk",
+            detector_pointing=pointing,
         ).apply(data)
 
         # Compare signal before and after to make sure the magnitude
         # of the effect is not crazy
 
-        signal1 = data.obs[0].detdata["signal"].data.copy()
-
-        rms0 = np.std(signal0)
-        rmsdiff = np.std(signal0 - signal1)
-
-        assert rms0 != 0
-        assert rmsdiff / rms0 < 1e-3
+        for ob in data.obs:
+            for det in ob.select_local_detectors(flagmask=defaults.det_mask_invalid):
+                # We have simulated data in the turnarounds above, and have not
+                # done anything else to flag samples.  So we ignore sample flags
+                # in this test.
+                sig_in = ob.detdata["input"][det]
+                sig_out = ob.detdata["signal"][det]
+                rms_in = np.std(sig_in)
+                rmsdiff = np.std(sig_out - sig_in)
+                if rms_in == 0:
+                    print(f"{ob.name}:{det} rms_in should not be zero!", flush=True)
+                    self.assertTrue(False)
+                if rmsdiff / rms_in > 1.0e-2:
+                    print(
+                        f"{ob.name}:{det} rmsdiff / rms_in = {rmsdiff / rms_in}",
+                        flush=True,
+                    )
+                    self.assertTrue(False)
 
         # Check that the crosstalk strength is as expected
 
-        obs = data.obs[0]
-        fp = obs.telescope.focalplane
-        dets = obs.detdata["signal"].keys()
-        chis = pos_to_chi(fp, dets)
-        ndet = len(dets)
-        nnz = len(chis)
-        med = np.median(np.log10(list(chis.values())))
-
-        print(f"ndet = {ndet}",flush=True)
-        print(f"nnz = {nnz} = {nnz / ndet} ndet",flush=True)
-        print(f"median(log10(chi)) = {med}",flush=True)
-        assert nnz > ndet and nnz < 2 * ndet
-        assert med > -3 and med < -2
+        for ob in data.obs:
+            dets = ob.select_local_detectors(flagmask=defaults.det_mask_invalid)
+            fp = ob.telescope.focalplane
+            chis = pos_to_chi(fp, dets)
+            ndet = len(dets)
+            nnz = len(chis)
+            med = np.median(np.log10(list(chis.values())))
+            if nnz <= ndet or nnz >= 2 * ndet:
+                print(f"{ob.name} ndet = {ndet}", flush=True)
+                print(f"{ob.name} nnz = {nnz} = {nnz / ndet} ndet", flush=True)
+                self.assertTrue(False)
+            if med < -3 or med > -2:
+                print(f"{ob.name} median(log10(chi)) = {med}", flush=True)
+                self.assertTrue(False)
 
         close_data_and_comm(data)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

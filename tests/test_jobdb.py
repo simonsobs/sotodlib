@@ -2,9 +2,12 @@ import unittest
 import os
 import tempfile
 
-
 from sotodlib.site_pipeline import jobdb
 
+from ._helpers import mpi_multi
+
+
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestBasic(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -33,7 +36,7 @@ class TestBasic(unittest.TestCase):
         with self.assertRaises(jobdb.JobLockedError):
             job = jdb.lock(j.id)
         jdb.unlock(job)
-        
+
         job = jdb.lock(j.id)
         jdb.unlock(job.id, merge=False)
 

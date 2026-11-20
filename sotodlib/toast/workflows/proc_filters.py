@@ -54,7 +54,9 @@ def setup_deconvolve_detector_timeconstant(operators):
     """
     operators.append(
         toast.ops.TimeConstant(
-            name="deconvolve_time_constant", deconvolve=True, enabled=False
+            name="deconvolve_time_constant",
+            deconvolve=True,
+            enabled=False,
         )
     )
 
@@ -115,6 +117,45 @@ def filter_hwpss(job, otherargs, runargs, data):
 
     if job_ops.hwpfilter.enabled:
         job_ops.hwpfilter.apply(data)
+
+
+def setup_filter_hwpss_model(operators):
+    """Add commandline args and operators for HWPSS modeling.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.HWPSynchronousModel(name="hwpss_model", enabled=False)
+    )
+
+
+@workflow_timer
+def filter_hwpss_model(job, otherargs, runargs, data):
+    """Model HWPSS and subtract.
+
+    This builds a model for the HWPSS, optionally subtracts it, and
+    optionally computes relative calibration factors from the 2f signal.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.hwpss_model.enabled:
+        job_ops.hwpss_model.apply(data)
 
 
 def setup_filter_ground(operators):
@@ -230,7 +271,11 @@ def setup_filter_common_mode(operators):
 
     """
     operators.append(
-        toast.ops.CommonModeFilter(name="common_mode_filter", enabled=False)
+        toast.ops.CommonModeFilter(
+            name="common_mode_filter",
+            regress=True,
+            enabled=False,
+        )
     )
 
 
@@ -253,3 +298,43 @@ def filter_common_mode(job, otherargs, runargs, data):
 
     if job_ops.common_mode_filter.enabled:
         job_ops.common_mode_filter.apply(data)
+
+
+def setup_median_detrend(operators):
+    """Add commandline args and operators for median detrend.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.Detrend(
+            name="median_detrend",
+            method='median',
+            enabled=False,
+        )
+    )
+
+
+@workflow_timer
+def median_detrend(job, otherargs, runargs, data):
+    """Remove median of data across the detectors.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.median_detrend.enabled:
+        job_ops.median_detrend.apply(data)

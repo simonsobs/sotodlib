@@ -9,9 +9,10 @@ import sotodlib
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
 from sotodlib.io import so_ufm
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
-logger = util.init_logger(__name__)
+logger = init_logger(__name__)
 
 
 def get_parser(parser=None):
@@ -114,4 +115,4 @@ def replace_none(val, replace_val=np.nan):
 
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

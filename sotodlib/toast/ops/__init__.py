@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024 Simons Observatory.
+# Copyright (c) 2020-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory processing modules.
 
@@ -7,20 +7,27 @@
 # Namespace imports
 
 from .act_sign import ActSign
+from .bias_cut import DetBiasCuts
 from .corotator import CoRotator
 from .sim_sso import SimSSO
 from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
 from .sim_source import SimSource
 from .h_n import Hn
+from .hwp_wobble import HWPWobbleCorrect
 from .mlmapmaker import MLMapmaker
 from .sim_wiregrid import SimWireGrid
 from .sim_stimulator import SimStimulator
 from .save_books import SaveBooks
 from .load_books import LoadBooks
 from .sim_readout import SimReadout
-from .sim_mumux_crosstalk import SimMuMUXCrosstalk
+from .sim_mumux_crosstalk import SimMuMUXCrosstalk, jbolo_available
 from .splits import Splits
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext
 from .readout_filter import ReadoutFilter
+from .dark_template import DarkTemplate
+from .trend_cut import DetTrendCuts
+from .intensity_templates import IntensityTemplates
+from .dark_templates import DarkTemplates
+from .housekeeping_templates import HouseKeepingTemplates

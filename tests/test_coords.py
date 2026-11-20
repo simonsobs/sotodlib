@@ -7,6 +7,7 @@
 
 import itertools
 import unittest
+import time
 import numpy as np
 
 from sotodlib import coords, core
@@ -17,6 +18,12 @@ from pixell import enmap
 DEG = np.pi/180
 CRVAL = [34.0*DEG, -20.9*DEG]
 TOL_RAD = .00001 * DEG
+
+if hasattr(so3g.proj.quat, "quat"):
+    g3quat = so3g.proj.quat.quat
+else:
+    g3quat = so3g.proj.quat.Quat
+
 
 def get_sightline():
     ra0, dec0, gamma0 = CRVAL[0], CRVAL[1], 0
@@ -79,7 +86,7 @@ class FootprintTest(unittest.TestCase):
             # Extracts.
             m1 = map0[:10,:10]
             m2 = map0[-10:,-10:]
-            
+
             # Reconstruct.
             sg = coords.get_supergeom((m1.shape, m1.wcs), (m2.shape, m2.wcs))
             mapx = enmap.zeros(*sg)
@@ -156,7 +163,7 @@ class CoordsUtilsTest(unittest.TestCase):
         qa = coords.ScalarLastQuat(test_array[0])
         self.assertIsInstance(qa, np.ndarray)
         q3 = qa.to_g3()
-        self.assertIsInstance(q3, so3g.proj.quat.quat)
+        self.assertIsInstance(q3, g3quat)
         self.assertEqual(q3.a, 1)
         qb = coords.ScalarLastQuat(q3)
         np.testing.assert_array_equal(qa, qb)
@@ -177,7 +184,7 @@ class CoordsUtilsTest(unittest.TestCase):
         y = np.linspace(-R, R, 45)
         xy = np.transpose(list(itertools.product(x, y)))
         s = xy[0]**2 + xy[1]**2 < R**2
-        
+
         xy = xy[:,s] + np.array([x0, y0])[:,None]
         (xi0, eta0), R0, (xi, eta) = \
             coords.helpers.get_focal_plane_cover(count=16, xieta=xy)
@@ -210,15 +217,48 @@ class CoordsUtilsTest(unittest.TestCase):
         xy[1,1:] = np.nan
         with self.assertRaises(ValueError):
             coords.helpers.get_focal_plane_cover(xieta=xy)
-            
+
+    def test_source_pos_ephem(self):
+        """
+        Test getting the position of a Solar System object.
+        """
+        t = 1.7e9
+        pos1 = coords.planets.get_source_pos('jupiter', t)
+        pos1 = coords.planets.get_source_azel('jupiter', t)
+
+    def test_source_pos_fixed(self):
+        """
+        Test getting the position of a fixed source.
+        """
+        t = time.time()
+
+        pos1 = coords.planets.get_source_pos("J1000+1000", t)
+        pos2 = coords.planets.get_source_pos("j1000p1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_pos("J1000-1000", t)
+        pos2 = coords.planets.get_source_pos("j1000m1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_azel("J1000+1000", t)
+        pos2 = coords.planets.get_source_azel("j1000p1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_azel("J1000-1000", t)
+        pos2 = coords.planets.get_source_azel("j1000m1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
 
 class OpticsTest(unittest.TestCase):
     def test_sat_fp(self):
-        x = np.array([-100, 0, 100]) 
+        x = np.array([-100, 0, 100])
         y = x.copy()
         pol = x.copy()
 
-        xi, eta, gamma = co.get_focal_plane(None, x, y, pol, 0, "SAT", "ws1", ufm_to_fp_pars={'theta': 60.0, 'dx': 0.0, 'dy': 128.5})
+        xi, eta, gamma = co.get_focal_plane(None, x, y, pol, 0, "SAT", "ws1", ufm_to_fp_pars={'theta': 60.0, 'dx': 0.0, 'dy': 128.5}, fp_to_rx_pars={'phi': 0.0, 'dx': 0.0, 'dy': 0})
         self.assertTrue(np.all(np.isclose(xi, np.array([-6.4406e-02,  0,  5.58489e-02]))))
         self.assertTrue(np.all(np.isclose(eta, np.array([0.01425728, -0.2207397, -0.404499]))))
         self.assertTrue(np.all(np.isclose(gamma, np.array([5.409, 3.6846, 1.8156]))))

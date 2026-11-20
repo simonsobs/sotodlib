@@ -1,7 +1,7 @@
 from .pmat import P
 from .helpers import (
     get_radec, get_horiz, get_footprint, get_wcs_kernel, get_supergeom,
-    Timer, DEG, ScalarLastQuat
+    Timer, DEG, ScalarLastQuat, normalize_geometry
 )
 from . import planets
 from . import local
@@ -9,3 +9,4 @@ from .plotting import *
 from . import demod
 from . import pointing_model
 from . import healpix_utils
+from . import sidelobes

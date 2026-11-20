@@ -172,7 +172,7 @@ class FlagManager(AxisManager):
             flags: List of flags to collapse together. Uses their names.
                    If flags is None then all flags are reduced
             method: How to collapse the data. Accepts 'union','intersect',
-                        or function.
+                    'except', or function.
             wrap: if True, add reduced flag to self
             new_flag: name of new flag, required if wrap is True
             remove_reduced: if True, remove all reduced flags from self
@@ -198,6 +198,8 @@ class FlagManager(AxisManager):
             op = lambda x, y: x+y
         elif method == 'intersect':
             op = lambda x, y: x*y
+        elif method == 'except':
+            op = lambda x, y: x*~y
         else:
             op = method
         out = reduce(op, to_reduce)
@@ -278,6 +280,87 @@ def has_all_cut(flag):
 def count_cuts(flag):
     return np.array([len(x.ranges()) for x in flag], dtype='int')
 
+def has_ratio_cuts(flag, ratio):
+    """Determine if the ratio of flag samples to total samples in each flag 
+    exceeds a given threshold.
+
+    Args:
+      flag (RangesMatrix): so3g.proj.RangesMatrix
+      ratio (float or int): The threshold ratio (0 =< ratio =< 1) above which a flag is 
+        considered to have too many cuts.
+    """
+
+    if not isinstance(ratio, (float, int)) or (ratio < 0 or ratio > 1):
+        raise ValueError('Ratio must be float or int and between 0 and 1')
+    len_samps = flag.shape[-1]
+    return np.array([np.sum(np.diff(x.ranges()))/len_samps > ratio for x in flag])
+
+def flag_cut_select(flags, kind, invert=False):
+    """Determine which detectors to select based on flag conditions.
+
+    Args:
+        flags (RangesMatrix): An instance of so3g.proj.RangesMatrix indicating flagged time ranges.
+        kind (str or int/float): One of the following:
+            - 'any': Select/cut detectors with any flagged samples.
+            - 'all': Select/cut detectors with all samples flagged.
+            - int/float: A threshold ratio (0.0–1.0); selects/cuts detectors whose flagged ratio exceeds the threshold.
+        intert (bool): default=False returns detectors to be excluded =True, detectors to be kept = False. If True, The logic is flipped.
+
+    Returns:
+        np.ndarray: Boolean array indicating which detectors to **keep** (True) or **drop** (False),
+                    depending on `cut` and `kind`.
+
+    Examples:
+        1. invert=False, kind='any' → Select detectors with **no** True flags (e.g., for Moon cut).
+        2. invert=True, kind='any' → Select detectors with **any** True flags (e.g., for planet selection).
+        3. invert=False, kind=0.4 → Select detectors with <40% of True flags.
+    """
+    if invert:
+        if kind == 'any':
+            return has_any_cuts(flags)
+        elif kind == 'all':
+            return has_all_cut(flags)
+        elif isinstance(kind, (int, float)):
+            return has_ratio_cuts(flags, ratio=kind)
+        else:
+            raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
+    else:
+        if kind == 'any':
+            return ~has_any_cuts(flags)
+        elif kind == 'all':
+            return ~has_all_cut(flags)
+        elif isinstance(kind, (int, float)):
+            return ~has_ratio_cuts(flags, ratio=kind)
+        else:
+            raise ValueError("kind must be 'any', 'all', or a float between 0.0 and 1.0")
+
+
+def flag_array_to_ranges_matrix(arr, ranges, reverse=False):
+    """Extend a 1D flag array into a 2D RangesMatrix by duplicating each entry
+    using a Ranges object for the columns axis. Useful for adding samps entries
+    to a 1D per-detector flag array.
+
+    Args:
+        arr (list or np.array): 1D flag array.
+        ranges (int or Ranges):  If int, create a Ranges object of length
+        ranges.  If ranges is a Ranges object, use it directly for duplicating
+        the flag array over.
+        reverse (bool): If True, return False(zero_like) if arr is True.
+    Returns:
+        RangesMatrix: The output RangesMatrix.
+    """
+    if isinstance(ranges, int):
+        ranges = Ranges(ranges)
+    if reverse:
+        return RangesMatrix(
+                    [Ranges.zeros_like(ranges) if Y else Ranges.ones_like(ranges) for Y in arr]
+                )
+    else:
+        return RangesMatrix(
+                    [Ranges.ones_like(ranges) if Y else Ranges.zeros_like(ranges) for Y in arr]
+                )
+
+
 def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):
     """Convert a csr sparse array into a ranges matrix
     
@@ -299,3 +382,23 @@ def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):
         x[i].close_gaps(close_gaps)
     return x
 
+def find_common_edge_idx(flags):
+    """Find the common valid range across multiple RangesMatrix objects.
+
+    Args:
+        flags (RangesMatrix): An instance of so3g.proj.RangesMatrix indicating flagged time ranges.
+    Returns:
+        min_idx, max_idx: minmum and maximum indices that has False flag across all detectros.
+    """
+    max_val = max(arr.complement().ranges()[:, 1].max() for arr in flags)
+    common_mask = np.ones(max_val, dtype=bool)
+    for arr in flags:
+        mask = np.zeros(max_val, dtype=bool)
+        for start, end in arr.complement().ranges():
+            mask[start:end] = True
+        common_mask &= mask
+
+    valid_indices = np.where(common_mask)[0]
+    if len(valid_indices) == 0:
+        raise ValueError("No common valid range found across all flags.")
+    return valid_indices[0], valid_indices[-1]

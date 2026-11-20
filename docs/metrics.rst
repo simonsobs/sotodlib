@@ -35,13 +35,16 @@ For a list of metrics provided in a config file, this script determines which
 observation ID's are available and have yet to be recorded in the Influx
 database, loads the metadata defined in the given context file one observation at
 a time, calculates each metric, and records it to Influx. The configuration file
-should contain three blocks:
+should contain these blocks:
 
     ``monitor``
         Specifies an InfluxDB monitor as defined in
         :meth:`sotodlib.site_pipeline.monitor.Monitor`
     ``context_file``
         The context file that includes all the relevant metadata.
+    ``jobdb``
+        The JobDB file (``db_file``) and a maximum number of attempts before marking
+        a job as failed (``max_retry``, defaults to 5).
     ``metrics``
         A list of metrics, with each entry including at least a ``name`` field
         giving the name of the class to instantiate, with all other parameters
@@ -58,6 +61,9 @@ For example, a config could look like::
         path: ""
         ssl: False
     context_file: "/path/to/context.yaml"
+    jobdb:
+        db_file: "/path/to/jobdb"
+        max_retry: 5
     metrics:
       - name: "PreprocessQA"
         process_name: "det_bias_flags"

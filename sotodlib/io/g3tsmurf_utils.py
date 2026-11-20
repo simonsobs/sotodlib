@@ -90,7 +90,7 @@ def get_last_bg_map(my_obs_id, SMURF):
     obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
     oper = _get_last_oper(obs.timestamp, obs.stream_id, "oper,bgmap%", session)
     if oper is None:
-        logger.error(f"Unable to find Bias Step associated with {my_obs_id}")
+        logger.error(f"Unable to find bg_map associated with {my_obs_id}")
 
     files = get_obs_outputs(oper.obs_id, SMURF)
     file = [f for f in files if "bg_map.npy" in f]

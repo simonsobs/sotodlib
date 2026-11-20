@@ -3,6 +3,7 @@ import tempfile
 import os
 
 import numpy as np
+import h5py
 import astropy.units as u
 from sotodlib import core
 import sotodlib.core.axisman_util as amutil
@@ -183,30 +184,52 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager.concatenate([amanAA, amanBB])
         self.assertEqual(aman.dets.count, len(detsA) + len(detsB))
 
-        # Handling of array that does not share the axis?
-        amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
-        amanB.wrap_new('azimuth', shape=('samps',))[:] = 1.
+        # Handling of arrays++ that do not share the axis?
+        for t in [amanA, amanB]:
+            # Vectors, with nan.
+            t.wrap_new('azimuth', shape=('samps',))[:] = 1.
+            t.azimuth[3] = float('nan')
+
+            # Scalars
+            t.wrap("ans", 42)
+            t.wrap("nans", float('nan'))
+
+            # Include strings, because array_equal is picky on that...
+            t.wrap('tersely', 'yo')
+            t.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
+            t.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
+
+            # And RangesMatrix
+            t.wrap('rmat', so3g.proj.RangesMatrix.ones((5, 4)))
+
+
+        amanB_backup, amanB = amanB, None
 
         # ... other_fields="exact"
-        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-
-        ## add scalars
-        amanA.wrap("ans", 42)
-        amanB.wrap("ans", 42)
+        amanB = amanB_backup.copy()
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
         # ... other_fields="exact"
+        amanB = amanB_backup.copy()
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
+        # RangesMatrix fail?
+        amanB = amanB_backup.copy()
+        amanB.rmat = so3g.proj.RangesMatrix.zeros(amanA.rmat.shape)
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+
         # ... other_fields="exact" and arrays of different shapes
+        amanB = amanB_backup.copy()
         amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
         # ... other_fields="fail"
+        amanB = amanB_backup.copy()
         amanB.move("azimuth",None)
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
         with self.assertRaises(ValueError):
@@ -218,6 +241,7 @@ class TestAxisManager(unittest.TestCase):
                                                other_fields='fail')
 
         # ... other_fields="drop"
+        amanB = amanB_backup.copy()
         amanB.azimuth[:] = 2.
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
                                             other_fields="drop")
@@ -326,6 +350,10 @@ class TestAxisManager(unittest.TestCase):
         np.testing.assert_array_equal(aman["child.child2.tod"], np.ones((2, 1500)))
         np.testing.assert_array_equal(aman.child.child2.tod, np.ones((2, 1500)))
 
+        aman.move('child.child2.tod', 'child.child2.tod_new')
+        aman.move('child.child2.tod_new', 'child.tod')
+        aman.move('child.child2', None)
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
@@ -368,6 +396,17 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('child', child)
         self.assertEqual(aman.shape, (3, n//2))
         self.assertEqual(aman._axes['samps'].offset, ofs)
+        # See that aman.child and child are different...
+        self.assertEqual(aman.child.dets.count, 3)
+        self.assertEqual(child.dets.count, 4)
+
+        # But you can tell it it's ok.
+        child2 = core.AxisManager(
+            core.LabelAxis('dets', dets + ['det3']),
+            core.OffsetAxis('samps', n, ofs - n//2))
+        aman.wrap('child2', child2, restrict_in_place=True)
+        self.assertEqual(aman.child2.dets.count, 3)
+        self.assertEqual(child2.dets.count, 3)
 
     def test_401_restrict(self):
         # Test AxisManager.restrict when it has AxisManager members.
@@ -426,17 +465,104 @@ class TestAxisManager(unittest.TestCase):
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
-        aman = core.AxisManager(
-            core.LabelAxis('dets', dets),
-            core.OffsetAxis('samps', n, ofs))
-        coparent = core.AxisManager(
+        for in_place in [False, True]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            coparent = core.AxisManager(
+                core.LabelAxis('dets', dets + ['det3']),
+                core.OffsetAxis('samps', n, ofs - n//2))\
+                .wrap('x', np.arange(n), [(0, 'samps')])
+            if in_place:
+                kw = {'restrict_in_place': True}
+            else:
+                kw = {}
+            aman.merge(coparent, **kw)
+            self.assertEqual(aman.shape, (3, n//2))
+            self.assertEqual(aman._axes['samps'].offset, ofs)
+            self.assertEqual(aman.x[0], n//2)
+
+            if in_place:
+                # Check coparent was modified
+                self.assertEqual(coparent.shape, aman.shape)
+            else:
+                # Check coparent was not modified in place
+                self.assertEqual(coparent.shape, (4, n))
+
+
+    def test_420_axis_mismatch_policy(self):
+        # wrap/merge intersect axes that share a name but not coverage;
+        # the on_mismatch policy controls whether log warning ('warn') or
+        # raise ValueError ('error').
+        logger = core.axisman.logger
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+
+        def make_tod():
+            tod = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            tod.wrap('sig', np.zeros((len(dets), n)),
+                     [(0, 'dets'), (1, 'samps')])
+            return tod
+
+        # on_mismatch='warn' warns shorter axis and then truncates.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n - 100),
+                     [(0, core.OffsetAxis('samps', n - 100, ofs))],
+                     on_mismatch='warn')
+        self.assertEqual(tod.samps.count, n - 100)
+        self.assertEqual(tod.sig.shape, (3, n - 100))
+
+        # Longer incoming axis warns.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n + 100),
+                     [(0, core.OffsetAxis('samps', n + 100, ofs))],
+                     on_mismatch='warn')
+        self.assertEqual(len(tod.x), n)
+
+        # Same count but different offset warns.
+        tod = make_tod()
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('x', np.zeros(n),
+                     [(0, core.OffsetAxis('samps', n, ofs + 10))],
+                     on_mismatch='warn')
+        self.assertEqual(tod.samps.count, n - 10)
+
+        # LabelAxis truncation (dets subset via child) warns.
+        tod = make_tod()
+        child = core.AxisManager(core.LabelAxis('dets', dets[:2]))
+        with self.assertLogs(logger, 'WARNING'):
+            tod.wrap('child', child, on_mismatch='warn')
+        self.assertEqual(tod.dets.count, 2)
+
+        # No error with matching axes.
+        tod = make_tod()
+        tod.wrap('x', np.zeros(n),
+                 [(0, core.OffsetAxis('samps', n, ofs))],
+                 on_mismatch='error')
+
+        # on_mismatch='error' raises, leaving the target untouched.
+        tod = make_tod()
+        with self.assertRaises(ValueError):
+            tod.wrap('x', np.zeros(n - 100),
+                     [(0, core.OffsetAxis('samps', n - 100, ofs))],
+                     on_mismatch='error')
+        self.assertEqual(tod.samps.count, n)
+        self.assertEqual(tod.sig.shape, (3, n))
+        self.assertNotIn('x', tod)
+
+        # Through merge() directly.
+        tod = make_tod()
+        _tod = core.AxisManager(
             core.LabelAxis('dets', dets + ['det3']),
-            core.OffsetAxis('samps', n, ofs - n//2))\
-            .wrap('x', np.arange(n), [(0, 'samps')])
-        aman.merge(coparent)
-        self.assertEqual(aman.shape, (3, n//2))
-        self.assertEqual(aman._axes['samps'].offset, ofs)
-        self.assertEqual(aman.x[0], n//2)
+            core.OffsetAxis('samps', n, ofs - n // 2))
+        with self.assertRaises(ValueError):
+            tod.merge(_tod, on_mismatch='error')
+        self.assertEqual(tod.shape, (3, n))
+
 
     def test_500_io(self):
         # Test save/load HDF5
@@ -467,10 +593,18 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('quantity', np.ones(5) << u.m)
         aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
+        aman.wrap('quantized', np.sin(np.linspace(0, 6, 10001)).round(2))
+        aman.wrap('quantized2', (aman['quantized'] * 100).astype('int32'))
+
         aman.wrap('subaman', core.AxisManager(
             aman.dets, core.LabelAxis('bands', ['f090', 'f150'])))
         aman['subaman'].wrap_new('subtest1', shape=[('dets', 'bands')])
         aman['subaman'].wrap_new('subtest2', shape=(100,))
+        aman['subaman'].wrap('also_q', np.cos(np.linspace(0, 6, 10001)))
+
+        encodings = {'quantized': {'type': 'flacarray', 'args': {'quanta': .01}},
+                     'quantized2': {'type': 'flacarray'},
+                     'subaman': {'also_q': {'type': 'flacarray', 'args': {'quanta': .2}}}}
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.
@@ -480,8 +614,17 @@ class TestAxisManager(unittest.TestCase):
                 aman.save(filename, dataset)
                 # Overwrite
                 aman.save(filename, dataset, overwrite=True)
+                # Fail on encodings error.
+                with self.assertRaises(ValueError):
+                    aman.save(filename, dataset, overwrite=True,
+                              encodings={'something': {'type': 'whatever'}})
+                # Fail on encodings error.
+                with self.assertRaises(ValueError):
+                    aman.save(filename, dataset, overwrite=True,
+                              encodings={'quantity': {'type': 'flacarray'}})
                 # Compress and Overwrite
-                aman.save(filename, dataset, overwrite=True, compression='gzip')
+                aman.save(filename, dataset, overwrite=True, compression='gzip',
+                          encodings=encodings)
                 # Refuse to overwrite
                 with self.assertRaises(RuntimeError):
                     aman.save(filename, dataset)
@@ -492,7 +635,14 @@ class TestAxisManager(unittest.TestCase):
             # should be required for all AxisManager members!
             for k in aman._fields.keys():
                 self.assertEqual(aman[k].__class__, aman2[k].__class__)
-                if hasattr(aman[k], 'shape'):
+                if isinstance(aman[k], u.quantity.Quantity):
+                    np.testing.assert_array_equal(aman[k], aman2[k])
+                elif isinstance(aman[k], np.ndarray):
+                    if np.issubdtype(aman2[k].dtype, np.floating):
+                        np.testing.assert_almost_equal(aman[k], aman2[k])
+                    else:
+                        np.testing.assert_array_equal(aman[k], aman2[k])
+                elif hasattr(aman[k], 'shape'):
                     self.assertEqual(aman[k].shape, aman2[k].shape)
                 else:
                     self.assertEqual(aman[k], aman2[k])  # scalar
@@ -500,13 +650,13 @@ class TestAxisManager(unittest.TestCase):
         # Test field subset load
         with tempfile.TemporaryDirectory() as tempdir:
             filename = os.path.join(tempdir, 'test.h5')
-            aman.save(filename, dataset)
+            aman.save(filename, dataset, encodings=encodings)
             aman2 = aman.load(filename, dataset, fields=['test1', 'flags'])
             aman3 = aman.load(filename, dataset, fields=['test1', 'subaman'])
             aman4 = aman.load(filename, dataset, fields=['test1', 'subaman.subtest1'])
         for target, keys, subkeys in [
                 (aman2, ['test1', 'flags'], None),
-                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2']),
+                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2', 'also_q']),
                 (aman4, ['test1', 'subaman'], ['subtest1']),
         ]:
             self.assertCountEqual(target._fields.keys(),
@@ -514,6 +664,21 @@ class TestAxisManager(unittest.TestCase):
             if subkeys:
                 self.assertCountEqual(target['subaman']._fields.keys(),
                                       subkeys)
+
+
+    def test_501_io_open_file_group(self):
+        # Test io with open h5py.File / Group.
+        root = core.AxisManager(core.LabelAxis('dets', ['det0', 'det1']))
+        sub = core.AxisManager(core.LabelAxis('dets', ['det2']))
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            with h5py.File(filename, 'w') as fout:
+                root.save(fout)
+                sub.save(fout, 'sub')
+            with h5py.File(filename, 'r') as fin:
+                self.assertEqual(core.AxisManager.load(fin).dets, root.dets)
+                self.assertEqual(core.AxisManager.load(fin, 'sub').dets, sub.dets)
+
 
     def test_900_everything(self):
         tod = core.AxisManager(
@@ -586,6 +751,64 @@ class TestAxisManagerUtil(unittest.TestCase):
         }
         am = amutil.dict_to_am(d)
         self.assertEqual(am.nested.test, 'answer')
+
+
+class TestResultSet(unittest.TestCase):
+    def test_00_basic(self):
+        keys = ['A', 'B', 'C']
+        dtypes = ['int64', 'float64', 'unicode']
+        rows = [
+            (1, 1., 'a'),
+            (2, 2., 'b'),
+            (3, 3., 'c'),
+            (4, 4., 'd'),
+        ]
+
+        # Test array conversion
+        rs = core.metadata.ResultSet(keys=keys, src=[list(r) for r in rows])
+        for k, dtype in zip(keys, dtypes):
+            assert len(rs[k]) == len(rows)
+            assert np.issubdtype(rs[k].dtype, dtype)
+
+        rsa = rs.asarray()
+        assert len(rsa) == len(rs)
+        for k, dtype in zip(keys, dtypes):
+            assert np.issubdtype(rsa.dtype[k], dtype)
+
+        # Even with nulls
+        for i in range(3):
+            r = list(rs.rows[i])
+            r[i] = None
+            rs.rows[i] = tuple(r)
+
+        for k, dtype in zip(keys, dtypes):
+            assert len(rs[k]) == len(rows)
+            assert np.issubdtype(rs[k].dtype, dtype)
+
+        rsa = rs.asarray()
+        assert len(rsa) == len(rs)
+        for k, dtype in zip(keys, dtypes):
+            assert np.issubdtype(rsa.dtype[k], dtype)
+
+        # Subsetting
+        rs = core.metadata.ResultSet(keys=keys, src=[list(r) for r in rows])
+
+        rs1 = rs.subset(keys=['B', 'A'])
+        assert rs1.rows[0] == (1., 1)
+
+        rs2 = rs.subset(rows=rs['A'] == 1)
+        assert (len(rs2) == 1)
+
+        rs3 = rs.subset(rows=np.array([1, 3]))
+        assert (len(rs3) == 2)
+
+        # Conversion.
+        aman = rs.to_axismanager(axis_key='C')
+
+        # Merge
+        rs2 = core.metadata.ResultSet(keys=['D'], src=[[1], [2], [3], [4]])
+        rs.merge(rs2)
+        assert (rs.keys == ['A', 'B', 'C', 'D'])
 
 
 if __name__ == '__main__':

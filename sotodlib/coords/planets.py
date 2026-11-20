@@ -39,6 +39,39 @@ SOURCE_LIST = ['mercury',
                ('QSO_J2253+1608', 343.4952422, 16.14301323),
                ('galactic_center', -93.5833, -29.0078)]
 
+def get_source_list_fromstr(target_source):
+    """Get a source_list from SOURCE_LIST by name, or raise ValueError if not found.
+    """
+    for isource in SOURCE_LIST:
+        if isinstance(isource, str):
+            isource_name = isource
+        elif isinstance(isource, tuple):
+            isource_name = isource[0]
+        if isource_name.lower() == target_source.lower():
+            return isource
+    raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
+
+def match_fixed_source(source_name):
+    """Match source_name against a regular expression and if it has the
+    format 'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers,
+    then RA, Dec = xxx, yyy in degrees will be returned.
+    If it doesn't match, nans are returned as RA and Dec.
+
+    Args:
+        source_name (str): Name of fixed-position source
+    Return:
+        RA (float): Right Ascension of source in degrees
+        Dec (float): Declination of source in degrees
+        match (bool): Whether the source_name match with regular expression
+    """
+    m = re.match(
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
+    if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
+        ra, dec = float(m['ra_deg']), sign * float(m['dec_deg'])
+        return ra, dec, m
+    else:
+        return np.nan, np.nan, m
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -74,7 +107,7 @@ class SlowSource:
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
-        return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
+        return cls(timestamp, ra0, dec0, ((ra1-ra0+np.pi) % (2*np.pi) - np.pi)/dt, (dec1-dec0)/dt)
 
     def pos(self, timestamps):
         """Get the (approximate) source position at the times given by the
@@ -92,7 +125,7 @@ class SlowSource:
         return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 
-def get_scan_q(tod, planet, boresight_offset=None, refq=None):
+def get_scan_q(tod, planet, boresight_offset=None, refq=None, unroll=False):
     """Identify the point (in time and azimuth space) at which the
     specified planet crosses the boresight elevation for the
     observation in tod.  The rotation taking boresight coordinates to
@@ -109,6 +142,10 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     and elevation parallel to eta; this is a useful system for
     measuring beam and pointing parameters.
 
+    Note that if unroll is False (the default) then the scans direction
+    in the output coordinates will be rotated by the roll angle.
+    If unroll is True then this rotation is removed, leaving the scans
+    going left right for all observations.
     """
     if boresight_offset is None:
         boresight_offset = (0, 0)
@@ -118,19 +155,24 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     # Get reference elevation...
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
+    roll = np.median(tod.boresight.roll[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
+    if isinstance(planet, (list, tuple)):
+        _, ra, dec = planet
+        planet = SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
         planet = SlowSource.for_named_source(planet, t)
 
-    def scan_q_model(t, az, el, planet):
+    def scan_q_model(t, az, el, roll, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
-            t, az, el, weather='typical', site='so')
+           t, az, el, roll=roll, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
         return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q * q_xieta
 
     def distance(p):
         dt, daz = p
-        q, qnet = scan_q_model(t + dt, az + daz, el, planet)
+        q, qnet = scan_q_model(t + dt, az + daz, el, roll, planet)
         lon, lat, phi = so3g.proj.quat.decompose_lonlat(qnet)
         return 90 * coords.DEG - lat
 
@@ -140,21 +182,23 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     if warnflag != 0:
         logger.warning('Source-scan solver failed to converge or otherwise '
                        f'complained!  warnflag={warnflag}')
-    q, qnet = scan_q_model(t+p[0], az+p[1], el, planet)
+    q, qnet = scan_q_model(t+p[0], az+p[1], el, roll, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
     ra, dec = planet.pos(t+p[0])
-    rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
+    rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi - roll*float(unroll))
     return {'rot': rot,
             'timestamp': t+p[0],
             'az': az+p[1],
             'el': el,
+            'roll' : roll,
             'ra': ra,
             'dec': dec,
             'psi': psi,
-            'planet': planet}
+            'planet': planet,
+            'unroll': unroll}
 
 
-def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, **kw):
+def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, unroll=False, **kw):
     """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
@@ -165,7 +209,7 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
 
     if res is None:
         res = 0.01 * coords.DEG
-    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq)
+    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq, unroll=unroll)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
     wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
 
@@ -178,7 +222,7 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
     return P, X
 
 
-def get_horizon_P(tod, az, el, **kw):
+def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
     """Get a standard Projection Matrix targeting arbitrary source (for example
     drone) in horizon coordinates.
 
@@ -186,6 +230,10 @@ def get_horizon_P(tod, az, el, **kw):
       tod: AxisManager of the observation
       az: azimuth of the target source (rad)
       el: elevation of the target source (rad)
+      receiver_fixed:
+          If true, rotate the source centered coordinate to be receiver fixed.
+          This should be True for receiver fixed beam measurement.
+          This should be False for pol angle calibration with source on drone.
 
     Return:
       a Projection Matrix
@@ -198,14 +246,18 @@ def get_horizon_P(tod, az, el, **kw):
         tod.boresight.roll
     )
     pq = so3g.proj.quat.rotation_lonlat(-az, el)
-    sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
+    if receiver_fixed:
+        rot = so3g.proj.quat.euler(2, -tod.boresight.roll)
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * rot * ~pq * sight.Q
+    else:
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
     P = coords.P.for_tod(tod, sight, **kw)
     return P
 
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
-                       n_modes=10, low_pass=None,
-                       wrap=None):
+                       n_modes=10, low_pass=None, wrap=None, 
+                       pca_wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -226,15 +278,34 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      pca_wrap (str): If specified, the PCA model modes and weights calculated for subtraction will be wrapped into tod[pca_wrap].
+      edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
+        Default is None. (Nothing happens.)
 
     Returns:
       The filtered signal.
 
     """
-    if source_flags is None:
+    if source_flags is None and tod is not None:
         source_flags = tod.source_flags
-    if signal is None:
+    elif source_flags is None and tod is None:
+        raise ValueError("Must provide source_flags if tod is None")
+    if signal is None and tod is not None:
         signal = tod.signal
+    elif signal is None and tod is None:
+        raise ValueError("Must provide signal if tod is None")
+    if signal is None:
+        raise ValueError("signal somehow still None!")
+    
+    if edge_guard is not None:
+        if isinstance(edge_guard, int):
+            edgebl = np.zeros(source_flags.shape[-1], dtype=bool)
+            edgebl[edge_guard:-edge_guard] = True
+            edgerm = so3g.proj.ranges.RangesMatrix.from_mask(edgebl)
+            for iflag in source_flags:
+                iflag.intersect(edgerm)
+        else:
+            raise ValueError("edge_guard must be an int.")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
@@ -243,21 +314,23 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
     # Low pass filter?
     if low_pass is not None:
+        if tod is None:
+            raise ValueError("tod cannot be None when lowpassing")
         if isinstance(low_pass, tod_ops.filters._chainable):
             filt = low_pass
         else:
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
-        a[:] = signal_pca
-        t_1()
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(n_det, n, 'BOTH')
+        rfft.a[:] = signal_pca
+        rfft.t_forward()
         times = tod.timestamps
         delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
-        filt.apply(freqs, tod, target=b)
-        signal_pca = t_2()
-        del a, b
+        filt.apply(freqs, tod, target=rfft.b)
+        signal_pca = rfft.t_backward()
+        del rfft
 
     # Measure TOD means (after gap fill, low pass, etc).
     if isinstance(n_modes, str) and n_modes == 'all':
@@ -274,38 +347,60 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
         # Get PCA model and discard the source vectors.
         pca = tod_ops.pca.get_pca_model(
-            tod, signal=signal_pca, n_modes=n_modes)
+            tod, signal=signal_pca, n_modes=n_modes, wrap=pca_wrap)
         del signal_pca
 
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
-    if wrap:
+    if wrap and tod is not None:
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
-def _get_astrometric(source_name, timestamp, site="_default"):
+def _get_astrometric(source_name, timestamp, site="_default", planets=None):
     """
     Derive skyfield's Astrometric object of a celestial source at a
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
 
-    Note that it will download a 16M ephemeris file on first use.
-
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
-        or fixed source specification.
+        or fixed source specification with a format 'Jxxx[+-pmn]yyy',
+        where xxx and yyy are decimal numbers of RA, Dec in degrees.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
+      planets (SpiceKernel): the ephemeris object for
+        skyfield.jpllib). If not passed in, a sensible default
+        ephemeris is used.
 
     Returns:
+      planets: SpiceKernel object (for re-use)
       astrometric: skyfield's astrometric object
-    """
-    # Get the ephemeris
-    de_filename = core.get_local_file("de421.bsp")
 
-    planets = jpllib.SpiceKernel(de_filename)
+    Notes:
+      The SpiceKernel holds the ephemeris file open. To close that
+      file, run planets.close().  Deleting the object is not enough,
+      as the garbage collection can be lazy.  After .close(), the
+      kernel can't be used for ephemeris stuff. Some operations on the
+      returned "astrometric" object will try to use the kernel, and
+      will fail. So keep planets around until you're done computing on
+      astrometric, then call close().
+
+      If you're doing lots of astrometric stuff, you can get the
+      kernel once and re-use it.
+
+      If the default ephemeris file (de421.bsp) is not found, it will
+      be downloaded (16M) and cached.
+
+    """
+    if planets is None:
+        # Get the ephemeris
+        de_filename = core.get_local_file("de421.bsp")
+        planets = jpllib.SpiceKernel(de_filename)
+    else:
+        assert len(planets.codes)  # Someone .closed this eph!
+
     for k in [
         source_name,
         source_name + " barycenter",
@@ -316,10 +411,15 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         except (ValueError, KeyError):
             pass
     else:
-        options = list(planets.names().values())
-        raise ValueError(
-            f'Failed to find a match for "{source_name}" in ephemeris: {options}'
-        )
+        ra, dec, m = match_fixed_source(source_name)
+        if m:
+            # convert from degrees to hours
+            target = skyfield_api.Star(ra_hours=ra/15., dec_degrees=dec)
+        else:
+            options = list(planets.names().values())
+            raise ValueError(
+                f'Failed to find a match for "{source_name}" in ephemeris: {options}'
+            )
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -331,7 +431,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
-    return astrometric
+    return planets, astrometric
 
 
 def get_source_pos(source_name, timestamp, site='_default'):
@@ -356,22 +456,20 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
       Before checking in the ephemeris, the source_name will be
       matched against a regular expression and if it has the format
-      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
       fixed-position source at RA,Dec = xxx,yyy in degrees will be
       processed.  In that case, the distance is returned as Inf.
 
     """
     # Check against fixed-position template...
-    m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+    ra, dec, m = match_fixed_source(source_name)
     if m:
-        ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
-        return ra, dec, float('inf')
-    
+        return ra * coords.DEG, dec * coords.DEG, float('inf')
+
     # Derive from skyfield astrometric object
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
+    planets.close()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
 
@@ -394,8 +492,9 @@ def get_source_azel(source_name, timestamp, site='_default'):
       el (float): in radians.
       distance (float): in AU.
     """
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
+    planets.close()
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
 
@@ -426,12 +525,12 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # Sight line
     sight = so3g.proj.CelestialSightLine.az_el(
-        tod.timestamps, tod.boresight.az, tod.boresight.el,
+        tod.timestamps, tod.boresight.az, tod.boresight.el, roll=tod.boresight.roll,
         site='so', weather='typical')
 
     # One central detector
     xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
-    fp = so3g.proj.FocalPlane.from_xieta(['x'], [xieta0[0]], [xieta0[1]], [0])
+    fp = so3g.proj.FocalPlane.from_xieta([xieta0[0]], [xieta0[1]])
 
     asm = so3g.proj.Assembly.attach(sight, fp)
     p = so3g.proj.Projectionist.for_geom(shape, wcs)
@@ -463,7 +562,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
 
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
-                         center_on=None, res=None, max_pix=4e6):
+                         center_on=None, res=None, max_pix=4e6, unroll=False):
     """Process masking instructions and create RangesMatrix that flags
     samples in the TOD that are within the masked region.  This
     masking makes use of a map with the footprint encoded in P, so
@@ -480,11 +579,13 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
       mask: source masking instructions (see note).
       wrap: key in tod at which to store the result.
       res: If P is None, sets the target mask map resolution
-        (radians).
+        (radians).  If None, defaults to 0.01 deg.
       max_pix: If P is None, this sets the maximum acceptable number
         of pixels for the mask map.  This is to catch cases where an
         incorrect source has been passed in, for example, leading to a
         weird map footprint
+      unroll: If True then when constructing P rotate the coordinates such that
+        scans go left-right even when roll != 0.
 
     Returns:
       RangesMatrix marking the samples inside the masked region.
@@ -500,18 +601,29 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
       the center of the circle, all in degrees.
 
     """
-    if P is None:
-        logger.info('Getting Projection Matrix ...')
-        P, X = get_scan_P(tod, center_on, res=res, comps='T')
-        shape, wcs = tuple(P.geom)
-        if shape[0] * shape[1] > max_pix:
-            raise ValueError(f'Mask map too large: {shape}')
-
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
         # radius) in deg.  (Deprecated!)
         mask = [{'xyr': list(map(float, line.split()))}
                 for line in open(mask)]
+
+    if P is None:
+        if res is None:
+            res = 0.01 * coords.DEG
+        x, y, r = mask['xyr']
+        shape = 3 * np.ceil(r * coords.DEG / res).astype(int)
+        # ensure odd dimensions
+        if shape % 2 == 0:
+            shape += 1
+        if shape**2 > max_pix:
+            raise ValueError(f'Mask map too large: {shape}')
+        logger.info('Getting Projection Matrix ...')
+        P, X = get_scan_P(tod, center_on, res=res, comps='T', unroll=unroll)
+
+        geom = enmap.geometry(np.array((0, 0)), shape=(shape, shape),
+                              proj='tan', res=(res, -res))
+        P.geom = enmap.Geometry(*geom)
+        shape, wcs = tuple(P.geom)
 
     mask_map = P.zeros()
     _add_to_mask(mask, mask_map)
@@ -671,7 +783,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              filename=None, source_flags=None, cuts=None,
              data_splits=None,
              low_pass=None, n_modes=10,
-             eigentol=1e-3, info={}):
+             eigentol=1e-3, info={}, unroll=False):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
@@ -703,7 +815,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         if scan_coords:
             P, X = coords.planets.get_scan_P(tod, center_on, res=res, size=size,
                                              comps=comps, cuts=cuts,
-                                             threads=thread_algo)
+                                             threads=thread_algo, unroll=unroll)
         else:
             planet = coords.planets.SlowSource.for_named_source(
                 center_on, tod.timestamps[0])
@@ -713,6 +825,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                                  cuts=cuts,
                                  threads=thread_algo,
                                  wcs_kernel=wcsk)
+            X = None
     with MmTimer('get_proj_threads'):
         P._get_proj_threads()
 
@@ -729,6 +842,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         base_cuts, P.cuts = P.cuts, None
         output = {
             'P': P,
+            'X': X,
             'det_weights': det_weights,
             'splits': {}
         }
@@ -778,5 +892,6 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             'weights': wmap1,
             'solved': map1b,
             'P': P,
+            'X': X,
             'det_weights': det_weights,
             }
