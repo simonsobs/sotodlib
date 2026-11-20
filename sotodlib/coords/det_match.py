@@ -44,16 +44,35 @@ def map_band_chans(b1, c1, b2, c2, chans_per_band=512):
     return mapping
 
 
-def get_north_is_highband(bands, bgs):
+def get_north_is_highband(bands, bgs, min_fraction=0.5):
     """
-    Checks if north is highband based on bgmapping. This will tell you if
-    the majority of dets on the north side of the ufm (bgs 0-5) belong to
-    highband (bands 4-7).
+    Determine the UFM coax orientation by requiring both SMuRF
+    band populations to agree on the north/south assignment.
     """
-    highband = (bands > 3).astype(int) * 2 - 1   # 1 if highband, -1 if not
-    north = (bgs < 6).astype(int) * 2 - 1        # 1 if north, -1 if not
-    north[bgs == -1] = 0
-    return np.mean(highband * north) > 0
+    bands, bgs = np.asarray(bands), np.asarray(bgs)
+
+    valid = (bands >= 0) & (bands < 8) & (bgs >= 0) & (bgs < 12)
+
+    low = valid & (bands < 4)
+    high = valid & (bands >= 4)
+
+    if not np.any(low) or not np.any(high):
+        raise ValueError("Missing lowband or highband population")
+
+    f_low_north = np.mean(bgs[low] < 6)
+    f_high_north = np.mean(bgs[high] < 6)
+
+    if f_high_north > min_fraction and f_low_north < 1 - min_fraction:
+        return True
+
+    if f_low_north > min_fraction and f_high_north < 1 - min_fraction:
+        return False
+
+    raise ValueError(
+        f"Ambiguous north/south orientation: "
+        f"lowband north={f_low_north:.1%}, "
+        f"highband north={f_high_north:.1%}"
+    )
 
 
 @dataclass
@@ -65,23 +84,26 @@ class PointingConfig:
     -----
     fp_file: str
         Path to focal-plane file that is used by the optics module.
+    rx_file: str
+        Path to optics tube YAML file that is used by the optics module.
     wafer_slot: str
         Wafer slot of the UFM. For example: "ws0"
-    tel_type: str
-        Tel type for the optics model. Either "SAT" or "LAT"
+    platform: str
+        Which platform to use for the optics model.
     zemax_path: str
-        If running for a "LAT" tel_type, the path to the zemax file must be specified.
+        If running for the lat platform, the path to the zemax file must be specified.
     roll: float
         Rotation about the line of sight.
         For the LAT this is elev - 60 - corotator.
         For the SAT this is -1*boresight.
     tube_slot: str/int
-        If running for a "LAT" tel_type, the tube slot must be specified.
+        If running for the lat platform, the tube slot must be specified.
         Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
+    rx_file: str
     wafer_slot: str
-    tel_type: str
+    platform: str
     zemax_path: Optional[str] = None
     roll: Optional[float] = 0
     tube_slot: Optional[Union[str, int]] = None
@@ -92,6 +114,10 @@ class PointingConfig:
     fp_pars: dict = field(init=False)
 
     def __post_init__(self):
+        if self.platform.lower() in ["satp1", "satp2", "satp3"]:
+            self.tel_type = "SAT"
+        elif self.platform.lower() == "lat":
+            self.tel_type = "LAT"
         if self.tel_type == 'LAT':
             if self.zemax_path is None:
                 raise ValueError("zemax path must be set for 'LAT' tel_type")
@@ -104,22 +130,37 @@ class PointingConfig:
         self.fp_pars = optics.get_ufm_to_fp_pars(
             self.tel_type, self.wafer_slot, self.fp_file
         )
-        self.dx = self.fp_pars['dx']
-        self.dy = self.fp_pars['dy']
-        self.theta = np.deg2rad(self.fp_pars['theta'])
+
+        self.rx_pars = optics.get_fp_to_rx_pars(
+            self.tube_slot, self.rx_file)
 
     def get_pointing(self, x, y, pol=0):
-        xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
-        yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
-
         if self.tel_type.upper() == 'SAT':
-            xi, eta, gamma = optics.SAT_focal_plane(
-                None, x=xp, y=yp, pol=pol, roll=self.roll
+            xi, eta, gamma = optics.get_focal_plane(
+                None,
+                x=x,
+                y=y,
+                pol=pol,
+                roll=self.roll,
+                telescope_flavor="SAT",
+                tube_slot=self.tube_slot,
+                wafer_slot=self.wafer_slot,
+                ufm_to_fp_pars=self.fp_pars,
+                fp_to_rx_pars=self.rx_pars,
             )
         elif self.tel_type.upper() == 'LAT':
-            xi, eta, gamma = optics.LAT_focal_plane(
-                None, self.zemax_path, x=xp, y=yp, pol=pol,
-                roll=self.roll, tube_slot=self.tube_slot
+            xi, eta, gamma = optics.get_focal_plane(
+                None,
+                x=x,
+                y=y,
+                pol=pol,
+                roll=self.roll,
+                telescope_flavor="LAT",
+                tube_slot=self.tube_slot,
+                wafer_slot=self.wafer_slot,
+                ufm_to_fp_pars=self.fp_pars,
+                fp_to_rx_pars=self.rx_pars,
+                zemax_path=self.zemax_path,
             )
         return xi, eta, gamma
 
@@ -139,6 +180,8 @@ class Resonator:
     smurf_channel: int = -1
     smurf_subband: int = -1
     readout_id: str = ''
+
+    wafer_slot: str = 'ws.'
 
     xi: float = np.nan
     eta: float = np.nan
@@ -194,7 +237,7 @@ def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointin
         'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
         'det_angle_actual_deg', 'det_type', 'det_id', 'is_optical',
         'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
-        'mux_layout_pos'
+        'mux_layout_pos', 'wafer_slot'
     ]
 
     # for LF
@@ -285,7 +328,8 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_aman(cls, aman, stream_id, det_cal=None, name=None, pointing: Optional[AxisManager]=None):
+    def from_aman(cls, aman, stream_id, det_cal=None, name=None,
+                  pointing: Optional[AxisManager]=None):
         """
         Load a resonator set from a Context object based on an obs_id
 
@@ -306,16 +350,22 @@ class ResSet:
         m = aman.det_info.stream_id == stream_id
         if not np.any(m):
             raise ValueError(f"No channels with stream_id {stream_id} in obs")
-        
+
         if det_cal is None:
             det_cal = aman.det_cal
-        north_is_highband = get_north_is_highband(
-            aman.det_info.smurf.band[m], det_cal.bg[m]
-        )
+        if aman.det_info.wafer_slot[0] != "ws.":
+            north_is_highband = get_north_is_highband(
+                aman.det_info.smurf.band[m], det_cal.bg[m]
+            )
+        is_norths = []
         resonators = []
         for i, ri in enumerate(np.where(m)[0]):
             band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
-            is_north = north_is_highband ^ (band < 4)
+            if aman.det_info.wafer_slot[ri] != "ws.":
+                is_north = north_is_highband ^ (band < 4)
+                is_norths.append(int(is_north))
+            else:
+                is_north = 1
             readout_id = aman.det_info.readout_id[ri]
             bg = det_cal.bg[ri]
             res_freq=aman.det_info.smurf.frequency[ri]
@@ -336,7 +386,7 @@ class ResSet:
 
     @classmethod
     def from_tunefile(cls, tunefile, name=None, north_is_highband=True,
-                      resfit_file=None, bgmap_file=None):
+                      resfit_file=None, bgmap_file=None, ignore_north_south=False):
         """
         Creates an instance based on a smurf-tune file. If a resfit or bgmap
         file is included, that data will be added to the Resonance objects as
@@ -354,6 +404,9 @@ class ResSet:
                 Path to file containing resonance fit data
             bgmap_file (str):
                 Path to file containing bgmap data
+            ignore_north_south (str):
+                Do not infer North/South orientation and just set all to North.
+                Used for LF.
         """
         tune = np.load(tunefile, allow_pickle=True).item()
         resonances = []
@@ -363,7 +416,10 @@ class ResSet:
                 continue
 
             for res_idx, d in _v['resonances'].items():
-                is_north = north_is_highband ^ (band < 4)
+                if not ignore_north_south:
+                    is_north = north_is_highband ^ (band < 4)
+                else:
+                    is_north = 1
                 res = Resonator(
                     idx=idx, smurf_res_idx=res_idx, res_freq=d['freq'],
                     smurf_band=band, is_north=is_north
@@ -457,7 +513,8 @@ class ResSet:
 
     @classmethod
     def from_solutions(cls, sol_file, north_is_highband=True, name=None,
-                       fp_pars=None, platform='SAT', zemax_path=None):
+                       fp_pars=None, platform='LAT', zemax_path=None,
+                       ignore_north_south=False):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
         and smurf-channel info. Resonance frequencies used here are the VNA
@@ -469,16 +526,18 @@ class ResSet:
             name (str):
                 Name to label this ResSet
             north_is_highband (bool):
-                True if the north-side of the array corresponds to bands
-                4-8
+                True if the north-side of the array corresponds to bands 4-8
             fp_pars (dict):
-                Result of the function ``sotododlib.coords.optics.get_ufm_to_fp_pars``. If this is None, detector positions will
-                not be mapped to pointing angles.
+                Result of the function ``sotododlib.coords.optics.get_ufm_to_fp_pars``.
+                If this is None, detector positions will not be mapped to pointing angles.
             platform (str):
-                'SAT' or 'LAT'. Used to determine which focal plane function to
+                Which platform.  Used to determine which focal plane function to
                 use for pointing
             zemax_path (str):
                 zemax path, required to get pointing for LAT optics
+            ignore_north_south (str):
+                Do not infer North/South orientation and just set all to North.
+                Used for LF.
         """
         resonances = []
 
@@ -492,7 +551,7 @@ class ResSet:
                 labels[i] = labels[i].strip()
 
             # Helper needed for when sol file has saved ints as floats
-            def _int(val, null_val=None): 
+            def _int(val, null_val=None):
                 is_null = (val == 'null' or val == '')
                 if is_null and null_val is not None:
                     return null_val
@@ -505,7 +564,10 @@ class ResSet:
                     continue
                 # is_north = north_is_highband ^ (_int(d['smurf_band']) < 4)
                 # is_north = d['is_north'].lower().strip() == 'true'
-                is_north = _int(d['bias_line']) < 6
+                if not ignore_north_south:
+                    is_north = _int(d['bias_line']) < 6
+                else:
+                    is_north = 1
                 is_optical = (d['is_optical'].lower() == 'true')
 
                 kwargs = dict(
@@ -746,7 +808,7 @@ class Match:
 
         mat = np.zeros((len(self.src), len(self.dst)), dtype=float)
 
-        # N/S mismatch
+        # N/S mismatch (all N for LF)
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
 
