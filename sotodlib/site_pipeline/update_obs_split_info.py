@@ -15,8 +15,6 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 
-os.environ.setdefault("SOTODLIB_SITECONFIG", "/global/cfs/cdirs/sobs/site.yaml")
-
 from sotodlib import core
 from sotodlib.io import hkdb
 from sotodlib.io.ancil import utils
