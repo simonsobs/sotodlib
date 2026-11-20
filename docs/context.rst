@@ -1582,6 +1582,13 @@ which individual columns or rows can easily be extracted:
 Queries involving tags
 ----------------------
 
+Use ``tag('name')`` in the main query string. Names are string literals use 
+double single quotes inside names, e.g. ``tag('it''s a tag')``. Alternatively 
+you can use the ``tags`` argument which remains supported for backward 
+compatibility.These can be combined to filter out intersecting tags for example::
+
+  >>> obsdb.query("not tag('cryo_problem')", tags=['hwp_fast'])
+
 Information from the tags table will only show up in the output if
 explicitly requested.  For example, we can ask for the ``'hwp_fast'``
 and ``'hwp_slow'`` fields to be included::
