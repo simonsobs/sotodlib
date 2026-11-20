@@ -257,7 +257,9 @@ def plot_ufm(
     ax1.legend()
 
     # Plot histogram of residuals.
-    dist = 3600 * np.linalg.norm( np.rad2deg( (transformed.xyz - data.xyz)[wmsk, :2]), axis=1)
+    dist = 3600 * np.linalg.norm(
+        np.rad2deg((transformed.xyz - data.xyz)[wmsk, :2]), axis=1
+    )
     if len(dist) > 0:
         dist_thresh = np.percentile(dist, 97)
         bins = max(int(len(dist) / 20), 10)
@@ -362,7 +364,9 @@ def plot_optics_tube(
     color_limit = np.nanpercentile(np.abs(dist), 99)
     cf = None
     if len(dist) >= 3 and np.isfinite(color_limit) and color_limit > 0:
-        cf = ax2.scatter( xi, eta, c=dist, s=10, vmin=-color_limit, vmax=color_limit, cmap="coolwarm")
+        cf = ax2.scatter(
+            xi, eta, c=dist, s=10, vmin=-color_limit, vmax=color_limit, cmap="coolwarm"
+        )
     if cf is not None:
         fig.colorbar(cf, ax=ax2, label='Radial residual (")')
     ax2.set_aspect("equal")
@@ -661,31 +665,51 @@ def plot_displacements(
     dy = np.asarray(dy) * plot_scale
     nobs = len(dx)
     for name, color_data in colorbys:
-        fig, ax = plt.subplots( figsize=figsize, constrained_layout=True)
+        fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
 
         if name is None:
-            ax.quiver( x0, y0, dx, dy, angles="xy", scale_units="xy",)
+            ax.quiver(
+                x0,
+                y0,
+                dx,
+                dy,
+                angles="xy",
+                scale_units="xy",
+            )
             title = f"{title_prefix} Observation Displacements"
             fname = f"{filename_prefix}_displacements.png"
         else:
             if color_data is None:
                 raise ValueError(f"{name} specified without data")
             if len(color_data) != nobs:
-                raise ValueError( f"{name}: expected {nobs} values but got {len(color_data)}")
-            q = ax.quiver( x0, y0, dx, dy, color_data, angles="xy", scale_units="xy", cmap="viridis")
+                raise ValueError(
+                    f"{name}: expected {nobs} values but got {len(color_data)}"
+                )
+            q = ax.quiver(
+                x0,
+                y0,
+                dx,
+                dy,
+                color_data,
+                angles="xy",
+                scale_units="xy",
+                cmap="viridis",
+            )
             fig.colorbar(q, ax=ax, label=name)
             title = (
-                f"{title_prefix} Observation Displacements by {name}\n"
-                f"{scale_str}"
+                f"{title_prefix} Observation Displacements by {name}\n" f"{scale_str}"
             )
             fname = f"{filename_prefix}_displacements_{name}.png"
         ax.set_title(title)
         ax.set_xlabel("Xi (rad)")
         ax.set_ylabel("Eta (rad)")
         ax.set_aspect("equal")
-        fig.savefig( os.path.join(output_dir, fname), dpi=200, bbox_inches="tight",)
+        fig.savefig(
+            os.path.join(output_dir, fname),
+            dpi=200,
+            bbox_inches="tight",
+        )
         plt.close(fig)
-
 
 
 def plot_receiver_displacements(
@@ -732,8 +756,12 @@ def plot_receiver_displacements(
                 msk = np.isfinite(meas.weights) & (meas.weights > 0)
                 if np.sum(msk) == 0:
                     continue
-                disp_x = np.nanmedian(meas.pm_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0])
-                disp_y = np.nanmedian(meas.pm_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1])
+                disp_x = np.nanmedian(
+                    meas.pm_transformed.xyz[msk, 0] - fp.transformed.xyz[msk, 0]
+                )
+                disp_y = np.nanmedian(
+                    meas.pm_transformed.xyz[msk, 1] - fp.transformed.xyz[msk, 1]
+                )
                 x0.append(xc)
                 y0.append(yc)
                 dx.append(disp_x)
@@ -811,18 +839,25 @@ def plot_receiver_nuisance_displacements(
         dx = []
         dy = []
         for obs_id in obs_ids:
-            pars = nuisance_params[obs_id]
+            pars, _ = nuisance_params[obs_id]
             if x_name not in pars or y_name not in pars:
-                raise ValueError(f"Missing nuisance parameters {x_name!r} or {y_name!r} for observation {obs_id}")
+                raise ValueError(
+                    f"Missing nuisance parameters {x_name!r} or {y_name!r} for observation {obs_id}"
+                )
             disp_x = pars[x_name]
             disp_y = pars[y_name]
             if rot_name is not None:
                 if rot_name not in pars:
-                    raise ValueError( f"Missing rotation parameter {rot_name!r} for observation {obs_id}")
+                    raise ValueError(
+                        f"Missing rotation parameter {rot_name!r} for observation {obs_id}"
+                    )
                 theta = pars[rot_name]
                 cos_theta = np.cos(theta)
                 sin_theta = np.sin(theta)
-                disp_x, disp_y = (cos_theta * disp_x - sin_theta * disp_y, sin_theta * disp_x + cos_theta * disp_y)
+                disp_x, disp_y = (
+                    cos_theta * disp_x - sin_theta * disp_y,
+                    sin_theta * disp_x + cos_theta * disp_y,
+                )
             dx.append(disp_x)
             dy.append(disp_y)
         param_names = f"{x_name}, {y_name}"
@@ -901,7 +936,10 @@ def plot_receiver_nuisance_transform_displacements(
                 theta = transform.rot
                 cos_theta = np.cos(theta)
                 sin_theta = np.sin(theta)
-                disp_x, disp_y = ( cos_theta * disp_x - sin_theta * disp_y, sin_theta * disp_x + cos_theta * disp_y)
+                disp_x, disp_y = (
+                    cos_theta * disp_x - sin_theta * disp_y,
+                    sin_theta * disp_x + cos_theta * disp_y,
+                )
                 x0.append(xc)
                 y0.append(yc)
                 dx.append(disp_x)
@@ -920,6 +958,7 @@ def plot_receiver_nuisance_transform_displacements(
         scale_str=scale_str,
         figsize=figsize,
     )
+
 
 def plot_receiver_resid_vs_enc(
     receiver: Receiver,
@@ -1111,7 +1150,9 @@ def plot_receiver_residuals(
     if not any(len(residuals[i]) > 0 for i in components):
         return None
 
-    fig, axs = plt.subplots( 1, len(components), figsize=figsize, squeeze=False, constrained_layout=True)
+    fig, axs = plt.subplots(
+        1, len(components), figsize=figsize, squeeze=False, constrained_layout=True
+    )
     for ax, idx, label in zip(axs[0], components, labels):
         data = residuals[idx]
         if len(data) == 0:
@@ -1128,12 +1169,22 @@ def plot_receiver_residuals(
             ax.axvline(0, color="black", linestyle="--", linewidth=1)
 
         median = np.median(data)
-        ax.axvline( median, color="red", linestyle="-", linewidth=1.5, label=f"Median: {median:.3g}")
+        ax.axvline(
+            median,
+            color="red",
+            linestyle="-",
+            linewidth=1.5,
+            label=f"Median: {median:.3g}",
+        )
         ax.set_xlabel(label)
         ax.set_ylabel("Detectors")
         ax.legend()
 
     fig.suptitle(f"{receiver.name} Residuals")
     os.makedirs(output_dir, exist_ok=True)
-    fig.savefig( os.path.join(output_dir, f"{receiver.name}_residuals.png"), dpi=dpi, bbox_inches="tight")
+    fig.savefig(
+        os.path.join(output_dir, f"{receiver.name}_residuals.png"),
+        dpi=dpi,
+        bbox_inches="tight",
+    )
     plt.close(fig)

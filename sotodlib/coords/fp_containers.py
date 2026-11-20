@@ -248,7 +248,14 @@ def _transformed(
     return to_ret
 
 
-def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, template_name: str, weights_name: str, attr_name: str, apply_wmsk: bool = True):
+def _get_aff(
+    self: FocalPlane | FocalPlaneCollection,
+    data_name: str,
+    template_name: str,
+    weights_name: str,
+    attr_name: str,
+    apply_wmsk: bool = True,
+):
     to_ret = Transform.identity()
     wmsk = self.wmsk
     if np.sum(wmsk) < 4:
@@ -266,13 +273,17 @@ def _get_aff(self: FocalPlane | FocalPlaneCollection, data_name: str, template_n
     to_ret.affine[:2, :2] = affine
     if not self.fake_gamma:
         to_ret.affine[-1, -1], to_ret.shift[-1] = gamma_fit(
-            getattr(self, template_name).xyz[msk, 2], getattr(self, data_name).xyz[msk, 2]
+            getattr(self, template_name).xyz[msk, 2],
+            getattr(self, data_name).xyz[msk, 2],
         )
     if self.autofreeze:
         setattr(self, attr_name, to_ret)
     return to_ret
 
-def setup_fit_params( system: PointingSystem, cfg: Namespace, nuisance_params: NuisanceParams) -> tuple[np.ndarray, list[tuple[float, float]], np.ndarray]:
+
+def setup_fit_params(
+    system: PointingSystem, cfg: Namespace, nuisance_params: NuisanceParams
+) -> tuple[np.ndarray, list[tuple[float, float]], np.ndarray]:
     """
     Set up fit parameters, including nuisance parameters.
 
@@ -280,7 +291,7 @@ def setup_fit_params( system: PointingSystem, cfg: Namespace, nuisance_params: N
     ----------
     system : PointingSystem
         Pointing system containing the non-nuisance parameters.
-    cfg : Namespace 
+    cfg : Namespace
         Configuration containing parameter initial values, bounds and static flags.
     nuisance_params : NuisanceParams
         Per-observation nuisance parameters.
@@ -308,7 +319,7 @@ def setup_fit_params( system: PointingSystem, cfg: Namespace, nuisance_params: N
         if par.get("static", False):
             bounds[idx] = (params[idx], params[idx])
             continue
-        bounds[idx] = tuple( float(b) for b in par.get("bounds", bounds[idx]))[:2]  # type: ignore
+        bounds[idx] = tuple(float(b) for b in par.get("bounds", bounds[idx]))[:2]  # type: ignore
         lo, hi = bounds[idx]
         if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
             scales[idx] = hi - lo
@@ -320,7 +331,10 @@ def setup_fit_params( system: PointingSystem, cfg: Namespace, nuisance_params: N
     for par_dict in nuisance_params.par_list:
         for name, value in par_dict.items():
             if name not in system.parameter_names:
-                logger.warning("No equivalent non-nuisance parameter found for nuisance parameter %s", name)
+                logger.warning(
+                    "No equivalent non-nuisance parameter found for nuisance parameter %s",
+                    name,
+                )
                 nuisance_values.append(value)
                 nuisance_bounds.append((-np.inf, np.inf))
                 nuisance_scales.append(1.0)
@@ -328,7 +342,12 @@ def setup_fit_params( system: PointingSystem, cfg: Namespace, nuisance_params: N
             idx = system.parameter_names.index(name)
             nuisance_values.append(value)
             lo, hi = bounds[idx]
-            nuisance_bounds.append((value - (value - lo)/cfg.nuisance_scale, value + (hi - value)/cfg.nuisance_scale))
+            nuisance_bounds.append(
+                (
+                    value - (value - lo) / cfg.nuisance_scale,
+                    value + (hi - value) / cfg.nuisance_scale,
+                )
+            )
             nuisance_scales.append(scales[idx])
 
     # Append nuisance parameters
@@ -375,6 +394,7 @@ class StaticOrCached(Generic[T]):
             return res
         return getattr(obj, f"_{self.name}_dyn")
 
+
 @dataclass
 class NuisanceParams:
     """
@@ -398,9 +418,10 @@ class NuisanceParams:
         (Property) Flattened array of all nuisance parameter values, concatenated
         in `par_list` order and preserving the insertion order of each dictionary.
     """
-    obs_mapping : dict[str, int]
-    par_list : list[dict[str, float]]
-    transform_list : list[Transform]
+
+    obs_mapping: dict[str, int]
+    par_list: list[dict[str, float]]
+    transform_list: list[Transform]
 
     def __getitem__(self, key) -> tuple[dict[str, float], Transform]:
         if key not in self.obs_mapping:
@@ -410,8 +431,11 @@ class NuisanceParams:
 
     @property
     def params_flat(self) -> Float[np.ndarray, "npar"]:
-        return np.array([ value for par_dict in self.par_list for value in par_dict.values()], dtype=float)
-    
+        return np.array(
+            [value for par_dict in self.par_list for value in par_dict.values()],
+            dtype=float,
+        )
+
     def update(self, params: Float[np.ndarray, "npar"]):
         """
         Update nuisance parameters from a flattened parameter array.
@@ -429,7 +453,9 @@ class NuisanceParams:
                 idx += 1
 
     @classmethod
-    def from_system(cls, system : PointingSystem, nuisance_pars: dict[str, float], threshold: float) -> NuisanceParams:
+    def from_system(
+        cls, system: PointingSystem, nuisance_pars: dict[str, float], threshold: float
+    ) -> NuisanceParams:
         """
         Construct nuisance parameters and transforms from a pointing system.
 
@@ -461,11 +487,13 @@ class NuisanceParams:
                 for fp in ot.focal_planes:
                     for meas in fp.focal_planes:
                         obs_ids += [meas.meas_id]
-                        timestamps += [float(meas.meas_id.split('_')[1])]
-        obs_ids_split, _ = epochs.group_obs(np.asarray(obs_ids), np.asarray(timestamps), threshold)
+                        timestamps += [float(meas.meas_id.split("_")[1])]
+        obs_ids_split, _ = epochs.group_obs(
+            np.asarray(obs_ids), np.asarray(timestamps), threshold
+        )
         obs_mapping = {}
         for i, obs_list in enumerate(obs_ids_split):
-            obs_mapping.update({obs_id : i for obs_id in obs_list})
+            obs_mapping.update({obs_id: i for obs_id in obs_list})
         par_list = [nuisance_pars.copy() for _ in range(len(obs_ids_split))]
         transform_list = [Transform.identity() for _ in range(len(obs_ids_split))]
         return cls(obs_mapping, par_list, transform_list)
@@ -532,7 +560,9 @@ class NuisanceParams:
             rev_mapping[idx] += [meas_id]
         done_idx = set()
         for rx in system.receivers:
-            rx_aff_inv, rx_sft_inv = mt.invert_transform(rx.cm_transform.affine, rx.cm_transform.shift)
+            rx_aff_inv, rx_sft_inv = mt.invert_transform(
+                rx.cm_transform.affine, rx.cm_transform.shift
+            )
             affs = {}
             sfts = {}
             rx_ids = []
@@ -549,17 +579,28 @@ class NuisanceParams:
                 inrx = np.isin(meas_ids, rx_ids)
                 if not np.all(inrx):
                     if np.any(inrx):
-                        raise ValueError(f"Somehow obs_ids {meas_ids} are not all in the same Receiver!")
+                        raise ValueError(
+                            f"Somehow obs_ids {meas_ids} are not all in the same Receiver!"
+                        )
                     continue
-                cm_aff, cm_shift = mt.get_common_mode([affs[mid] for mid in meas_ids], [sfts[mid] for mid in meas_ids], -2, False, fast=True)
-                n_aff, n_sft = mt.invert_transform(mt.compose_transforms(cm_aff, cm_shift, rx_aff_inv, rx_sft_inv))
+                cm_aff, cm_shift = mt.get_common_mode(
+                    [affs[mid] for mid in meas_ids],
+                    [sfts[mid] for mid in meas_ids],
+                    -2,
+                    False,
+                    fast=True,
+                )
+                n_aff, n_sft = mt.invert_transform(
+                    *mt.compose_transform(cm_aff, cm_shift, rx_aff_inv, rx_sft_inv)
+                )
                 trf_old = self.transform_list[i]
-                n_aff, n_sft = mt.compose_transforms(trf_old.affine, trf_old.shift, n_aff, n_sft)
+                n_aff, n_sft = mt.compose_transform(
+                    trf_old.affine, trf_old.shift, n_aff, n_sft
+                )
                 self.transform_list[i] = Transform(n_aff, n_sft)
                 done_idx.add(i)
         if len(done_idx) != len(self.transform_list):
             raise ValueError("Not all obs were completed! Check your receiver objects!")
-
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -580,18 +621,34 @@ class NuisanceParams:
         data = np.empty(len(obs_ids), dtype=dtype)
         data["obs:obs_id"] = obs_ids
         data["par_idx"] = par_idx
-        write_dataset(metadata.ResultSet.from_friend(data), f, os.path.join(path, "obs_mapping"), overwrite=overwrite)
+        write_dataset(
+            metadata.ResultSet.from_friend(data),
+            f,
+            os.path.join(path, "obs_mapping"),
+            overwrite=overwrite,
+        )
 
         npar = len(self.par_list[0]) if self.par_list else 0
         par_idx = np.repeat(np.arange(len(self.par_list)), npar)
         par_name = np.array([name for pars in self.par_list for name in pars.keys()])
-        par_value = np.array([value for pars in self.par_list for value in pars.values()])
-        dtype = [("par_idx", par_idx.dtype), ("par_name", par_name.dtype), ("par_value", par_value.dtype)]
+        par_value = np.array(
+            [value for pars in self.par_list for value in pars.values()]
+        )
+        dtype = [
+            ("par_idx", par_idx.dtype),
+            ("par_name", par_name.dtype),
+            ("par_value", par_value.dtype),
+        ]
         data = np.empty(len(par_idx), dtype=dtype)
         data["par_idx"] = par_idx
         data["par_name"] = par_name
         data["par_value"] = par_value
-        write_dataset(metadata.ResultSet.from_friend(data), f, os.path.join(path, "par_list"), overwrite=overwrite)
+        write_dataset(
+            metadata.ResultSet.from_friend(data),
+            f,
+            os.path.join(path, "par_list"),
+            overwrite=overwrite,
+        )
 
         _ = _create_group(f, os.path.join(path, "transform_list"), overwrite)
         for i, trf in enumerate(self.transform_list):
@@ -616,8 +673,7 @@ class NuisanceParams:
         """
         data = read_dataset(f, os.path.join(path, "obs_mapping")).asarray()
         obs_mapping: dict[str, int] = {
-            str(row["obs:obs_id"]): int(row["par_idx"])
-            for row in data
+            str(row["obs:obs_id"]): int(row["par_idx"]) for row in data
         }
 
         data = read_dataset(f, os.path.join(path, "par_list")).asarray()
@@ -626,13 +682,17 @@ class NuisanceParams:
         for row in data:
             name = row["par_name"]
             par_list[int(row["par_idx"])][str(name)] = float(row["par_value"])
-        
+
         if os.path.join(path, "transform_list") in f:
-            transform_list = [Transform.load(f, os.path.join(path, "transform_list", f"{i}")) for i in range(len(par_list))]
+            transform_list = [
+                Transform.load(f, os.path.join(path, "transform_list", f"{i}"))
+                for i in range(len(par_list))
+            ]
         else:
             transform_list = [Transform.identity() for _ in range(len(par_list))]
 
         return cls(obs_mapping, par_list, transform_list)
+
 
 @dataclass
 class PointingModel:
@@ -662,7 +722,6 @@ class PointingModel:
     nuisance_params: NuisanceParams
     force_zero_roll: bool
     pad: bool = False
-
 
     def apply_det(
         self,
@@ -725,7 +784,7 @@ class PointingModel:
         """
         to_ret = deepcopy(meas.data)
         if len(self.parameters) == 0:
-            return to_ret 
+            return to_ret
 
         # Apply nuisance
         params_use = deepcopy(self.parameters)
@@ -735,13 +794,13 @@ class PointingModel:
 
         # Start with the input detector coordinates
         if not np.any(meas.wmsk):
-            return to_ret 
+            return to_ret
         estimate = meas.data_msk.xyz.copy()
         if meas.fake_gamma:
             estimate = estimate[:, :2]
-        fp_target = meas.data_msk 
+        fp_target = meas.data_msk
         fp = meas.data_msk.fp
-        det_enc_msk = meas.enc_msk 
+        det_enc_msk = meas.enc_msk
         ancil = det_enc_msk.ancil
         if self.force_zero_roll:
             q_enc = det_enc_msk.q_enc_zero_roll
@@ -764,7 +823,12 @@ class PointingModel:
             # Apply the pointing model
             bs, fp_corrected = apply_pointing_model(None, params_use, ancil, fp)
             bs = cast(AxisManager, bs)
-            xi, eta, gamma = quat.decompose_xieta(~quat.euler(2, bs.roll) * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el) * q_enc * q_fp)
+            xi, eta, gamma = quat.decompose_xieta(
+                ~quat.euler(2, bs.roll)
+                * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
+                * q_enc
+                * q_fp
+            )
 
             if fp_corrected is None:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
@@ -811,8 +875,8 @@ class PointingModel:
             estimate -= alpha * distortion
 
         raise RuntimeError(
-             f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
-         )
+            f"Pointing-model inversion did not converge after {max_iter} iterations (error={err:.3e} rad)."
+        )
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """
@@ -1002,8 +1066,8 @@ class DetectorOffsets:
     coordinates. The `xi`, `eta`, `gamma`, `az`, `el`, and `roll` properties
     provide convenient access to individual coordinates and raise a
     `ValueError` if accessed when `coordsys` is incompatible.
-    
-    Cached properties are cleared when `xyz` is assigned to. 
+
+    Cached properties are cleared when `xyz` is assigned to.
 
     Attributes
     ----------
@@ -1145,7 +1209,9 @@ class DetectorOffsets:
 
     @cached_property
     def q_enc_zero_roll(self):
-        return quat.rotation_lonlat(-1 * self.az, self.el) * quat.euler(2, 0*self.roll)
+        return quat.rotation_lonlat(-1 * self.az, self.el) * quat.euler(
+            2, 0 * self.roll
+        )
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """Save detector offsets to an HDF5 ResultSet.
@@ -1335,6 +1401,7 @@ class FocalPlane:
     pm_data_msk : DetectorOffsets
         (Property) Pointing model corrected detector offsets selected by `wmsk`.
     """
+
     name: str
     meas_id: str
     data: DetectorOffsets
@@ -1555,7 +1622,7 @@ class FocalPlane:
 
         # ~1 sigma cut
         weights[weights < 0.61] = 0
-        valid_msk *= (weights == 0)
+        valid_msk *= weights == 0
 
         return cls(
             name,
@@ -1599,7 +1666,7 @@ class FocalPlane:
         static : bool
             What to set `self.static` to after thawing.
         """
-        self.__dict__.pop("_pm_data_stat", None) 
+        self.__dict__.pop("_pm_data_stat", None)
         self.__dict__.pop("_fpc_transformed_stat", None)
         self.__dict__.pop("_transform_stat", None)
         self.__dict__.pop("_transformed_stat", None)
@@ -1609,14 +1676,16 @@ class FocalPlane:
 
     @property
     def _pm_data_dyn(self) -> DetectorOffsets:
-        to_ret = self.pointing_model.apply_det( self)
+        to_ret = self.pointing_model.apply_det(self)
         if self.autofreeze:
             self._pm_data_stat = to_ret
         return to_ret
 
     @property
     def _transform_dyn(self) -> Transform:
-        return _get_aff(self, "data_msk", "template_msk", "weights_msk", "_transform_stat", False)
+        return _get_aff(
+            self, "data_msk", "template_msk", "weights_msk", "_transform_stat", False
+        )
 
     @property
     def _transformed_dyn(self) -> DetectorOffsets:
@@ -1624,7 +1693,14 @@ class FocalPlane:
 
     @property
     def _pm_transform_dyn(self) -> Transform:
-        return _get_aff(self, "pm_data_msk", "template_msk", "weights_msk", "_pm_transform_stat", False)
+        return _get_aff(
+            self,
+            "pm_data_msk",
+            "template_msk",
+            "weights_msk",
+            "_pm_transform_stat",
+            False,
+        )
 
     @property
     def _pm_transformed_dyn(self) -> DetectorOffsets:
@@ -1932,8 +2008,8 @@ class FocalPlaneCollection:
         static : bool
             What to set `self.static` to after thawing.
         """
-        self.__dict__.pop("_weights_stat", None) 
-        self.__dict__.pop("_data_stat", None) 
+        self.__dict__.pop("_weights_stat", None)
+        self.__dict__.pop("_data_stat", None)
         self.__dict__.pop("_transform_stat", None)
         self.__dict__.pop("_transformed_stat", None)
         self.static = static
@@ -1948,7 +2024,7 @@ class FocalPlaneCollection:
 
     @property
     def residuals(self) -> Float[np.ndarray, "ndet*nobs"]:
-        n_data = self.ndet*self.nobs
+        n_data = self.ndet * self.nobs
         if n_data == 0:
             return np.empty(0)
         if "_residual_buffer" in self.__dict__ and len(self._residual_buffer) == n_data:
@@ -1961,9 +2037,11 @@ class FocalPlaneCollection:
             ndim = 3 - int(meas.fake_gamma)
             r = np.linalg.norm(meas.fpc_resid[:, :ndim], axis=1) * meas.weights
             r[~meas.wmsk] = 0
-            resid[i:(i+len(r))] = r
+            resid[i : (i + len(r))] = r
             i += len(r)
-        to_ret = np.nan_to_num(resid, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
+        to_ret = np.nan_to_num(
+            resid, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf
+        )
         if to_ret is None:
             raise TypeError
         return to_ret
@@ -1979,7 +2057,9 @@ class FocalPlaneCollection:
         fmsk = np.zeros(len(to_ret.xyz), dtype=bool)
         for meas in self.focal_planes:
             fmsk += meas.wmsk
-            to_ret.xyz[meas.wmsk] += meas.pm_data.xyz[meas.wmsk] * meas.weights[meas.wmsk, None]
+            to_ret.xyz[meas.wmsk] += (
+                meas.pm_data.xyz[meas.wmsk] * meas.weights[meas.wmsk, None]
+            )
         to_ret.xyz[~fmsk] = np.nan
         to_ret.xyz[fmsk] /= self.weights[fmsk, None]
         to_ret.center = None
@@ -1989,7 +2069,7 @@ class FocalPlaneCollection:
 
     @property
     def _weights_dyn(self) -> Float[np.ndarray, "ndet"]:
-        weights_full = np.asarray( [fp.weights for fp in self.focal_planes])
+        weights_full = np.asarray([fp.weights for fp in self.focal_planes])
         to_ret = np.nansum(weights_full, axis=0)
         if self.autofreeze:
             self._weights_stat = to_ret
@@ -2200,6 +2280,7 @@ class OpticsTube:
         tube are padded and should therefore be excluded from common-mode
         calculations. Returns True if the collection is empty.
     """
+
     name: str
     focal_planes: list[FocalPlaneCollection]
     wafer_slots: list[str]
@@ -2262,7 +2343,9 @@ class OpticsTube:
         elif len(transforms) == 1:
             cm_aff, cm_shift = transforms[0], shifts[0]
         else:
-            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, False, fast=True)
+            cm_aff, cm_shift = mt.get_common_mode(
+                transforms, shifts, -2, False, fast=True
+            )
         to_ret = Transform(cm_shift, cm_aff)
         if self.autofreeze:
             self._cm_transform_stat = to_ret
@@ -2514,7 +2597,9 @@ class Receiver:
         elif len(transforms) == 1:
             cm_aff, cm_shift = transforms[0], shifts[0]
         else:
-            cm_aff, cm_shift = mt.get_common_mode(transforms, shifts, -2, True, fast=True)
+            cm_aff, cm_shift = mt.get_common_mode(
+                transforms, shifts, -2, True, fast=True
+            )
         to_ret = Transform(cm_shift, cm_aff)
         if self.autofreeze:
             self._cm_transform_stat = to_ret
@@ -2619,30 +2704,30 @@ class Receiver:
 class PointingSystem:
     """
     Collection of epoch-dependent pointing models and receiver data.
-    
+
     A `PointingSystem` combines an observing era, a collection of pointing
     models, and the corresponding receiver-level focal-plane data. It provides
     a unified interface for managing pointing model parameters, evaluating
     focal-plane residuals, calculating common-mode transforms, and optimizing
     the complete pointing solution.
-    
+
     Pointing model parameters are managed through `parameter_names` and
     `parameter_map`. These define the independent parameters of the system
     and specify which pointing models each parameter applies to. A parameter
     may be shared across multiple epochs or restricted to a subset of epochs.
     Nuisance parameters are managed separately through `NuisanceParams`.
-    
+
     The receiver data are organized hierarchically:
     `PointingSystem -> Receiver -> OpticsTube -> FocalPlaneCollection -> FocalPlane`.
-    
+
     The system provides two objective functions for optimization:
-    
+
     - `objective` evaluates the total chi-squared, including regularization
       of receiver common-mode transforms.
     - `objective_resid` returns the corresponding residual vector, allowing
       least-squares optimizers to operate directly on the residuals.
-    
-    
+
+
     Attributes
     ----------
     era : epochs.Era
@@ -2774,35 +2859,39 @@ class PointingSystem:
         )
 
     def update_parameters(self, new_pars: Float[np.ndarray, "npar"]):
-       """
-       Update the pointing model and nuisance parameter values.
+        """
+        Update the pointing model and nuisance parameter values.
 
-       The independent pointing model parameters are distributed to the
-       corresponding `PointingModel` instances according to `parameter_map`.
-       Parameters mapped to multiple pointing models are updated consistently
-       across all associated epochs.
+        The independent pointing model parameters are distributed to the
+        corresponding `PointingModel` instances according to `parameter_map`.
+        Parameters mapped to multiple pointing models are updated consistently
+        across all associated epochs.
 
-       If additional values are provided beyond the independent pointing
-       model parameters, they are passed to `NuisanceParams.update`.
+        If additional values are provided beyond the independent pointing
+        model parameters, they are passed to `NuisanceParams.update`.
 
-       Updating parameters modifies the underlying `PointingModel` instances
-       and `NuisanceParams` in place. It does not explicitly freeze or thaw
-       the derived quantities of the pointing system.
+        Updating parameters modifies the underlying `PointingModel` instances
+        and `NuisanceParams` in place. It does not explicitly freeze or thaw
+        the derived quantities of the pointing system.
 
-       Parameters
-       ----------
-       new_pars : Float[np.ndarray, "npar"]
-           New parameter values. The first `len(parameter_names)` entries
-           correspond to the independent pointing model parameters. Any
-           remaining entries correspond to the flattened nuisance parameters.
-       """
+        Parameters
+        ----------
+        new_pars : Float[np.ndarray, "npar"]
+            New parameter values. The first `len(parameter_names)` entries
+            correspond to the independent pointing model parameters. Any
+            remaining entries correspond to the flattened nuisance parameters.
+        """
         npar = len(self.parameter_names)
         if len(new_pars) < npar:
-            raise ValueError( f"Expected at least {npar} parameters, got {len(new_pars)}")
+            raise ValueError(
+                f"Expected at least {npar} parameters, got {len(new_pars)}"
+            )
         if len(new_pars) > npar + len(self.nuisance_params.params_flat):
             raise ValueError("Too many parameters supplied")
 
-        for val, par, par_map in zip( new_pars[:npar], self.parameter_names, self.parameter_map):
+        for val, par, par_map in zip(
+            new_pars[:npar], self.parameter_names, self.parameter_map
+        ):
             name = par.split("(")[0]
             for idx in par_map:
                 self.pointing_models[idx].parameters[name] = val
@@ -2817,7 +2906,7 @@ class PointingSystem:
                 for fp in ot.focal_planes:
                     if fp.pad:
                         continue
-                    n += fp.ndet*fp.nobs
+                    n += fp.ndet * fp.nobs
         return n
 
     @property
@@ -2835,11 +2924,11 @@ class PointingSystem:
                     if fp.pad:
                         continue
                     fpr = fp.residuals
-                    resid[i:(i+len(fpr))] = fpr
+                    resid[i : (i + len(fpr))] = fpr
                     i += len(fpr)
         if i != n_data:
-            raise RuntimeError( f"Residual size mismatch: expected {n_data}, got {i}")
-        return resid 
+            raise RuntimeError(f"Residual size mismatch: expected {n_data}, got {i}")
+        return resid
 
     @property
     def chisq(self) -> float:
@@ -2852,7 +2941,9 @@ class PointingSystem:
                     chisq += fp.chisq
         return chisq
 
-    def objective( self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> float:
+    def objective(
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+    ) -> float:
         """
         Evaluate the total chi-squared objective function.
 
@@ -2893,12 +2984,17 @@ class PointingSystem:
             chisq = self.chisq
             if np.isfinite(chisq):
                 for rx in self.receivers:
-                    chisq += np.sum((cm_fac*nresid*rx.cm_transform.shift)**2) + (cm_fac*nresid*rx.cm_transform.rot)**2
+                    chisq += (
+                        np.sum((cm_fac * nresid * rx.cm_transform.shift) ** 2)
+                        + (cm_fac * nresid * rx.cm_transform.rot) ** 2
+                    )
             return chisq
         except (RuntimeError, AssertionError):
             return 1e6
 
-    def objective_resid( self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> Float[np.ndarray, "nresid_full"]:
+    def objective_resid(
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+    ) -> Float[np.ndarray, "nresid_full"]:
         """
         Evaluate the residual vector used by least-squares optimization.
 
@@ -2933,38 +3029,45 @@ class PointingSystem:
             residuals followed by the receiver common-mode shift and
             rotation regularization terms.
         """
-         print("obj")
-         self.update_parameters(params)
-         self.set_thaw(True)
-         try:
-             resid = [self.residuals,]
-             for rx in self.receivers:
-                 resid += [(cm_fac * nresid * rx.cm_transform.shift).ravel(), np.atleast_1d(cm_fac*nresid * rx.cm_transform.rot).ravel()]
-             return np.hstack(resid)
-         except (RuntimeError, AssertionError):
-             return np.full(nresid, 1e3)
+        print('.', end='', flush=True)
+        self.update_parameters(params)
+        self.set_thaw(True)
+        try:
+            resid = [
+                self.residuals,
+            ]
+            for rx in self.receivers:
+                resid += [
+                    (cm_fac * nresid * rx.cm_transform.shift).ravel(),
+                    np.atleast_1d(cm_fac * nresid * rx.cm_transform.rot).ravel(),
+                ]
+            return np.hstack(resid)
+        except (RuntimeError, AssertionError):
+            return np.full(nresid, 1e3)
 
-    def log_prob(self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float) -> float:
-       """
-       Calculate the log probability of the current parameter values.
+    def log_prob(
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+    ) -> float:
+        """
+        Calculate the log probability of the current parameter values.
 
-       This is defined as -0.5 times the objective function evaluated
-       at the supplied parameters.
+        This is defined as -0.5 times the objective function evaluated
+        at the supplied parameters.
 
-       Parameters
-       ----------
-       params : Float[np.ndarray, "npar"]
-           Parameter values to evaluate.
-       nresid : int
-           Number of residuals used to scale the common-mode penalty.
-       cm_fac : float
-           Scaling factor applied to the common-mode penalty.
+        Parameters
+        ----------
+        params : Float[np.ndarray, "npar"]
+            Parameter values to evaluate.
+        nresid : int
+            Number of residuals used to scale the common-mode penalty.
+        cm_fac : float
+            Scaling factor applied to the common-mode penalty.
 
-       Returns
-       -------
-       log_prob : float
-           Log probability of the supplied parameter values.
-       """
+        Returns
+        -------
+        log_prob : float
+            Log probability of the supplied parameter values.
+        """
         return -0.5 * self.objective(params, nresid, cm_fac)
 
     @overload
@@ -3140,7 +3243,11 @@ class PointingSystem:
         rxs = []
         pms = []
         for epoch in era.epochs:
-            pms += [PointingModel(epoch.name, {}, nuisance_params, cfg.force_zero_roll, False)]
+            pms += [
+                PointingModel(
+                    epoch.name, {}, nuisance_params, cfg.force_zero_roll, False
+                )
+            ]
             ws_map = epoch.covers[0].data["ws_mapping"]
             ots = []
             for ot, arrays in ws_map.items():
@@ -3190,7 +3297,9 @@ class PointingSystem:
                         ]
                         good = all(x == allf[0] for x in allf)
                     if not good:
-                        raise ValueError(f"Inconsistent {field} values in {desc} group {grp}")
+                        raise ValueError(
+                            f"Inconsistent {field} values in {desc} group {grp}"
+                        )
                 in_group = [d for d in dat if d.epoch in grp]
                 if len(in_group) < len(grp):
                     raise ValueError(f"Unknown epoch in {desc} group {grp}")
@@ -3237,7 +3346,16 @@ class PointingSystem:
         par_names = tuple(name for name, n in zip(par_names, n_mapped) if n > 0)
         par_map = tuple(np.array(pmap) for pmap, n in zip(par_map, n_mapped) if n > 0)
 
-        return cls(era, tuple(pms), tuple(rxs), nuisance_params, par_names, par_map, calender_str, {})
+        return cls(
+            era,
+            tuple(pms),
+            tuple(rxs),
+            nuisance_params,
+            par_names,
+            par_map,
+            calender_str,
+            {},
+        )
 
     def set_pm_to_defaults(self, cfg):
         params = self.parameters.copy()
@@ -3246,13 +3364,14 @@ class PointingSystem:
             pm_ver = cfg.pm_ver_override.get(pm.epoch, cfg.pm_ver)
             pars = deepcopy(param_defaults[pm_ver])
             pars.update(cfg.pm_defaults_overrides[pm_ver])
-            def_pars += [pars] 
-        for i, (p_idx, name) in enumerate(zip(self.parameter_map, self.parameter_names)):
+            def_pars += [pars]
+        for i, (p_idx, name) in enumerate(
+            zip(self.parameter_map, self.parameter_names)
+        ):
             pars = def_pars[p_idx[0]]
             par_name = name.split("(")[0]
             params[i] = pars[par_name]
         self.update_parameters(params)
-
 
     def save(self, f: h5py.File, path: str, overwrite: bool = True):
         """

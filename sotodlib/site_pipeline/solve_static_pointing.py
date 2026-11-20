@@ -90,7 +90,6 @@ class ErrCode(Enum):
     FPINIT = 7
 
 
-
 def least_squares_fixed(fun, x0, bounds, x_scale, jac_sparsity, args=(), **kwargs):
     x0 = np.asarray(x0, dtype=float)
     lb = np.asarray(bounds[0], dtype=float)
@@ -136,7 +135,9 @@ def _report_fit(res, cfg, system, npar, x0, report_static, report_nuisance):
         header = f"{'Parameter Name':<35} {'Optimized Value':>18} {'Change':>18}"
         logger.info("Parameter changes:\n%s", header)
         logger.info("-" * len(header))
-        for name, value, change in zip(system.parameter_names, system.parameters, changes):
+        for name, value, change in zip(
+            system.parameter_names, system.parameters, changes
+        ):
             logger.info(f"{name:<35} {value:>18.8g} {change:>18.8g}")
     if report_nuisance:
         nn = len(cfg.nuisance_params)
@@ -149,10 +150,23 @@ def _report_fit(res, cfg, system, npar, x0, report_static, report_nuisance):
         header = f"{'Nuisance Name':<35} {'Average Value':>18} {'Average Change':>18} {'Net Value':>18} {'Net Change':>18}"
         logger.info("Parameter changes:\n%s", header)
         logger.info("-" * len(header))
-        for name, a, ac, t, tc in zip(cfg.nuisance_params.keys(), avg, avg_change, tot, tot_change):
+        for name, a, ac, t, tc in zip(
+            cfg.nuisance_params.keys(), avg, avg_change, tot, tot_change
+        ):
             logger.info(f"{name:<35} {a:>18.8g} {ac:>18.8g} {t:>18.8g} {tc:>18.8g}")
 
-def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsity, cm_fac, **kwargs):
+
+def _fit_round(
+    system,
+    x0,
+    bounds,
+    scales,
+    nresid,
+    use_least_squares,
+    jac_sparsity,
+    cm_fac,
+    **kwargs,
+):
     if use_least_squares:
         lb = np.array([b[0] for b in bounds])
         ub = np.array([b[1] for b in bounds])
@@ -164,7 +178,7 @@ def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsi
             jac_sparsity=jac_sparsity,
             args=(nresid, cm_fac),
             method="trf",
-            loss="linear", #"soft_l1",
+            loss="linear",  # "soft_l1",
             tr_solver="lsmr",
             verbose=2,
             **kwargs,
@@ -172,7 +186,10 @@ def _fit_round(system, x0, bounds, scales, nresid, use_least_squares, jac_sparsi
 
         return res, res.x
 
-    scaled_bounds = [(lo / scale, hi / scale) for (lo, hi), scale in zip(bounds, scales)]
+    scaled_bounds = [
+        (lo / scale, hi / scale) for (lo, hi), scale in zip(bounds, scales)
+    ]
+
     def scaled_objective(z):
         return system.objective(z * scales, nresid, cm_fac)
 
@@ -228,8 +245,13 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
     if np.any(proposal_scales[free_mask] <= 0):
         raise ValueError("All free parameters must have positive proposal scales.")
 
-    logger.info( "Gibbs MCMC: %d physical, %d nuisance, %d fixed parameters", nphysical, nnuisance_free, np.sum(fixed_mask))
-    logger.info( "Running %d Gibbs iterations", cfg.mcmc_steps)
+    logger.info(
+        "Gibbs MCMC: %d physical, %d nuisance, %d fixed parameters",
+        nphysical,
+        nnuisance_free,
+        np.sum(fixed_mask),
+    )
+    logger.info("Running %d Gibbs iterations", cfg.mcmc_steps)
 
     # Full joint log probability
     def log_prob(x):
@@ -247,28 +269,30 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         if not np.isfinite(value):
             return -np.inf
         return value
+
     current_logp = log_prob(x)
 
     if not np.isfinite(current_logp):
         raise RuntimeError("Initial parameter vector has invalid log probability.")
     diagnostics = {
-         "physical": {
-             "bounds": 0,
-             "nonfinite": 0,
-             "errors": 0,
-             "metropolis": 0,
-             "accepted": 0,
-             "log_alpha": [],
-         },
-         "nuisance": {
-             "bounds": 0,
-             "nonfinite": 0,
-             "errors": 0,
-             "metropolis": 0,
-             "accepted": 0,
-             "log_alpha": [],
-         },
-     }
+        "physical": {
+            "bounds": 0,
+            "nonfinite": 0,
+            "errors": 0,
+            "metropolis": 0,
+            "accepted": 0,
+            "log_alpha": [],
+        },
+        "nuisance": {
+            "bounds": 0,
+            "nonfinite": 0,
+            "errors": 0,
+            "metropolis": 0,
+            "accepted": 0,
+            "log_alpha": [],
+        },
+    }
+
     def metropolis_step(x, current_logp, mask, block_name):
         indices = np.where(mask)[0]
 
@@ -277,10 +301,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
 
         proposal = x.copy()
 
-        proposal[indices] += (
-            rng.normal(size=len(indices))
-            * proposal_scales[indices]
-        )
+        proposal[indices] += rng.normal(size=len(indices)) * proposal_scales[indices]
 
         if np.any(proposal[indices] < lb[indices]) or np.any(
             proposal[indices] > ub[indices]
@@ -319,11 +340,15 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
     # Gibbs sampling
     for i in range(cfg.mcmc_steps):
         # Sample physical parameters conditional on the current nuisance parameters
-        x, current_logp, accepted = metropolis_step(x, current_logp, physical_free, "physical")
+        x, current_logp, accepted = metropolis_step(
+            x, current_logp, physical_free, "physical"
+        )
         physical_accept += accepted
 
         # Sample nuisance parameters conditional on the newly sampled physical parameters.
-        x, current_logp, accepted = metropolis_step(x, current_logp, nuisance_free, "nuisance")
+        x, current_logp, accepted = metropolis_step(
+            x, current_logp, nuisance_free, "nuisance"
+        )
         nuisance_accept += accepted
 
         samples[i] = x
@@ -373,16 +398,19 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         tau = emcee.autocorr.integrated_time(samples, quiet=True)
         discard = int(2 * np.nanmax(tau))
         logger.info("Autocorrelation times: %s", tau)
-        logger.info( "Estimated effective sample sizes: %s", np.round(cfg.mcmc_steps / tau).astype(int))
+        logger.info(
+            "Estimated effective sample sizes: %s",
+            np.round(cfg.mcmc_steps / tau).astype(int),
+        )
     except emcee.autocorr.AutocorrError:
-        logger.warning( "Chain too short to estimate autocorrelation time.")
+        logger.warning("Chain too short to estimate autocorrelation time.")
         discard = int(0.1 * cfg.mcmc_steps)
     except ValueError:
         logger.warning("Estimating autocorrelation time raised a ValueError.")
         discard = int(0.1 * cfg.mcmc_steps)
 
     if discard >= cfg.mcmc_steps:
-        raise RuntimeError( "MCMC chain too short relative to autocorrelation time.")
+        raise RuntimeError("MCMC chain too short relative to autocorrelation time.")
     logger.info("Discarding %d burn-in iterations", discard)
 
     posterior_samples = samples[discard:]
@@ -401,10 +429,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
 
     # Log physical parameter estimates.
     header = (
-        f"{'Parameter Name':<35}"
-        f"{'Median':>18}"
-        f"{'Lower':>18}"
-        f"{'Upper':>18}"
+        f"{'Parameter Name':<35}" f"{'Median':>18}" f"{'Lower':>18}" f"{'Upper':>18}"
     )
 
     logger.info("Physical parameter estimates:\n%s", header)
@@ -421,10 +446,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         suffix = " (fixed)" if fixed_mask[i] else ""
 
         logger.info(
-            f"{name + suffix:<35}"
-            f"{med:>18.8g}"
-            f"{lo:>18.8g}"
-            f"{hi:>18.8g}"
+            f"{name + suffix:<35}" f"{med:>18.8g}" f"{lo:>18.8g}" f"{hi:>18.8g}"
         )
 
     # Log nuisance parameter estimates
@@ -447,7 +469,11 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
     # Corner plot for physical parameters.
     plot_mask = physical_free
     physical_samples = posterior_samples[:, plot_mask]
-    physical_names = [name for name, include in zip(system.parameter_names, plot_mask[:npar]) if include]
+    physical_names = [
+        name
+        for name, include in zip(system.parameter_names, plot_mask[:npar])
+        if include
+    ]
     if physical_samples.shape[1] > 0:
         fig = corner.corner(
             physical_samples,
@@ -458,7 +484,9 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
             truths=median[plot_mask],
         )
 
-        fig.savefig( os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight")
+        fig.savefig(
+            os.path.join(plot_dir, "mcmc_corner.png"), dpi=200, bbox_inches="tight"
+        )
         plt.close(fig)
     _plot_fit(system, plot_dir, "mcmc", cfg)
     logger.info("Gibbs MCMC complete")
@@ -470,8 +498,10 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
         group = f.create_group("chain")
-        group.create_dataset( "samples", data=samples, compression="gzip")
-        group.create_dataset( "posterior_samples", data=posterior_samples, compression="gzip")
+        group.create_dataset("samples", data=samples, compression="gzip")
+        group.create_dataset(
+            "posterior_samples", data=posterior_samples, compression="gzip"
+        )
         group.create_dataset("fixed_mask", data=fixed_mask)
         group.attrs["ndim"] = ndim
         group.attrs["npar"] = npar
@@ -800,7 +830,7 @@ def _run_per_obs(open_jobs, done_jobs, jdb, ctx, system, cfg, plot_dir, outfile)
         len(done_jobs),
     )
     open_jobs += [None]
-    pm_pars = deepcopy(system.parameters) # Cache a copy of the pars
+    pm_pars = deepcopy(system.parameters)  # Cache a copy of the pars
     system.set_pm_to_defaults(cfg)
     for i, j in enumerate(open_jobs):
         if job is not None:
@@ -934,7 +964,9 @@ def _check_jobs(system, jdb, done_jobs, open_jobs):
         for ot in rx.optics_tubes:
             for fp in ot.focal_planes:
                 fp.focal_planes = [
-                    meas for meas in fp.focal_planes if f"{meas.meas_id}+{meas.name}" not in open_ids
+                    meas
+                    for meas in fp.focal_planes
+                    if f"{meas.meas_id}+{meas.name}" not in open_ids
                 ]
 
     return open_jobs, done_jobs
@@ -949,8 +981,12 @@ def _plot_fit(system, plot_dir, i, cfg):
         os.makedirs(pdir, exist_ok=True)
         fpp.plot_receiver(rx, pdir)
         fpp.plot_receiver_displacements(rx, [(None, None)], pdir)
-        fpp.plot_receiver_nuisance_displacements(rx, system.nuisance_params, cfg.nuisanse_plot, [(None, None)], pdir)
-        fpp.plot_receiver_nuisance_transform_displacements(rx, system.nuisance_params, [(None, None)], pdir)
+        fpp.plot_receiver_nuisance_displacements(
+            rx, system.nuisance_params, cfg.nuisance_plot, [(None, None)], pdir
+        )
+        fpp.plot_receiver_nuisance_transform_displacements(
+            rx, system.nuisance_params, [(None, None)], pdir
+        )
         fpp.plot_receiver_resid_vs_enc(rx, pdir)
         fpp.plot_receiver_residuals(rx, pdir)
         for ot in rx.optics_tubes:
@@ -1064,7 +1100,9 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                     meas.pointing_model = system.pointing_models[pm_idx]
 
     # Setup nuisance
-    nuisance_params = fpc.NuisanceParams.from_system(system, cfg.nuisance_params, cfg.obs_time_thresh)
+    nuisance_params = fpc.NuisanceParams.from_system(
+        system, cfg.nuisance_params, cfg.obs_time_thresh
+    )
     system.nuisance_params = nuisance_params
     for pm in system.pointing_models:
         pm.nuisance_params = nuisance_params
@@ -1081,10 +1119,12 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Setup fit params
     params, bounds, scales = fpc.setup_fit_params(system, cfg, system.nuisance_params)
     system.update_parameters(params)
-    logger.info(params[:len(system.parameters)])
+    logger.info(params[: len(system.parameters)])
     npar = len(system.parameters)
     nresid = len(system.residuals)
-    nresid_full = len(system.objective_resid(system.parameters_full, nresid, cfg.cm_fac))
+    nresid_full = len(
+        system.objective_resid(system.parameters_full, nresid, cfg.cm_fac)
+    )
     jac_sparsity = None
     if len(cfg.nuisance_params) > 0 and cfg.least_squares and cfg.n_rounds > 0:
         jac_sparsity = np.zeros((len(system.parameters_full), nresid_full), dtype=int)
@@ -1096,16 +1136,16 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                     for meas in fp.focal_planes:
                         idx = system.nuisance_params.obs_mapping[meas.meas_id]
                         ndet = len(meas.weights)
-                        jac_n[idx, :, n:(n+ndet)] = meas.wmsk.astype(int)
+                        jac_n[idx, :, n : (n + ndet)] = meas.wmsk.astype(int)
                         n += ndet
-        jac_sparsity[npar:,nresid:] = 1
+        jac_sparsity[npar:, nresid:] = 1
         jac_sparsity = csr_array(jac_sparsity.T, dtype=bool)
-    
+
     system.set_thaw(True)
     system.set_freeze(True)
     logger.info("Initial chisq is %.5f", system.chisq)
     # _plot_fit(system, plot_dir, 0)
-    
+
     # Fit for pointing model and focal planes
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
@@ -1117,31 +1157,59 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         x0 = x0[:npar]
         scales_use = scales[:npar]
         bounds_use = bounds[:npar]
-        res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, None, cfg.cm_fac)
+        res, params_fit = _fit_round(
+            system,
+            x0,
+            bounds_use,
+            scales_use,
+            nresid,
+            cfg.least_squares,
+            None,
+            cfg.cm_fac,
+        )
         system.update_parameters(params_fit)
         _report_fit(res, cfg, system, npar, x0, True, False)
         system.set_thaw(True)
 
+        system.set_freeze(True)
+        _plot_fit(system, plot_dir, i + 1, cfg)
+
         # Now nuisance
-        if len(cfg.nuisance_params) > 0 and i+1 >= cfg.activate_nuisance:
+        if len(cfg.nuisance_params) > 0 and i + 1 >= cfg.activate_nuisance:
             logger.info("Fitting nuisance for round %d", i + 1)
             x0 = system.parameters_full.copy()
             bounds_fixed = [(val, val) for val in x0[:npar]]
             bounds_use = bounds_fixed + bounds[npar:]
             scales_use = scales
-            res, params_fit = _fit_round(system, x0, bounds_use, scales_use, nresid, cfg.least_squares, jac_sparsity, cfg.cm_fac, max_nfev=25, xtol=1e-6, ftol=1e-4)
+            res, params_fit = _fit_round(
+                system,
+                x0,
+                bounds_use,
+                scales_use,
+                nresid,
+                cfg.least_squares,
+                jac_sparsity,
+                cfg.cm_fac,
+                max_nfev=25,
+                xtol=1e-6,
+                ftol=1e-4,
+            )
             system.update_parameters(params_fit)
             _report_fit(res, cfg, system, npar, x0, False, True)
             system.set_thaw(True)
 
+        system.set_freeze(True)
+        _plot_fit(system, plot_dir, f"{i + 1}_np", cfg)
+        system.set_thaw(True)
+
         # Now do the fp nuisance transforms
-        if i+1 >= cfg.activate_nuisance_transforms:
+        if i + 1 >= cfg.activate_nuisance_transforms:
             system.nuisance_params.compute_transforms(system)
 
         # Freeze and plot
         system.set_freeze(True)
-        _plot_fit(system, plot_dir, "i + 1", cfg)
-    
+        _plot_fit(system, plot_dir, f"{i + 1}_fp", cfg)
+
         # Cut outliers
         tot_cut = 0
         for rx in system.receivers:
@@ -1161,13 +1229,15 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                         all_errs.append(err)
                         wmsks.append(wmsk)
                     errs_full = np.hstack(all_errs)
-                    err_cutoff = np.nanmean(errs_full) + cfg.outlier_sigma * np.nanstd(errs_full)
+                    err_cutoff = np.nanmean(errs_full) + cfg.outlier_sigma * np.nanstd(
+                        errs_full
+                    )
                     print(err_cutoff)
                     for meas, err, wmsk in zip(fp.focal_planes, all_errs, wmsks):
                         mrmsk = err > err_cutoff
                         # meas.weights[mrmsk] = 0
                         meas.wmsk[mrmsk] = False
-                        meas.wmsk = meas.wmsk.copy() # reset cache
+                        meas.wmsk = meas.wmsk.copy()  # reset cache
                         tot_cut += np.sum(mrmsk[wmsk])
 
         if tot_cut == 0 and i >= cfg.activate_nuisance:
@@ -1180,11 +1250,14 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.set_static(True)
     with h5py.File(outfile, "a") as f:
         system.save(f, "/", True)
-    fpc.make_manifestdb(system, "transformed", os.path.join(data_dir, "focal_plane.sqlite"), outfile)
+    fpc.make_manifestdb(
+        system, "transformed", os.path.join(data_dir, "focal_plane.sqlite"), outfile
+    )
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
         _ = _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir)
+
 
 def main():
     # Load arguments
