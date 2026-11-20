@@ -99,18 +99,41 @@ def run(
         return obs_id,  None, (type(e).__name__, str(e), traceback.format_exc())
 
 
-def _get_stm_h5_name(obs_id):
+def _get_stm_h5_name(obs_id, h5_unix_digits, prefix='stm_cal'):
     oid_spl = obs_id.split('_')
-    unix = oid_spl[1][:5]
+    unix = oid_spl[1][:h5_unix_digits]
     tube_slot = oid_spl[2]
 
-    return f'stm_cal_{tube_slot}_{unix}.h5'
+    return f'{prefix}_{tube_slot}_{unix}.h5'
 
 
-def _open_stm_manifest_dbs(output_dir, logger):
+def _strip_stm_cal(stm_cal):
+    """Remove large intermediate data (coadd_data and the weights of
+    fit_coadd) from stm_cal in place, together with the stm_coadd_bins
+    axis that only these fields use.
+    """
+    if 'coadd_data' in stm_cal._fields:
+        stm_cal.move('coadd_data', None)
+    if 'fit_coadd' in stm_cal._fields:
+        fc = stm_cal.fit_coadd
+        for filt in fc._fields:
+            for freq in fc[filt]._fields:
+                if 'weight' in fc[filt][freq]._fields:
+                    fc[filt][freq].move('weight', None)
+                if 'stm_coadd_bins' in fc[filt][freq]._axes:
+                    del fc[filt][freq]['stm_coadd_bins']
+            if 'stm_coadd_bins' in fc[filt]._axes:
+                del fc[filt]['stm_coadd_bins']
+        if 'stm_coadd_bins' in fc._axes:
+            del fc['stm_coadd_bins']
+    if 'stm_coadd_bins' in stm_cal._axes:
+        del stm_cal['stm_coadd_bins']
+
+
+def _open_stm_manifest_dbs(output_dir, logger, prefix='stm_cal'):
     dbs = {}
     for key in _DB_TYPES:
-        db_path = os.path.join(output_dir, f'stm_{key}.sqlite')
+        db_path = os.path.join(output_dir, f'{prefix}_{key}.sqlite')
         if os.path.exists(db_path):
             logger.info(f'Mapping {db_path}')
             dbs[key] = core.metadata.ManifestDb(db_path)
@@ -133,8 +156,8 @@ def _get_latest_stm_times(available, stm_rows):
     return latest
 
 
-def _publish_self(dbs, obs_id, obs_type, stm_cal, detset, overwrite):
-    h5_name = _get_stm_h5_name(obs_id)
+def _publish_self(dbs, obs_id, obs_type, stm_cal, detset, overwrite, h5_unix_digits, prefix='stm_cal'):
+    h5_name = _get_stm_h5_name(obs_id, h5_unix_digits, prefix=prefix)
 
     for product in _PRODUCTS[obs_type]:
         if product == 'gain' and 'stm_gain' not in stm_cal._fields:
@@ -229,7 +252,7 @@ def _build_update_start_times(latest_stm_times, cal_index):
 
 
 def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, update_start_times,
-                          max_days_before):
+                          max_days_before, h5_unix_digits):
 
     for row in obs_rows:
         obs_id = row['obs_id']
@@ -262,7 +285,7 @@ def _publish_obs_relation(db, obs_rows, obs_detsets, cal_index, update_start_tim
                         'dets:detset': detset,
                         'dataset': stm_obs_id,
                     },
-                    filename=_get_stm_h5_name(stm_obs_id),
+                    filename=_get_stm_h5_name(stm_obs_id, h5_unix_digits),
                     replace=True,
                     commit=False,
                 )
@@ -294,6 +317,7 @@ def _main(
     context_path: str,
     stm_config: dict,
     output_dir: str,
+    h5_unix_digits: Optional[int] = 5,
     metadata_list: Optional[List[str]] = 'all',
     verbosity: Optional[int] = 2,
     overwrite: Optional[bool] = False,
@@ -308,7 +332,9 @@ def _main(
     stale: Optional[float] = 60.,
     max_days_before: Optional[float] = 1.0,
     update_obs_corresp: Optional[bool] = True,
-    update_obs_scope: Optional[str] = 'all'
+    update_obs_scope: Optional[str] = 'all',
+    strip: Optional[bool] = True,
+    save_daily: Optional[bool] = True,
 ):
     """Main function for making stimulator calibration metadata.
 
@@ -320,6 +346,8 @@ def _main(
         Stimulator configuration dict (loaded from stm_config yaml).
     output_dir : str
         Directory for HDF5 files and ManifestDb sqlite files.
+    h5_unix_digits: int (default 5)
+        Number of digits of unix time to include in the HDF5 filename.
     metadata_list : str or list of str (default 'all')
         Metadata labels to load when building context.
     verbosity : int (default 2)
@@ -354,6 +382,10 @@ def _main(
         - 'all': all observations in the obsdb.
         - 'processed': observations starting from the latest stimulator
           calibration already registered in the ManifestDb.
+    strip: bool (default True)
+        If True, remove large intermediate data (coadd_data and the weights of fit_coadd) in hdf5 files.
+    save_daily: bool (default True)
+        If True, save the first stimulator observation of each day (UTC) for each tube.
     """
     logger = init_logger(__name__, 'make_stm_cal: ', verbosity=verbosity)
     errlog = os.path.join(output_dir, 'errlog.txt')
@@ -406,6 +438,20 @@ def _main(
     for key, db in dbs.items():
         available = load_stimulator_cal(db)
         latest_stm_times[key] = _get_latest_stm_times(available, stm_rows_all)
+
+    daily_ids = set()
+    if save_daily:
+        daily_dbs = _open_stm_manifest_dbs(output_dir, logger, prefix='stm_cal_daily')
+
+        # First stimulator obs of each day (UTC) for each tube.
+        daily_ids = set()
+        seen = set()
+        for row in stm_rows_all:
+            key = (row['tube_slot'], int(row['start_time'] // 86400))
+            if key not in seen:
+                seen.add(key)
+                daily_ids.add(row['obs_id'])
+
 
     jclass = 'stm_cal'
     jdb_path = os.path.join(output_dir, 'jobdb.sqlite')
@@ -462,11 +508,21 @@ def _main(
             if stm_cal is not None:
                 try:
                     logger.info(f'Saving {oid}...')
-                    h5_path = os.path.join(output_dir, _get_stm_h5_name(oid))
+                    if save_daily and oid in daily_ids:
+                        daily_name = _get_stm_h5_name(oid, h5_unix_digits, prefix='stm_cal_daily')
+                        stm_cal.save(os.path.join(output_dir, daily_name),
+                                     overwrite=overwrite, compression='gzip', group=oid)
+                        for detset in detsets:
+                            _publish_self(daily_dbs, oid, obs_type, stm_cal, detset, overwrite, h5_unix_digits, prefix='stm_cal_daily')
+
+                    if strip:
+                        _strip_stm_cal(stm_cal)
+
+                    h5_path = os.path.join(output_dir, _get_stm_h5_name(oid, h5_unix_digits))
                     stm_cal.save(h5_path, overwrite=overwrite,
                                  compression='gzip', group=oid)
                     for detset in detsets:
-                        _publish_self(dbs, oid, obs_type, stm_cal, detset, overwrite)
+                        _publish_self(dbs, oid, obs_type, stm_cal, detset, overwrite, h5_unix_digits)
                     job.jstate = 'done'
                     continue
                 except Exception as e:
@@ -511,10 +567,10 @@ def _main(
                     ctx.obsfiledb,
                     obs_rows['obs_id']
                 )
-                   
+
                 _publish_obs_relation(dbs[product], obs_rows, obs_detsets,
                                       cal_index, update_start_times,
-                                      max_days_before)
+                                      max_days_before, h5_unix_digits)
 
 
 def main(pipeline_config, stm_config):
