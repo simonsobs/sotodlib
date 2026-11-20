@@ -17,7 +17,7 @@ from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
-from sotodlib.site_pipeline.jobdb import JState
+from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.core.util import H5ContextManager
 
 from .. import core
@@ -173,11 +173,10 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 )
             if overwrite or not found:
                 with jdb.locked(job) as j:
-                    if overwrite == True:
-                        j.jstate = "open"
-                        for _t in j._tags:
-                            if _t.key == "error":
-                                _t.value = None
+                    j.jstate = JState.open
+                    for _t in j._tags:
+                        if _t.key == "error":
+                            _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
@@ -1764,8 +1763,9 @@ def check_cfg_match(ref, loaded, logger=None):
                 logger.warning('Config check fails due to ordered pipeline element names not matching.')
                 return False
             else:
-                if type(ref[ri]) is core.AxisManager and type(loaded[li]) is core.AxisManager:
-                    check_cfg_match(ref[ri], loaded[li], logger)
+                if isinstance(ref[ri], core.AxisManager) and isinstance(loaded[li], core.AxisManager):
+                    if not check_cfg_match(ref[ri], loaded[li], logger):
+                        return False
                 elif ref[ri] == loaded[li]:
                     continue
                 else:
