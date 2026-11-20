@@ -105,6 +105,7 @@ class DetTrendCuts(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
+        gcomm = data.comm.comm_group
 
         for ob in data.obs:
             # Relative timestamps within the observation
@@ -117,7 +118,10 @@ class DetTrendCuts(Operator):
 
             # Flag detectors with any chunk-wise slope beyond the limit
             trend_flags = dict()
+            ndet = 0
+            ncut = 0
             for det in ob.select_local_detectors(detectors, flagmask=self.det_mask):
+                ndet += 1
                 slopes = self._compute_trend(ob, reltime, slices, det)
                 max_abs_slope = np.amax(np.absolute(slopes))
                 if max_abs_slope > self.max_trend:
@@ -125,6 +129,7 @@ class DetTrendCuts(Operator):
                     msg += f"greater than limit ({self.max_trend}), cutting."
                     log.debug(msg)
                     trend_flags[det] = self.trend_mask
+                    ncut += 1
                 else:
                     msg = f"{ob.name}:{det} max trend slope {max_abs_slope} is "
                     msg += f"less than limit ({self.max_trend}), keeping."
@@ -132,6 +137,14 @@ class DetTrendCuts(Operator):
 
             # Update per-detector flags
             ob.update_local_detector_flags(trend_flags)
+
+            if gcomm is not None:
+                ndet = gcomm.reduce(ndet)
+                ncut = gcomm.reduce(ncut)
+            log.debug_rank(
+                f"DetTrendCuts flagged {ncut} / {ndet} surviving detectors in {ob.name}",
+                comm=gcomm
+            )
 
     def _compute_chunk_slices(self, obs, reltime):
         # Sample rate
