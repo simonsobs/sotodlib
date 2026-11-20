@@ -52,6 +52,30 @@ class PreprocessErrors:
         return errmsg, tb
 
 
+def summarize_preprocess_errors(obs_errors, run_list, raise_error=False):
+    """Count up number of failed preprocess groups and obs_ids."""
+    n_obs_fail = 0
+    n_groups_fail = 0
+
+    for out_meta in obs_errors.values():
+        n_failed = sum(entry["error"] is not None for entry in out_meta)
+
+        n_groups_fail += n_failed
+        if out_meta and n_failed == len(out_meta):
+            n_obs_fail += 1
+
+    msg = (
+        f"preprocessing is done with "
+        f"{n_obs_fail}/{len(obs_errors)} failed obsids "
+        f"and {n_groups_fail}/{len(run_list)} failed groups"
+    )
+
+    if raise_error and n_groups_fail > 0:
+        raise RuntimeError(msg)
+
+    return msg
+
+
 def _get_aman_encodings(encodings, field):
     """Encodings for flacarray compression."""
     if (
