@@ -1029,6 +1029,202 @@ the ``focal_plane`` dataset. This can be done like so:
 This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
 The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
+solve_pointing_model
+--------------------
+
+This script solves for the pointing model parameters using moon observations. 
+The inputs are the the el_center, roll_center, and the UFM
+center locations as fit by finalize_focal_plane, 
+per each moon observation.
+The fitter uses lmfit with a Nelder-Mead minimization routine to minimize
+the distance between modeled data points and the reference data points. 
+By default, the measured UFM centers are the reference points, 
+and the quaternion rotations of the pointing model are applied to the nominal, template, UFM center locations.
+However, the model can be applied in reverse, with the template positions as reference -- some diagnostic plots are in this space, as it makes it easier to view residuals from multiple boresight orientations at once.
+See the ``xieta_model`` parameter comments for more details.
+
+``solve_pointing_model`` can be iterated once after the first parameter fit.
+Specifying ``iterate_cutoff`` in arcmin will exlude outliers from next round of fitting.
+
+.. automodule:: sotodlib.site_pipeline.solve_pointing_model
+   :members:
+   :undoc-members:
+
+Config file format
+``````````````````
+
+Here is an annotated basic configuration file. 
+The first block are mandatory entries. The second block are optional.
+
+.. code-block:: yaml
+
+    # Mandatory to include in config file
+
+    # Specify platform for the code to run on. (satp1, satp3 are supported)
+    platform: satp1
+    # pm_version tells coords.pointing_model which pointing model to use.
+    # It determines the quaternion model. Don't change this.
+    pm_version: sat_v1
+    # Tag for metadata versioning, will appended to output directory
+    solution_version_tag: YYMMDDr
+    # Output directory to save results in.
+    # A sub directory in {outdir} will be created as
+    #{platform}_pointing_model_{solution_version_tag}_{xieta_model}_{add_tag}
+    outdir: /your/save/directory
+    # Load data and reference focal plane templates
+    # ffp_path must be common mode subtracted version of focal_plane
+    ffp_path: "/path/to/centered/focal_plane/metadata/focal_plane_cmsub.h5"
+    # per_obs_fps are multiple per-observation focal_plane
+    # fits saved into one h5 file. These are fitted to moon measurements.
+    # only data from UFMs that had good detector fits are included.
+    per_obs_fps: /path/to/per-obs/finalize/focal/plane/results/per_obs/focal_plane.h5
+    # The provided context file is used to load boresight/elevation data from
+    # obs_ids included in per_obs_fps
+    context:
+        path: "/so/metadata/satp1/contexts/nominal/focal_plane.h5"
+    # List of ufms in order of wafer slot, not currently future
+    # proof when new ufms are swapped in.
+    # This assists unpacking per_obs_fps with its sparse UFM info.
+    ufms: ['ufm_mv19', 'ufm_mv18', 'ufm_mv22', 'ufm_mv29', 
+           'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] #satp1
+    # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35', 'ufm_mv12',
+    # 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
+
+    # Define pointing epochs for db.sqlite time ranges.
+    # Needs entry even if not using multiple epochs.
+    # Specify any indepedent parameters allowed to vary across epochs.
+    # Create optional expression definitions if parameters are correlated.
+    # Note, independent params are given epoch's name as suffix inside code.
+    epochs:
+      - begin_timerange: 1700000000
+        end_timerange: 1770569999
+        fp_template_timestamp: 1750000000 # determine correct val with ffp_path's .h5
+        name: satp2_epoch_1
+        indep_list: ['enc_offset_az']  #optional
+      - begin_timerange: 1770570000
+        end_timerange: 2000000000
+        fp_template_timestamp: 1750000000 # determine correct val with ffp_path's .h5
+        name: satp2_epoch_2  #
+        indep_list: ['enc_offset_az'] #optional
+        param_expr:
+          enc_offset_az_satp2_epoch_2: 'enc_offset_az_satp2_epoch_1 + radians(3.86)'
+
+    # Optional configuration parameters
+
+    # Any additional tag to append on results directory as subfolder
+    append: ""
+    save_output: True  # Save fit info to an h5 file. Save model as db.sqlite.
+    # Exclude full or partial timestamps in obs_ids e.g. bad PWV or bad timing.
+    skip_tags:
+      - "_1713" #bad timing satp1
+      - "1716423951" #Just a very bad fit satp1
+
+    # Select some subset of the observations. Indexes on obs in per_obs focal_plane.h5
+    use_these_files:   #{None or list e.g. [0,1,18,20,21,22,30]}
+    # Select parameters to fix in the minimization routine.
+    # See comments for which to fix for different SAT platforms.
+    fixed_params:
+      - az_rot          #all
+      - base_tilt_cos   #all
+      - base_tilt_sin   #all
+      - fp_rot_eta0     #all
+      - fp_offset_eta0  #all
+      - fp_rot_xi0      #satp3 only
+
+    # Initialize parameter values for fitter.   (radians)
+    # If not specified, defaults from coords/pointing_model.py..
+    initial_params:
+      enc_offset_az: -0.06 # (radians)
+      enc_offset_el:  0.001
+
+    just_test_params: False  #If True, makes analysis plots with initial_params
+    # "xieta_model" decides which parameter space the fitting occurs in.
+    # "measured": The fitter applies pointing model to template UFM xi-eta
+    #             locations based on El and Roll of the obs, to get the modeled
+    #             xi-etas to match the measured data points.
+    #             Modeled data points get spread out based on boresight.
+    # "template": The fitter applies pointing model "backwards" on measured
+    #             xieta data points to match them to template locations.
+    #             The modeled data points cluster around
+    #             the nominal template locations.
+    # Each method gives slightly different results. "measured" is default. "template" is friendlier with some plotting methods.
+    xieta_model: measured # {template, measured}
+    # Specify preferred lmfit method. Friendly with most options. Defaults to leastsq
+    fit_method: leastsq
+    second_fit_method:   #For iterated fits. Default same as fit_method.
+    # Specify choice of data to use in fitter.
+    # "detector":
+    # "ufm_center": avgd ufm center location (as solved from per-obs finalize_focal_plane)
+    fit_type: detector # {detector, ufm_center}
+    # Define a weight cutoff for fitting routine.
+    # typical per-detector cutoff is above 0.97-0.98 for SAT
+    # typical per-obs cutoff 0.2 for SAT
+    weight_cutoff: 0.97
+
+    #Additional Choices for Per-Detector Fitting Option
+    band:   # None for all bands, or e.g. 'f220'}
+    which_ufm:  # None or specify ufm_mv29 or list of ufms.
+    cull_dets:  # Select downsample factor. Default None
+    # Define xieta fit error cutoff for fitting routine. (In arc seconds)
+    # If xieta fit errors not in input data, XE errs are set to 0, and no data is cut here.
+    xe_fit_max_cutoff: 12   # Default=12.
+    # Select data type to use as pointing data. (for per-detector fits)
+    # "ffp" - takes focal planes fitted/shifted/stretched to match moon/planet observations
+    # "raw" - takes raw moon/planet detector fits.
+    use_as_data: raw  #{ffp or raw}
+    # Choose template to compare pointing data against
+    # "ffp": averaged focal plane from finalize_focal_plane
+    # "nominal": from a nominal optical template
+    use_as_template: ffp #{ffp, nominal} # hard-coded as nominal in per-observation case.
+
+    # Option to iterate parameter fitting. If not None, data points with
+    # fit residuals higher than cutoff will be excluded from second round of fits.
+    iterate_cutoff: None # or arcmin
+
+    # Diagnostic Plotting Options
+    make_plots: True
+    plotlims: 25  # will set plot lims in arcmin on some diagnostic plots.
+    # Full analysis plots loads all dets from non skipped obs that pass weight/xi-eta error cuts.
+    # Only ignores downsampling, band selection, wafer selections.
+    # Averages residuals per wafer and per observation.
+    make_full_analysis_plots: True
+
+
+Output file format
+``````````````````
+
+The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
+Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
+
+.. code-block:: text
+
+    - ancil (aman)
+      - az_enc (num_obs * 7)
+      - boresight_enc (num_obs * 7)
+      - el_enc (num_obs * 7)
+    - ffp_ufm_center_fits ((xi, eta, gamma), num_obs * 7) #This where the info from per_obs_fps gets stored
+    - nom_ufm_centers ((xi, eta, gamma), num_obs * 7) #This is where info from cmsub focal_plane goes.
+    - obs_info (aman) 
+      - obs_ids (num_obs)
+    - roll_c (num_obs * 7)
+    - weights (num_obs * 7)
+    - model_fits (aman)
+      - eta (num_obs * 7)
+      - xi (num_obs * 7)    
+    - pointing_model (aman)
+      - pm_version
+      - parameters by name
+    #- parameter_fit_stats #Not yet implemented in output, but visible in log file.
+    #  - name 
+    #  - value 
+    #  - vary 
+    #  - min 
+    #  - max
+    #  - stderr 
+    #  - correl #correlation with other fit params
+    #- excluded (Data points)
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
