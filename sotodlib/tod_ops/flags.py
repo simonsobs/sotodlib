@@ -1314,7 +1314,7 @@ def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
 
     smurfgaps = RangesMatrix([aman.flags.get('smurfgaps_' + ufm) for ufm in aman.det_info.stream_id])
     if buffer:
-        smurfgaps = smurfgaps.buffer(buffer)
+        smurfgaps = smurfgaps.buffered(buffer)
     if merge:
         aman.flags.wrap(name, smurfgaps, [(0, 'dets'), (1, 'samps')])
     return smurfgaps
