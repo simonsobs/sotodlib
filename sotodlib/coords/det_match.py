@@ -357,13 +357,11 @@ class ResSet:
             north_is_highband = get_north_is_highband(
                 aman.det_info.smurf.band[m], det_cal.bg[m]
             )
-        is_norths = []
         resonators = []
         for i, ri in enumerate(np.where(m)[0]):
             band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
             if aman.det_info.wafer_slot[ri] != "ws.":
                 is_north = north_is_highband ^ (band < 4)
-                is_norths.append(int(is_north))
             else:
                 is_north = 1
             readout_id = aman.det_info.readout_id[ri]
@@ -494,12 +492,12 @@ class ResSet:
             optional_fields = {
                 "det_row": (has_det_row, 'dets:wafer.det_row'),
                 "det_col": (has_det_col, 'dets:wafer.det_col'),
-                "rhombus": (has_rhomb, 'dets:wafer.rhombus'),
+                "det_rhomb": (has_rhomb, 'dets:wafer.rhombus'),
             }
 
             for key, (found, val) in optional_fields.items():
-                if found and field in r.dtype.names:
-                    kwargs[key] = val
+                if found and val in r.dtype.names:
+                    kwargs[key] = r[val]
 
             res = Resonator(**kwargs)
 
@@ -516,9 +514,9 @@ class ResSet:
                        fp_pars=None, platform='LAT', zemax_path=None,
                        ignore_north_south=False):
         """
-        Creates an instance from an input-solution file. This will include both design data, along with smurf-band
-        and smurf-channel info. Resonance frequencies used here are the VNA
-        freqs measured by Kaiwen.
+        Creates an instance from an input-solution file. This will include
+        both design data, along with smurf-band and smurf-channel info.
+        Resonance frequencies used here are the VNA freqs measured by Kaiwen.
 
         Args:
             sol_file (str):
@@ -722,7 +720,7 @@ class MatchParams:
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
     enforce_pointing_reqs: bool = False
-    allow_unassigned_to_assigned: bool = True
+    allow_unassigned_to_assigned: bool = False
 
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
@@ -812,6 +810,7 @@ class Match:
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
 
+        # Don't match NC det type (placeholder row in wafer_info files)
         src_no_match = np.isin(src_arr['det_type'], ['NC'])
         dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
         mat[src_no_match, :] = np.inf
