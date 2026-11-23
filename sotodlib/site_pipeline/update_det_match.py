@@ -20,6 +20,8 @@ from sotodlib.io.metadata import write_dataset
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.utils.procs_pool import get_exec_env
 
+from sotodlib.site_pipeline.utils.logging import init_logger
+
 
 logger = init_logger("update_det_match", "update-det-match: ")
 
