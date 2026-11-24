@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 import os
 from argparse import Namespace
+from concurrent.futures import Executor
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property, reduce
-from concurrent.futures import Executor
 from typing import (
     Any,
     ClassVar,
@@ -33,7 +33,7 @@ import h5py
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
-from jaxtyping import Float, Integer, Shaped, Bool
+from jaxtyping import Bool, Float, Integer, Shaped
 from scipy.cluster import vq
 from scipy.optimize import minimize
 from so3g.proj import quat
@@ -370,7 +370,10 @@ def setup_fit_params(
             idx = system.parameter_names.index(name)
             nuisance_values[nidx] = value
             lo, hi = bounds[idx]
-            nuisance_bounds[nidx] = (value - (value - lo) / cfg.nuisance_scale, value + (hi - value) / cfg.nuisance_scale)
+            nuisance_bounds[nidx] = (
+                value - (value - lo) / cfg.nuisance_scale,
+                value + (hi - value) / cfg.nuisance_scale,
+            )
             nuisance_scales[nidx] = scales[idx]
 
     # Append nuisance parameters
@@ -382,8 +385,10 @@ def setup_fit_params(
 
     return params, bounds, scales
 
+
 def _get_pm(meas):
     return meas._pm_data_dyn
+
 
 class StaticOrCached(Generic[T]):
     """
@@ -479,7 +484,6 @@ class NuisanceParams:
                 par_dict[name] = float(params[idx])
                 idx += 1
 
-
     def mean_zero(self, system: PointingSystem):
         """
         Make all nuisance parameter distributions mean zero by
@@ -490,16 +494,23 @@ class NuisanceParams:
         system : PointingSystem
             Pointing system whose pointing models will be modified.
         """
-        pm_mapping = {pm.epoch : [] for pm in system.pointing_models}
+        pm_mapping = {pm.epoch: [] for pm in system.pointing_models}
         for rx in system.receivers:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
                     for meas in fp.focal_planes:
-                        pm_mapping[meas.pointing_model.epoch] += [self.obs_mapping[meas.meas_id]]
+                        pm_mapping[meas.pointing_model.epoch] += [
+                            self.obs_mapping[meas.meas_id]
+                        ]
 
         for pm in system.pointing_models:
             pm_map = pm_mapping[pm.epoch]
-            pm_pars = dict(zip(self.par_list[0].keys(), zip(*[self.par_list[m].values() for m in pm_map])))
+            pm_pars = dict(
+                zip(
+                    self.par_list[0].keys(),
+                    zip(*[self.par_list[m].values() for m in pm_map]),
+                )
+            )
             for key, val in pm_pars.items():
                 if key not in pm.parameters:
                     continue
@@ -649,9 +660,9 @@ class NuisanceParams:
                     [sfts[mid] for mid in meas_ids],
                     -2,
                     True,
-                    fast=False, #True,
+                    fast=False,  # True,
                 )
-                n_aff, n_sft = mt.invert_transform( # cm_aff, cm_shift)
+                n_aff, n_sft = mt.invert_transform(  # cm_aff, cm_shift)
                     *mt.compose_transform(rx_aff_inv, rx_sft_inv, cm_aff, cm_shift)
                 )
                 trf_old = self.transform_list[i]
@@ -872,22 +883,22 @@ class PointingModel:
         prev_err = np.inf
         alpha = 1.0
         prev_distortion = np.zeros_like(estimate)
-        
+
         for _ in range(max_iter):
             fp.xi = estimate[:, 0]
             fp.eta = estimate[:, 1]
-        
+
             if meas.fake_gamma:
                 q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1])
             else:
                 fp.gamma = estimate[:, 2]
                 q_fp = quat.rotation_xieta(
-                        estimate[:, 0], estimate[:, 1], estimate[:, 2] # type: ignore
+                    estimate[:, 0], estimate[:, 1], estimate[:, 2]  # type: ignore
                 )
-        
-            bs, fp_corrected = apply_pointing_model( None, params_use, ancil, fp)
+
+            bs, fp_corrected = apply_pointing_model(None, params_use, ancil, fp)
             bs = cast(AxisManager, bs)
-        
+
             xi, eta, gamma = quat.decompose_xieta(
                 ~quat.euler(2, bs.roll)
                 * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
@@ -897,25 +908,36 @@ class PointingModel:
 
             if fp_corrected is None:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
-                to_ret.xyz = mt.apply_transform( to_ret.xyz, ntrf.affine, ntrf.shift)
+                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
                 return to_ret
-        
+
             if meas.fake_gamma:
                 dx = fp_corrected.xi - fp.xi
                 dy = fp_corrected.eta - fp.eta
-        
+
                 distortion = np.column_stack((dx, dy))
-                resid = np.column_stack(( fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta,))
+                resid = np.column_stack(
+                    (
+                        fp_corrected.xi - fp_target.xi,
+                        fp_corrected.eta - fp_target.eta,
+                    )
+                )
             else:
                 dx = fp_corrected.xi - fp.xi
                 dy = fp_corrected.eta - fp.eta
                 dg = fp_corrected.gamma - fp.gamma
-        
+
                 distortion = np.column_stack((dx, dy, dg))
-                resid = np.column_stack(( fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta, fp_corrected.gamma - fp_target.gamma,))
-        
+                resid = np.column_stack(
+                    (
+                        fp_corrected.xi - fp_target.xi,
+                        fp_corrected.eta - fp_target.eta,
+                        fp_corrected.gamma - fp_target.gamma,
+                    )
+                )
+
             err = np.sqrt(np.nanmean(np.sum(resid * resid, axis=1)))
-        
+
             if err > prev_err:
                 alpha *= 0.5
                 distortion = prev_distortion
@@ -923,14 +945,12 @@ class PointingModel:
                 alpha = min(1.0, alpha * 1.2)
                 prev_distortion = distortion.copy()
                 prev_err = err
-        
+
             if err < tol:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
-                to_ret.xyz = mt.apply_transform(
-                    to_ret.xyz, ntrf.affine, ntrf.shift
-                )
+                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
                 return to_ret
-        
+
             estimate -= alpha * distortion
 
         raise RuntimeError(
@@ -1980,7 +2000,7 @@ class FocalPlaneCollection:
     fake_gamma : bool
         If True, ignore gamma when fitting transforms, effectively treating
         the focal plane as two-dimensional.
-    parent : OpticsTube 
+    parent : OpticsTube
         The OT that this FocalPlane belongs to.
     data : DetectorOffsets
         Weighted-average detector offsets constructed from the
@@ -2123,7 +2143,7 @@ class FocalPlaneCollection:
             all_fake *= meas.fake_gamma
             ndim = 3 - int(meas.fake_gamma)
             to_ret.xyz[meas.wmsk, :ndim] += (
-                    meas.pm_data.xyz[meas.wmsk, :ndim] * meas.weights[meas.wmsk, None]
+                meas.pm_data.xyz[meas.wmsk, :ndim] * meas.weights[meas.wmsk, None]
             )
         to_ret.xyz[~fmsk] = np.nan
         to_ret.xyz[fmsk] /= self.weights[fmsk, None]
@@ -2224,7 +2244,11 @@ class FocalPlaneCollection:
 
     @classmethod
     def load(
-            cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...], parent: OpticsTube,
+        cls,
+        f: h5py.File,
+        path: str,
+        pointing_models: tuple[PointingModel, ...],
+        parent: OpticsTube,
     ) -> Self:
         """
         Load a focal plane collection from an HDF5 file.
@@ -2237,7 +2261,7 @@ class FocalPlaneCollection:
             The path within the HDF5 file where the collection is stored.
         pointing_models : tuple[PointingModel, ...]
             The pointing models used by the focal-planes.
-        parent : OpticsTube 
+        parent : OpticsTube
             The OT that this FocalPlane belongs to.
 
         Returns
@@ -2360,7 +2384,9 @@ class OpticsTube:
     autofreeze: bool
     parent: Receiver
     cm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform")
-    cm_transform_norx: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform_norx")
+    cm_transform_norx: ClassVar[StaticOrCached[Transform]] = StaticOrCached(
+        "cm_transform_norx"
+    )
     _cm_transform_stat: Transform = field(init=False)
     _cm_transform_norx_stat: Transform = field(init=False)
 
@@ -2441,7 +2467,6 @@ class OpticsTube:
             self._cm_transform_norx_stat = to_ret
         return to_ret
 
-
     def save(
         self,
         f: h5py.File,
@@ -2482,7 +2507,11 @@ class OpticsTube:
 
     @classmethod
     def load(
-            cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...], parent: Receiver
+        cls,
+        f: h5py.File,
+        path: str,
+        pointing_models: tuple[PointingModel, ...],
+        parent: Receiver,
     ) -> Self:
         """
         Load an optics tube from an HDF5 file.
@@ -2514,7 +2543,9 @@ class OpticsTube:
         if "cm_transform" in group:
             tube._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
         if "cm_transform_norx" in group:
-            tube._cm_transform_norx_stat = Transform.load(f, f"{path}/cm_transform_norx")
+            tube._cm_transform_norx_stat = Transform.load(
+                f, f"{path}/cm_transform_norx"
+            )
         focal_planes = []
         group = cast(h5py.Group, f[path])
         for name in group:
@@ -2917,8 +2948,7 @@ class PointingSystem:
                 ot.thaw(static)
             rx.thaw(static)
 
-
-    def warm_pm_data(self, executor : Executor):
+    def warm_pm_data(self, executor: Executor):
         """
         Warm up the `FocalPlane.pm_data` cache in parallel.
         This will set `_pm_data_stat` to the output of `_pm_data_dyn`
@@ -2942,13 +2972,13 @@ class PointingSystem:
             for fp in ot.focal_planes
             for meas in fp.focal_planes
         ]
-    
+
         # futures = [
         #     executor.submit(_get_pm, meas)
         #     for meas in all_meas
         # ]
         # wait(futures)
-    
+
         # for meas, future in zip(all_meas, futures):
         #     meas._pm_data_stat = future.result()
 
@@ -3050,7 +3080,12 @@ class PointingSystem:
         return chisq
 
     def objective(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor, thaw_meas = None 
+        self,
+        params: Float[np.ndarray, "npar"],
+        nresid: int,
+        cm_fac: float,
+        executor: Executor,
+        thaw_meas=None,
     ) -> float:
         """
         Evaluate the total chi-squared objective function.
@@ -3106,7 +3141,12 @@ class PointingSystem:
             return 1e6
 
     def objective_resid(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor, thaw_meas = None
+        self,
+        params: Float[np.ndarray, "npar"],
+        nresid: int,
+        cm_fac: float,
+        executor: Executor,
+        thaw_meas=None,
     ) -> Float[np.ndarray, "nresid_full"]:
         """
         Evaluate the residual vector used by least-squares optimization.
@@ -3163,7 +3203,11 @@ class PointingSystem:
             return np.full(nresid, 1e3)
 
     def log_prob(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor
+        self,
+        params: Float[np.ndarray, "npar"],
+        nresid: int,
+        cm_fac: float,
+        executor: Executor,
     ) -> float:
         """
         Calculate the log probability of the current parameter values.

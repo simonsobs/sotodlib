@@ -13,9 +13,9 @@ from .fp_containers import (
     DetectorOffsets,
     FocalPlane,
     FocalPlaneCollection,
+    NuisanceParams,
     OpticsTube,
     Receiver,
-    NuisanceParams,
 )
 
 

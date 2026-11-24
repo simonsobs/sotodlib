@@ -10,17 +10,17 @@ import datetime as dt
 import hashlib
 import os
 import shutil
-from enum import Enum
-from typing import cast
-from copy import deepcopy
-import corner
-import matplotlib.pyplot as plt
-from functools import partial
 from concurrent.futures import Executor
+from copy import deepcopy
+from enum import Enum
+from functools import partial
+from typing import cast
 
+import corner
 import emcee
 import git
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import pyinstrument
 import sotodlib.coords.fp_containers as fpc
@@ -28,8 +28,7 @@ import sotodlib.coords.fp_plots as fpp
 import sotodlib.utils.jdb_utils as ju
 import sqlalchemy as sqy
 import yaml
-from scipy.optimize import minimize
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize
 from scipy.sparse import csr_array
 from sotodlib.coords import optics
 from sotodlib.core import Context, metadata
@@ -1012,17 +1011,24 @@ def _plot_fit(system, plot_dir, i, cfg):
 def _make_executor(pool_type: str, pool_size: int) -> Executor:
     if pool_type == "thread":
         from concurrent.futures import ThreadPoolExecutor
+
         return ThreadPoolExecutor(max_workers=pool_size)
     if pool_type == "process":
         from concurrent.futures import ProcessPoolExecutor
+
         return ProcessPoolExecutor(max_workers=pool_size)
     if pool_type == "interpreter":
-        from concurrent.futures import InterpreterPoolExecutor  # type: ignore[reportAttributeAccessIssue]
+        from concurrent.futures import (
+            InterpreterPoolExecutor,
+        )  # type: ignore[reportAttributeAccessIssue]
+
         return InterpreterPoolExecutor(max_workers=pool_size)
     if pool_type == "mizu":
         import pymizu
+
         return pymizu.PoolExecutor.create(pool_size)
     raise ValueError(f"Invalid pool type: {pool_type}")
+
 
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
@@ -1186,7 +1192,9 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             x0 = system.parameters_full.copy()
             x0[npar:] = 0
             system.update_parameters(x0)
-            system.nuisance_params.transform_list = [fpc.Transform.identity() for _ in range(len(transform_list))]
+            system.nuisance_params.transform_list = [
+                fpc.Transform.identity() for _ in range(len(transform_list))
+            ]
 
         # Just static
         logger.info("Fitting static for round %d", i + 1)
@@ -1223,10 +1231,16 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             nn = len(cfg.nuisance_params)
             scales_use = scales
             for j in range(len(system.nuisance_params.par_list)):
-                logger.info("Fitting %d/%d", j+1, len(system.nuisance_params.par_list))
+                logger.info(
+                    "Fitting %d/%d", j + 1, len(system.nuisance_params.par_list)
+                )
                 bounds_fixed = [(val, val) for val in system.parameters_full]
-                par_start, par_stop = npar + (j*nn), npar + ((j+1)*nn)
-                bounds_use = bounds_fixed[:par_start] + bounds[par_start:par_stop] + bounds_fixed[par_stop:]
+                par_start, par_stop = npar + (j * nn), npar + ((j + 1) * nn)
+                bounds_use = (
+                    bounds_fixed[:par_start]
+                    + bounds[par_start:par_stop]
+                    + bounds_fixed[par_stop:]
+                )
                 res, params_fit = _fit_round(
                     system,
                     x0,
