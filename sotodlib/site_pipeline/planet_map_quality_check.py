@@ -426,7 +426,7 @@ def main(config_file: str, query: str, update_delay: int,
     failed_cache_file = configs['failed_cache']
     overwrite_map = configs['overwrite']
     
-    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(repo_root)) # this will be updated once the mapmaker is updated in sotodlib
     spec = importlib.util.spec_from_file_location("planet_mapmaking", module_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -532,3 +532,4 @@ def main(config_file: str, query: str, update_delay: int,
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)
+    
