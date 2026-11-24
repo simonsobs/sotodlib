@@ -22,7 +22,6 @@ def get_parser(parser=None):
     parser.add_argument(
         "--config-file",
         type=str,
-        default=None,
         help="Path to mapmaker config.yaml file",
     )
 
@@ -48,7 +47,7 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count")
     parser.add_argument("-q", "--quiet", action="count")
     parser.add_argument(
-        "--cont", action="store_true", default=False, help="continue a run"
+        "--cont", action="store_true", help="continue a run"
     )
     parser.add_argument("-@", "--center-at", type=str)
     parser.add_argument("-w", "--window", type=float)
@@ -63,7 +62,7 @@ def get_parser(parser=None):
     parser.add_argument(
         "-d", "--downsample", type=int, help="Downsample TOD by this factor"
     )
-    parser.add_argument("--cut-type", type=str, default="full", help="Cut type: full or poly")
+    parser.add_argument("--cut-type", type=str, help="Cut type: full or poly")
     parser.add_argument("--maxiter", type=int, help="Maximum number of iterative steps")
     parser.add_argument("-T", "--tiled", type=int)
     parser.add_argument(
@@ -79,10 +78,10 @@ def get_parser(parser=None):
         help="number of tasks per group. By default it is 1, but can be higher if you want more than one MPI job working on a depth-1 map, e.g. if you don't have enough memory for so many MPI jobs",
     )
     parser.add_argument(
-        "--rhs", action="store_true", default=False, help="Save the rhs maps"
+        "--rhs", action="store_true", help="Save the rhs maps"
     )
     parser.add_argument(
-        "--bin", action="store_true", default=False, help="Save the bin maps"
+        "--bin", action="store_true", help="Save the bin maps"
     )
     parser.add_argument(
         "--srcsamp",
