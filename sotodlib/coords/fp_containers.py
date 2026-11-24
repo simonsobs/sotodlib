@@ -1951,6 +1951,8 @@ class FocalPlaneCollection:
     fake_gamma : bool
         If True, ignore gamma when fitting transforms, effectively treating
         the focal plane as two-dimensional.
+    parent : OpticsTube 
+        The OT that this FocalPlane belongs to.
     data : DetectorOffsets
         Weighted-average detector offsets constructed from the
         pointing-model-corrected measurements in `focal_planes`.
@@ -1991,6 +1993,7 @@ class FocalPlaneCollection:
     autofreeze: bool
     pad: bool
     fake_gamma: bool
+    parent: OpticsTube
     data: ClassVar[StaticOrCached[DetectorOffsets]] = StaticOrCached("data")
     weights: ClassVar[StaticOrCached[Float[np.ndarray, "ndet"]]] = StaticOrCached(
         "weights"
@@ -2112,6 +2115,8 @@ class FocalPlaneCollection:
 
     @property
     def _transform_dyn(self) -> Transform:
+        if self.pad or np.sum(self.wmsk) == 0:
+            return self.parent.cm_transform
         return _get_aff(self, "data", "template", "weights", "_transform_stat", True)
 
     @property
@@ -2190,7 +2195,7 @@ class FocalPlaneCollection:
 
     @classmethod
     def load(
-        cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...]
+            cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...], parent: OpticsTube,
     ) -> Self:
         """
         Load a focal plane collection from an HDF5 file.
@@ -2203,6 +2208,8 @@ class FocalPlaneCollection:
             The path within the HDF5 file where the collection is stored.
         pointing_models : tuple[PointingModel, ...]
             The pointing models used by the focal-planes.
+        parent : OpticsTube 
+            The OT that this FocalPlane belongs to.
 
         Returns
         -------
@@ -2233,6 +2240,7 @@ class FocalPlaneCollection:
             autofreeze=cast(bool, group.attrs["autofreeze"]),
             pad=cast(bool, group.attrs["pad"]),
             fake_gamma=cast(bool, group.attrs["fake_gamma"]),
+            parent=parent,
         )
 
         if "data" in group:
@@ -2303,13 +2311,13 @@ class OpticsTube:
     autofreeze : bool
         If True, cache dynamically computed quantities into their
         corresponding static fields.
+    parent : Receiver
+        The Receiver that this OT belongs to.
     cm_transform : Transform
         Common-mode transform derived from the transforms of all
         non-padded focal-plane collections.
     cm_transform_norx : Transform
-        Copy of the optics-tube common-mode transform with a receiver
-        common mode removed. This quantity is not computed dynamically and
-        is updated only through `remove_rx`.
+        Copy of the optics-tube common-mode transform with a receiver common mode removed.
     allpad : bool
         (Property) Flag indicating whether all focal-plane collections in the optics
         tube are padded and should therefore be excluded from common-mode
@@ -2321,9 +2329,11 @@ class OpticsTube:
     wafer_slots: list[str]
     static: bool
     autofreeze: bool
+    parent: Receiver
     cm_transform: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform")
-    cm_transform_norx: Transform = field(init=False)
+    cm_transform_norx: ClassVar[StaticOrCached[Transform]] = StaticOrCached("cm_transform_norx")
     _cm_transform_stat: Transform = field(init=False)
+    _cm_transform_norx_stat: Transform = field(init=False)
 
     def __getitem__(self, key):
         if key in self.wafer_slots:
@@ -2386,33 +2396,22 @@ class OpticsTube:
             self._cm_transform_stat = to_ret
         return to_ret
 
-    def remove_rx(self, rx_cm: Transform):
-        """
-        Remove the receiver common-mode transform from the optics tube
-        common-mode transform.
-
-        Unlike `cm_transform`, the receiver-corrected transform is not a
-        dynamic property and is updated only when this method is called.
-
-        If `allpad=True`, no valid focal-plane collections are available for
-        this optics tube and `cm_transform_norx` is set to the identity
-        transform.
-
-        Parameters
-        ----------
-        rx_cm : Transform
-            Receiver common-mode transform to remove from the current
-            optics tube common mode.
-        """
+    @property
+    def _cm_transform_norx_dyn(self) -> Transform:
         if self.allpad:
-            self.cm_transform_norx = Transform.identity()
-        aff, sft = mt.decompose_transform(
-            self.cm_transform.affine,
-            self.cm_transform.shift,
-            rx_cm.affine,
-            rx_cm.shift,
-        )
-        self.cm_transform_norx = Transform(sft, aff)
+            to_ret = Transform.identity()
+        else:
+            aff, sft = mt.decompose_transform(
+                self.cm_transform.affine,
+                self.cm_transform.shift,
+                self.parent.cm_transform.affine,
+                self.parent.cm_transform.shift,
+            )
+            to_ret = Transform(sft, aff)
+        if self.autofreeze:
+            self._cm_transform_norx_stat = to_ret
+        return to_ret
+
 
     def save(
         self,
@@ -2449,12 +2448,12 @@ class OpticsTube:
             fp.save(f, f"{path}/{ws}-{fp.name}", pointing_models, overwrite=overwrite)
         if "_cm_transform_stat" in self.__dict__:
             self._cm_transform_stat.save(f, f"{path}/cm_transform")
-        if "cm_transform_norx" in self.__dict__:
+        if "_cm_transform_norx_stat" in self.__dict__:
             self.cm_transform_norx.save(f, f"{path}/cm_transform_norx")
 
     @classmethod
     def load(
-        cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...]
+            cls, f: h5py.File, path: str, pointing_models: tuple[PointingModel, ...], parent: Receiver
     ) -> Self:
         """
         Load an optics tube from an HDF5 file.
@@ -2473,6 +2472,20 @@ class OpticsTube:
         OpticsTube
             The loaded optics tube.
         """
+        group = cast(h5py.Group, f[path])
+        tube = cls(
+            name=cast(str, group.attrs["name"]),
+            focal_planes=[],
+            wafer_slots=list(np.asarray(group.attrs["wafer_slots"])),
+            static=cast(bool, group.attrs["static"]),
+            autofreeze=cast(bool, group.attrs["autofreeze"]),
+            parent=parent,
+        )
+
+        if "cm_transform" in group:
+            tube._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
+        if "cm_transform_norx" in group:
+            tube._cm_transform_norx_stat = Transform.load(f, f"{path}/cm_transform_norx")
         focal_planes = []
         group = cast(h5py.Group, f[path])
         for name in group:
@@ -2480,22 +2493,10 @@ class OpticsTube:
                 continue
             focal_planes.append(
                 FocalPlaneCollection.load(
-                    f, f"{path}/{name}", pointing_models=pointing_models
+                    f, f"{path}/{name}", pointing_models=pointing_models, parent=tube
                 )
             )
-        tube = cls(
-            name=cast(str, group.attrs["name"]),
-            focal_planes=focal_planes,
-            wafer_slots=list(np.asarray(group.attrs["wafer_slots"])),
-            static=cast(bool, group.attrs["static"]),
-            autofreeze=cast(bool, group.attrs["autofreeze"]),
-        )
-
-        group = cast(h5py.Group, f[path])
-        if "cm_transform" in group:
-            tube._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
-        if "cm_transform_norx" in group:
-            tube.cm_transform_norx = Transform.load(f, f"{path}/cm_transform_norx")
+        tube.focal_planes = focal_planes
 
         return tube
 
@@ -2716,22 +2717,23 @@ class Receiver:
         epoch = cast(str, group.attrs["epoch"])
         static = cast(bool, group.attrs["static"])
         autofreeze = cast(bool, group.attrs["autofreeze"])
-        optics_tubes = [
-            OpticsTube.load(f, f"{path}/{ot_name}", pointing_models)
-            for ot_name in group.keys()
-            if ot_name != "cm_transform"
-        ]
-
         receiver = cls(
             name=name,
             epoch=epoch,
-            optics_tubes=optics_tubes,
+            optics_tubes=[],
             static=static,
             autofreeze=autofreeze,
         )
 
         if "cm_transform" in group:
             receiver._cm_transform_stat = Transform.load(f, f"{path}/cm_transform")
+        optics_tubes = [
+            OpticsTube.load(f, f"{path}/{ot_name}", pointing_models, receiver)
+            for ot_name in group.keys()
+            if ot_name != "cm_transform"
+        ]
+        receiver.optics_tubes = optics_tubes
+
         return receiver
 
 
