@@ -39,7 +39,7 @@ def map_band_chans(b1, c1, b2, c2, chans_per_band=512):
     mapping = np.full_like(acs1, -1, dtype=int)
     for i, ac in enumerate(acs1):
         x = np.where(acs2 == ac)[0]
-        if len(x > 0):
+        if x.size > 0:
             mapping[i] = x[0]
     return mapping
 
@@ -569,7 +569,7 @@ class ResSet:
                 is_optical = (d['is_optical'].lower() == 'true')
 
                 kwargs = dict(
-                    i=i,
+                    idx=i,
                     res_freq=float(d['freq_mhz']),
                     smurf_band=_int(d['smurf_band']),
                     bg=_int(d['bias_line']),
@@ -820,7 +820,6 @@ class Match:
             # Det types of DARK and SLOT are allowed to may or may not have
             # pointing data. For these types of detectors, the cost is left
             # untouched.
-
             src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
             dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
 
@@ -852,11 +851,6 @@ class Match:
         m = dst_unassigned_type[None, :] & (src_arr['bg'][:, None] !=-1)
         mat[m] = np.inf
 
-        # Frequency offset
-        df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
-        df -= self.match_pars.freq_offset_mhz
-        mat += np.exp((np.abs(df / self.match_pars.freq_width)) ** 2)
-
         # Design or pointing unassigned
         dst_unassigned = (dst_arr['bg'][None, :] == -1)
         # pointing or tune unassigned
@@ -878,6 +872,11 @@ class Match:
         bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
         m = bgs_mismatch & (~dst_unassigned) & (~src_unassigned)
         mat[m] = np.inf
+
+        # Frequency offset
+        df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
+        df -= self.match_pars.freq_offset_mhz
+        mat += np.exp((np.abs(df / self.match_pars.freq_width)) ** 2)
 
         # If pointing, add cost if assigned too far
         dd = np.sqrt(
@@ -909,7 +908,7 @@ class Match:
 
 
     def _match(self):
-        nside = max(len(self.src), len(self.dst)) + self.match_pars.unassigned_slots
+        nside = len(self.src) + len(self.dst)
 
         # Keep this square so all resonators are included in final matching
         mat_full = np.zeros((nside, nside), dtype=float)
@@ -1022,11 +1021,16 @@ class Match:
         if (~np.isnan(dangs)).any():
             stats.pointing_err_avg = np.nanmean(dangs)
 
-        stats.freq_diff_avg /= stats.matched_chans
-        stats.freq_diff_avg = float(stats.freq_diff_avg)
-
-        stats.freq_err_avg /= stats.matched_chans
-        stats.freq_err_avg = float(stats.freq_err_avg)
+        if stats.matched_chans:
+            stats.freq_diff_avg = float(
+                stats.freq_diff_avg / stats.matched_chans
+            )
+            stats.freq_err_avg = float(
+                stats.freq_err_avg / stats.matched_chans
+            )
+        else:
+            stats.freq_diff_avg = np.nan
+            stats.freq_err_avg = np.nan
 
         return stats
 
@@ -1035,6 +1039,8 @@ class Match:
         with h5py.File(path, 'w') as fout:
             fout.create_group('meta')
             fout.create_group('meta/match_pars')
+            fout['meta/matching_cost'] = self.matching_cost
+            fout['meta/apply_dst_pointing'] = self.apply_dst_pointing
             for k, v in asdict(self.match_pars).items():
                 fout['meta/match_pars'][k] = v
             if self.src.name is not None:
@@ -1070,7 +1076,27 @@ class Match:
                 else:
                     match_pars[k] = f['meta/match_pars'][k][()]
             match_pars = MatchParams(**match_pars)
-        match = cls(src, dst, match_pars=match_pars)
+            matching = np.asarray(f['matching'], dtype=int)
+            merged = ResSet.from_array(np.array(f['merged']), name='merged')
+            matching_cost = (
+                float(f['meta/matching_cost'][()])
+                if 'meta/matching_cost' in f else np.nan
+            )
+            apply_dst_pointing = (
+                bool(f['meta/apply_dst_pointing'][()])
+                if 'meta/apply_dst_pointing' in f else True
+            )
+
+        # Restore the saved solution without rerunning the assignment.
+        match = cls.__new__(cls)
+        match.src = src
+        match.dst = dst
+        match.match_pars = match_pars
+        match.apply_dst_pointing = apply_dst_pointing
+        match.matching = matching
+        match.matching_cost = matching_cost
+        match.merged = merged
+        match.stats = match.get_stats()
         return match
 
 
@@ -1087,7 +1113,7 @@ def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
     else:
         offset = 0
 
-    yw= 0.4
+    yw = 0.4
     def plot_res(ax, r: Resonator, y=0, offset=0):
         if r is None:
             return

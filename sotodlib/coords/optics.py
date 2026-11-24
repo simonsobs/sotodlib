@@ -401,7 +401,7 @@ def LAT_optics(zemax_path):
     zemax_dat = load_zemax(zemax_path)
     try:
         LAT = zemax_dat["LAT"][()]
-        LAT = {k.decode(): v for k, v in zemax_dat["LAT"][()].items()}
+        LAT = {k: v for k, v in zemax_dat["LAT"][()].items()}
     except Exception as e:
         logger.error("LAT key missing from dictionary")
         raise e
@@ -441,7 +441,7 @@ def LATR_optics(zemax_path, tube_slot):
     try:
         LATR = zemax_dat["LATR"][()]
         LATR = np.array([
-            {k.decode(): v for k, v in d.items()}
+            {k: v for k, v in d.items()}
             for d in LATR
         ], dtype=object)
     except Exception as e:
