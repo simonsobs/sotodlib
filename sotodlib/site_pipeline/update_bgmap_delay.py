@@ -19,12 +19,11 @@ from sotodlib import core
 from sotodlib.io import load_book
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
-from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-logger = logging.getLogger("bgmap_delay")
-if not logger.hasHandlers():
-    sp_init_logger("bgmap_delay")
+
+logger = init_logger('update_bgmap_delay', 'update-bgmap-delay: ')
 
 #######################################################################
 

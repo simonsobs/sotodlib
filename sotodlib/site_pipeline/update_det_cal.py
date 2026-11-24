@@ -26,12 +26,14 @@ from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.logging import init_logger
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
 from sodetlib.operations.iv import IVAnalysis
 from sodetlib.operations.bias_steps import BiasStepAnalysis
 
+logger = init_logger('update_det_cal', 'update-det-cal: ')
 
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
@@ -43,13 +45,6 @@ BGS = {'lb': [0, 1, 4, 5, 8, 9], 'hb': [2, 3, 6, 7, 10, 11]}
 BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
             'uhf': {'lb': 'f220', 'hb': 'f280'},
             'lf': {'lb': 'f030', 'hb': 'f040'}}
-
-from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
-
-logger = logging.getLogger("det_cal")
-if not logger.hasHandlers():
-    sp_init_logger("det_cal")
-
 
 @dataclass
 class DetCalCfg:
@@ -506,7 +501,7 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
     bsa.am = am
     zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
     if zero_bias_count > 0:
-        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+        logger.warning(f'Patching {zero_bias_count} zero bias values in {obs_id}')
         fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
@@ -679,7 +674,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
             if cfg.apply_cal_correction:
                 correction = find_correction_results(band, chan, detset)
                 if correction is None:
-                    logger.warn(
+                    logger.warning(
                         "Unable to find correction result for %s %s %s (%s)",
                         band,
                         chan,
