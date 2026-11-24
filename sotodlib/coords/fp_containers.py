@@ -15,6 +15,7 @@ from argparse import Namespace
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import cached_property, reduce
+from concurrent.futures import Executor
 from typing import (
     Any,
     ClassVar,
@@ -340,9 +341,10 @@ def setup_fit_params(
             par[idx] = old_system.parameters[old_names.index(name)]
 
     # Setup nuisance fit parameters
-    nuisance_values = []
-    nuisance_bounds = []
-    nuisance_scales = []
+    nn = len(system.nuisance_params.params_flat)
+    nuisance_values = np.zeros(nn)
+    nuisance_bounds = [(-np.inf, np.inf) for _ in range(nn)]
+    nuisance_scales = np.ones(nn)
     for meas_id, nidx in system.nuisance_params.obs_mapping.items():
         if old_system is not None and meas_id in old_system.nuisance_params.obs_mapping:
             oidx = old_system.nuisance_params.obs_mapping[meas_id]
@@ -361,20 +363,15 @@ def setup_fit_params(
                     "No equivalent non-nuisance parameter found for nuisance parameter %s",
                     name,
                 )
-                nuisance_values.append(value)
-                nuisance_bounds.append((-np.inf, np.inf))
-                nuisance_scales.append(1.0)
+                nuisance_values[nidx] = value
+                nuisance_bounds[nidx] = (-np.inf, np.inf)
+                nuisance_scales[nidx] = 1.0
                 continue
             idx = system.parameter_names.index(name)
-            nuisance_values.append(value)
+            nuisance_values[nidx] = value
             lo, hi = bounds[idx]
-            nuisance_bounds.append(
-                (
-                    value - (value - lo) / cfg.nuisance_scale,
-                    value + (hi - value) / cfg.nuisance_scale,
-                )
-            )
-            nuisance_scales.append(scales[idx])
+            nuisance_bounds[nidx] = (value - (value - lo) / cfg.nuisance_scale, value + (hi - value) / cfg.nuisance_scale)
+            nuisance_scales[nidx] = scales[idx]
 
     # Append nuisance parameters
     params = np.concatenate([params, np.asarray(nuisance_values)])
@@ -385,6 +382,8 @@ def setup_fit_params(
 
     return params, bounds, scales
 
+def _get_pm(meas):
+    return meas._pm_data_dyn
 
 class StaticOrCached(Generic[T]):
     """
@@ -526,6 +525,13 @@ class NuisanceParams:
         transform_list = [Transform.identity() for _ in range(len(obs_ids_split))]
         return cls(obs_mapping, par_list, transform_list)
 
+    @property
+    def rev_mapping(self):
+        rev_mapping = [[] for _ in range(len(self.transform_list))]
+        for meas_id, idx in self.obs_mapping.items():
+            rev_mapping[idx] += [meas_id]
+        return rev_mapping
+
     def compute_transforms(self, system: PointingSystem):
         r"""
         Take in a system after a round of fitting and compute the nuisance transforms needed
@@ -583,9 +589,7 @@ class NuisanceParams:
             If there are obs split across multiple receivers or the total
             number of focal planes in the system does not match the mapping.
         """
-        rev_mapping = [[] for _ in range(len(self.transform_list))]
-        for meas_id, idx in self.obs_mapping.items():
-            rev_mapping[idx] += [meas_id]
+        rev_mapping = self.rev_mapping
         done_idx = set()
         for rx in system.receivers:
             rx_aff_inv, rx_sft_inv = mt.invert_transform(
@@ -615,17 +619,17 @@ class NuisanceParams:
                     [affs[mid] for mid in meas_ids],
                     [sfts[mid] for mid in meas_ids],
                     -2,
-                    False,
-                    fast=True,
+                    True,
+                    fast=False, #True,
                 )
-                n_aff, n_sft = mt.invert_transform(
-                    *mt.compose_transform(cm_aff, cm_shift, rx_aff_inv, rx_sft_inv)
+                n_aff, n_sft = mt.invert_transform( # cm_aff, cm_shift)
+                    *mt.compose_transform(rx_aff_inv, rx_sft_inv, cm_aff, cm_shift)
                 )
                 trf_old = self.transform_list[i]
                 n_aff, n_sft = mt.compose_transform(
                     trf_old.affine, trf_old.shift, n_aff, n_sft
                 )
-                self.transform_list[i] = Transform(n_aff, n_sft)
+                self.transform_list[i] = Transform(n_sft, n_aff)
                 done_idx.add(i)
         if len(done_idx) != len(self.transform_list):
             raise ValueError("Not all obs were completed! Check your receiver objects!")
@@ -836,21 +840,25 @@ class PointingModel:
             q_enc = det_enc_msk.q_enc
 
         err = np.inf
-        alpha = 1.0
         prev_err = np.inf
+        alpha = 1.0
         prev_distortion = np.zeros_like(estimate)
+        
         for _ in range(max_iter):
             fp.xi = estimate[:, 0]
             fp.eta = estimate[:, 1]
+        
             if meas.fake_gamma:
                 q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1])
             else:
-                q_fp = quat.rotation_xieta(estimate[:, 0], estimate[:, 1], estimate[:, 2])  # type: ignore[arg-type]
                 fp.gamma = estimate[:, 2]
-
-            # Apply the pointing model
-            bs, fp_corrected = apply_pointing_model(None, params_use, ancil, fp)
+                q_fp = quat.rotation_xieta(
+                        estimate[:, 0], estimate[:, 1], estimate[:, 2] # type: ignore
+                )
+        
+            bs, fp_corrected = apply_pointing_model( None, params_use, ancil, fp)
             bs = cast(AxisManager, bs)
+        
             xi, eta, gamma = quat.decompose_xieta(
                 ~quat.euler(2, bs.roll)
                 * ~quat.rotation_lonlat(-1 * np.asarray(bs.az), bs.el)
@@ -860,46 +868,40 @@ class PointingModel:
 
             if fp_corrected is None:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
-                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
+                to_ret.xyz = mt.apply_transform( to_ret.xyz, ntrf.affine, ntrf.shift)
                 return to_ret
-
-            # Estimate and remove focalplane distortion
+        
             if meas.fake_gamma:
-                distortion = np.column_stack(
-                    (fp_corrected.xi - fp.xi, fp_corrected.eta - fp.eta)
-                )
-                resid = np.column_stack(
-                    (fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta)
-                )
+                dx = fp_corrected.xi - fp.xi
+                dy = fp_corrected.eta - fp.eta
+        
+                distortion = np.column_stack((dx, dy))
+                resid = np.column_stack(( fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta,))
             else:
-                distortion = np.column_stack(
-                    (
-                        fp_corrected.xi - fp.xi,
-                        fp_corrected.eta - fp.eta,
-                        fp_corrected.gamma - fp.gamma,
-                    )
-                )
-                resid = np.column_stack(
-                    (
-                        fp_corrected.xi - fp_target.xi,
-                        fp_corrected.eta - fp_target.eta,
-                        fp_corrected.gamma - fp_target.gamma,
-                    )
-                )
-            err = np.sqrt(np.nanmean(np.linalg.norm(resid, axis=1) ** 2))
+                dx = fp_corrected.xi - fp.xi
+                dy = fp_corrected.eta - fp.eta
+                dg = fp_corrected.gamma - fp.gamma
+        
+                distortion = np.column_stack((dx, dy, dg))
+                resid = np.column_stack(( fp_corrected.xi - fp_target.xi, fp_corrected.eta - fp_target.eta, fp_corrected.gamma - fp_target.gamma,))
+        
+            err = np.sqrt(np.nanmean(np.sum(resid * resid, axis=1)))
+        
             if err > prev_err:
                 alpha *= 0.5
                 distortion = prev_distortion
             else:
                 alpha = min(1.0, alpha * 1.2)
-                prev_distortion = distortion
+                prev_distortion = distortion.copy()
                 prev_err = err
+        
             if err < tol:
                 to_ret.xyz[meas.wmsk] = np.column_stack((xi, eta, gamma))
-                to_ret.xyz = mt.apply_transform(to_ret.xyz, ntrf.affine, ntrf.shift)
+                to_ret.xyz = mt.apply_transform(
+                    to_ret.xyz, ntrf.affine, ntrf.shift
+                )
                 return to_ret
-
-            # Update estimate of the undistorted fp
+        
             estimate -= alpha * distortion
 
         raise RuntimeError(
@@ -2859,7 +2861,7 @@ class PointingSystem:
             rx.freeze(True)
         self.set_static(static)
 
-    def set_thaw(self, static: bool):
+    def set_thaw(self, static: bool, thaw_meas: Optional[list[str]] = None):
         """
         Run thaw for all relevent childen.
 
@@ -2872,10 +2874,52 @@ class PointingSystem:
             for ot in rx.optics_tubes:
                 for fp in ot.focal_planes:
                     for meas in fp.focal_planes:
+                        if thaw_meas is not None and meas.meas_id not in thaw_meas:
+                            continue
                         meas.thaw(static)
                     fp.thaw(static)
                 ot.thaw(static)
             rx.thaw(static)
+
+
+    def warm_pm_data(self, executor : Executor):
+        """
+        Warm up the `FocalPlane.pm_data` cache in parallel.
+        This will set `_pm_data_stat` to the output of `_pm_data_dyn`
+        for all `FocalPlane`s, overwriting whatever the current cached static
+        value is regardless of if `FocalPlane.static` is `True` or if it was recently
+        frozen on thawed.
+
+        This should be used with caution.
+
+        Parameters
+        ----------
+        executor : Executor
+            Executor used to evaluate `_pm_data_dyn` concurrently.
+            Doesn't need to be from `concurrent.futures` but must
+            implement a compatible API.
+        """
+        all_meas = [
+            meas
+            for rx in self.receivers
+            for ot in rx.optics_tubes
+            for fp in ot.focal_planes
+            for meas in fp.focal_planes
+        ]
+    
+        # futures = [
+        #     executor.submit(_get_pm, meas)
+        #     for meas in all_meas
+        # ]
+        # wait(futures)
+    
+        # for meas, future in zip(all_meas, futures):
+        #     meas._pm_data_stat = future.result()
+
+        results = executor.map(_get_pm, all_meas)
+
+        for meas, pm_data in zip(all_meas, results):
+            meas._pm_data_stat = pm_data
 
     @property
     def parameters(self) -> Float[np.ndarray, "npar"]:
@@ -2970,7 +3014,7 @@ class PointingSystem:
         return chisq
 
     def objective(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor, thaw_meas = None 
     ) -> float:
         """
         Evaluate the total chi-squared objective function.
@@ -2999,15 +3043,20 @@ class PointingSystem:
         cm_fac : float
             Multiplicative factor controlling the strength of the
             common-mode regularization penalty.
+        executor : Executor
+            Executor used to evaluate `_pm_data_dyn` concurrently.
+            See `warm_pm_data` for details.
 
         Returns
         -------
-        float
+        objective : float
             Total objective value, consisting of the focal-plane chi-squared
             and the receiver common-mode regularization penalty.
         """
+        print(".", end="", flush=True)
         self.update_parameters(params)
-        self.set_thaw(True)
+        self.set_thaw(True, thaw_meas)
+        self.warm_pm_data(executor)
         try:
             chisq = self.chisq
             if np.isfinite(chisq):
@@ -3021,7 +3070,7 @@ class PointingSystem:
             return 1e6
 
     def objective_resid(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor, thaw_meas = None
     ) -> Float[np.ndarray, "nresid_full"]:
         """
         Evaluate the residual vector used by least-squares optimization.
@@ -3049,17 +3098,21 @@ class PointingSystem:
         cm_fac : float
             Multiplicative factor controlling the strength of the
             common-mode regularization terms.
+        executor : Executor
+            Executor used to evaluate `_pm_data_dyn` concurrently.
+            See `warm_pm_data` for details.
 
         Returns
         -------
-        Float[np.ndarray, "nresid"]
+        objective_resid : Float[np.ndarray, "nresid"]
             Concatenated residual vector containing the focal-plane
             residuals followed by the receiver common-mode shift and
             rotation regularization terms.
         """
         print(".", end="", flush=True)
         self.update_parameters(params)
-        self.set_thaw(True)
+        self.set_thaw(True, thaw_meas)
+        self.warm_pm_data(executor)
         try:
             resid = [
                 self.residuals,
@@ -3074,7 +3127,7 @@ class PointingSystem:
             return np.full(nresid, 1e3)
 
     def log_prob(
-        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float
+        self, params: Float[np.ndarray, "npar"], nresid: int, cm_fac: float, executor : Executor
     ) -> float:
         """
         Calculate the log probability of the current parameter values.
@@ -3090,13 +3143,16 @@ class PointingSystem:
             Number of residuals used to scale the common-mode penalty.
         cm_fac : float
             Scaling factor applied to the common-mode penalty.
+        executor : Executor
+            Executor used to evaluate `_pm_data_dyn` concurrently.
+            See `warm_pm_data` for details.
 
         Returns
         -------
         log_prob : float
             Log probability of the supplied parameter values.
         """
-        return -0.5 * self.objective(params, nresid, cm_fac)
+        return -0.5 * self.objective(params, nresid, cm_fac, executor, None)
 
     @overload
     def search(

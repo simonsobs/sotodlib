@@ -16,6 +16,7 @@ from copy import deepcopy
 import corner
 import matplotlib.pyplot as plt
 from functools import partial
+from concurrent.futures import Executor
 
 import emcee
 import git
@@ -74,11 +75,13 @@ default_config = {
     "activate_nuisance": 1,
     "activate_nuisance_transforms": 1,
     "least_squares": True,
-    "cm_fac": 1e-3,
+    "cm_fac": 1e-4,
     "proposal_factor": 1e-2,
-    "pars_from_old": True,
-    "nuisance_from_old": True,
+    "pars_from_old": False,
+    "nuisance_from_old": False,
     "nuisance_transform_from_old": False,
+    "pool_type": "thread",
+    "pool_size": 1,
 }
 
 
@@ -168,6 +171,8 @@ def _fit_round(
     use_least_squares,
     jac_sparsity,
     cm_fac,
+    executor,
+    thaw_meas=None,
     **kwargs,
 ):
     if use_least_squares:
@@ -179,7 +184,7 @@ def _fit_round(
             bounds=(lb, ub),
             x_scale=scales,
             jac_sparsity=jac_sparsity,
-            args=(nresid, cm_fac),
+            args=(nresid, cm_fac, executor, thaw_meas),
             method="trf",
             loss="linear",  # "soft_l1",
             tr_solver="lsmr",
@@ -194,12 +199,13 @@ def _fit_round(
     ]
 
     def scaled_objective(z):
-        return system.objective(z * scales, nresid, cm_fac)
+        return system.objective(z * scales, nresid, cm_fac, executor, thaw_meas)
 
     res = minimize(
         scaled_objective,
         x0 / scales,
-        method="L-BFGS-B",
+        # method="L-BFGS-B",
+        method="powell",
         bounds=scaled_bounds,
         **kwargs,
     )
@@ -207,7 +213,7 @@ def _fit_round(
     return res, res.x * scales
 
 
-def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
+def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir, executor):
     system.set_static(False)
     system.set_thaw(True)
 
@@ -261,7 +267,7 @@ def _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir):
         if np.any(x < lb) or np.any(x > ub):
             return -np.inf
         try:
-            value = system.log_prob(x, nresid, cfg.cm_fac)
+            value = system.log_prob(x, nresid, cfg.cm_fac, executor)
         except (
             RuntimeError,
             AssertionError,
@@ -1002,6 +1008,21 @@ def _plot_fit(system, plot_dir, i, cfg):
                 fpp.plot_ufm(fp, pdir)
 
 
+def _make_executor(pool_type: str, pool_size: int) -> Executor:
+    if pool_type == "thread":
+        from concurrent.futures import ThreadPoolExecutor
+        return ThreadPoolExecutor(max_workers=pool_size)
+    if pool_type == "process":
+        from concurrent.futures import ProcessPoolExecutor
+        return ProcessPoolExecutor(max_workers=pool_size)
+    if pool_type == "interpreter":
+        from concurrent.futures import InterpreterPoolExecutor  # type: ignore[reportAttributeAccessIssue]
+        return InterpreterPoolExecutor(max_workers=pool_size)
+    if pool_type == "mizu":
+        import pymizu
+        return pymizu.PoolExecutor.create(pool_size)
+    raise ValueError(f"Invalid pool type: {pool_type}")
+
 def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # Load config
     require = (
@@ -1039,16 +1060,21 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         f"{repo.head.object.hexsha}{'_dirty'*repo.is_dirty()}"
     )
 
+    # Setup executor
+    executor = _make_executor(cfg.pool_type, cfg.pool_size)
+
     # Make templates and load old data if we can
     _compute_templates_and_copy_old(system, cfg, old_system, old_cfg, ctx, plot_dir)
 
     # Save our template
-    # logger.info("Saving templates")
-    # with h5py.File(outfile, "a") as f:
-    #     system.save(f, "/", True)
-    # fpc.make_manifestdb(
-    #     system, "template", os.path.join(data_dir, "template.sqlite"), outfile
-    # )
+    logger.info("Saving templates")
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    fpc.make_manifestdb(
+        system, "template", os.path.join(data_dir, "template.sqlite"), outfile
+    )
+    import sys
+    sys.exit()
 
     # Mark pad epochs as pad
     logger.info("Padding epochs")
@@ -1118,6 +1144,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     # fpc.make_per_obs_manifestdb(
     #     system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
     # )
+    
 
     # Setup fit params
     params, bounds, scales = fpc.setup_fit_params(system, cfg, old_system)
@@ -1125,7 +1152,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     npar = len(system.parameters)
     nresid = len(system.residuals)
     nresid_full = len(
-        system.objective_resid(system.parameters_full, nresid, cfg.cm_fac)
+        system.objective_resid(system.parameters_full, nresid, cfg.cm_fac, executor)
     )
     jac_sparsity = None
     if len(cfg.nuisance_params) > 0 and cfg.least_squares and cfg.n_rounds > 0:
@@ -1146,7 +1173,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     system.set_thaw(True)
     system.set_freeze(True)
     logger.info("Initial chisq is %.5f", system.chisq)
-    # _plot_fit(system, plot_dir, 0)
+    _plot_fit(system, plot_dir, 0, cfg)
 
     # Fit for pointing model and focal planes
     for i in range(cfg.n_rounds):
@@ -1168,6 +1195,7 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
             cfg.least_squares,
             None,
             cfg.cm_fac,
+            executor,
         )
         system.update_parameters(params_fit)
         _report_fit(res, cfg, system, npar, x0, True, False)
@@ -1178,26 +1206,34 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
         # Now nuisance
         if len(cfg.nuisance_params) > 0 and i + 1 >= cfg.activate_nuisance:
+            rev_mapping = system.nuisance_params.rev_mapping
             logger.info("Fitting nuisance for round %d", i + 1)
             x0 = system.parameters_full.copy()
-            bounds_fixed = [(val, val) for val in x0[:npar]]
-            bounds_use = bounds_fixed + bounds[npar:]
+            nn = len(cfg.nuisance_params)
+            # _bounds_use = bounds_fixed + bounds[npar:]
             scales_use = scales
-            res, params_fit = _fit_round(
-                system,
-                x0,
-                bounds_use,
-                scales_use,
-                nresid,
-                cfg.least_squares,
-                jac_sparsity,
-                cfg.cm_fac,
-                max_nfev=25,
-                xtol=1e-6,
-                ftol=1e-4,
-            )
-            system.update_parameters(params_fit)
-            _report_fit(res, cfg, system, npar, x0, False, True)
+            for j in range(len(system.nuisance_params.par_list)):
+                logger.info("Fitting %d/%d", j+1, len(system.nuisance_params.par_list))
+                bounds_fixed = [(val, val) for val in system.parameters_full]
+                par_start, par_stop = npar + (j*nn), npar + ((j+1)*nn)
+                bounds_use = bounds_fixed[:par_start] + bounds[par_start:par_stop] + bounds_fixed[par_stop:]
+                res, params_fit = _fit_round(
+                    system,
+                    x0,
+                    bounds_use,
+                    scales_use,
+                    nresid,
+                    cfg.least_squares,
+                    jac_sparsity,
+                    cfg.cm_fac,
+                    executor,
+                    thaw_meas=rev_mapping[i],
+                    xtol=1e-6,
+                    ftol=1e-4,
+                )
+                system.update_parameters(params_fit.copy())
+                _report_fit(res, cfg, system, npar, x0, False, True)
+                x0 = params_fit.copy()
             system.set_thaw(True)
 
         system.set_freeze(True)
@@ -1206,7 +1242,9 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
         # Now do the fp nuisance transforms
         if i + 1 >= cfg.activate_nuisance_transforms:
+            logger.info("Fitting nuisance transforms for round %d", i + 1)
             system.nuisance_params.compute_transforms(system)
+            system.set_thaw(True)
 
         # Freeze and plot
         system.set_freeze(True)
@@ -1258,7 +1296,10 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
 
     # Run MCMC if we want
     if cfg.mcmc_steps > 0:
-        _ = _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir)
+        _ = _run_mcmc(system, nresid, cfg, bounds, scales, data_dir, plot_dir, executor)
+
+    # Shutdown executor
+    executor.shutdown()
 
 
 def main():
