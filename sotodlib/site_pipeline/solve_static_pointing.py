@@ -82,6 +82,7 @@ default_config = {
     "nuisance_transform_from_old": False,
     "pool_type": "thread",
     "pool_size": 1,
+    "zero_nuisance": False,
 }
 
 
@@ -1073,8 +1074,6 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     fpc.make_manifestdb(
         system, "template", os.path.join(data_dir, "template.sqlite"), outfile
     )
-    import sys
-    sys.exit()
 
     # Mark pad epochs as pad
     logger.info("Padding epochs")
@@ -1137,14 +1136,13 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         pm.nuisance_params = nuisance_params
 
     # Save our per-obs results
-    # logger.info("Saving per-obs")
-    # system.set_static(True)
-    # with h5py.File(outfile, "a") as f:
-    #     system.save(f, "/", True)
-    # fpc.make_per_obs_manifestdb(
-    #     system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
-    # )
-    
+    logger.info("Saving per-obs")
+    system.set_static(True)
+    with h5py.File(outfile, "a") as f:
+        system.save(f, "/", True)
+    fpc.make_per_obs_manifestdb(
+        system, "transformed", os.path.join(data_dir, "per_obs.sqlite"), outfile
+    )
 
     # Setup fit params
     params, bounds, scales = fpc.setup_fit_params(system, cfg, old_system)
@@ -1179,10 +1177,20 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
     for i in range(cfg.n_rounds):
         logger.info("Starting fit round %d", i + 1)
         system.set_thaw(True)
-        x0 = system.parameters_full.copy()
+
+        par_list = system.nuisance_params.par_list
+        transform_list = system.nuisance_params.transform_list
+        if cfg.zero_nuisance:
+            par_list = deepcopy(par_list)
+            transform_list = deepcopy(transform_list)
+            x0 = system.parameters_full.copy()
+            x0[npar:] = 0
+            system.update_parameters(x0)
+            system.nuisance_params.transform_list = [fpc.Transform.identity() for _ in range(len(transform_list))]
 
         # Just static
         logger.info("Fitting static for round %d", i + 1)
+        x0 = system.parameters_full.copy()
         x0 = x0[:npar]
         scales_use = scales[:npar]
         bounds_use = bounds[:npar]
@@ -1200,17 +1208,19 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
         system.update_parameters(params_fit)
         _report_fit(res, cfg, system, npar, x0, True, False)
         system.set_thaw(True)
-
         system.set_freeze(True)
         _plot_fit(system, plot_dir, i + 1, cfg)
 
+        if cfg.zero_nuisance:
+            system.nuisance_params.par_list = par_list
+
         # Now nuisance
         if len(cfg.nuisance_params) > 0 and i + 1 >= cfg.activate_nuisance:
+            system.set_thaw(True)
             rev_mapping = system.nuisance_params.rev_mapping
             logger.info("Fitting nuisance for round %d", i + 1)
             x0 = system.parameters_full.copy()
             nn = len(cfg.nuisance_params)
-            # _bounds_use = bounds_fixed + bounds[npar:]
             scales_use = scales
             for j in range(len(system.nuisance_params.par_list)):
                 logger.info("Fitting %d/%d", j+1, len(system.nuisance_params.par_list))
@@ -1234,21 +1244,22 @@ def run(config_path: str, overwrite: bool, backup: bool, timestamp: str):
                 system.update_parameters(params_fit.copy())
                 _report_fit(res, cfg, system, npar, x0, False, True)
                 x0 = params_fit.copy()
+            system.nuisance_params.mean_zero(system)
             system.set_thaw(True)
-
-        system.set_freeze(True)
-        _plot_fit(system, plot_dir, f"{i + 1}_np", cfg)
-        system.set_thaw(True)
+            system.set_freeze(True)
+            _plot_fit(system, plot_dir, f"{i + 1}_np", cfg)
 
         # Now do the fp nuisance transforms
         if i + 1 >= cfg.activate_nuisance_transforms:
+            system.set_thaw(True)
             logger.info("Fitting nuisance transforms for round %d", i + 1)
             system.nuisance_params.compute_transforms(system)
             system.set_thaw(True)
+            system.set_freeze(True)
+            _plot_fit(system, plot_dir, f"{i + 1}_fp", cfg)
 
-        # Freeze and plot
-        system.set_freeze(True)
-        _plot_fit(system, plot_dir, f"{i + 1}_fp", cfg)
+        if cfg.zero_nuisance:
+            system.nuisance_params.transform_list = transform_list
 
         # Cut outliers
         tot_cut = 0

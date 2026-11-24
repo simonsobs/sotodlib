@@ -479,6 +479,35 @@ class NuisanceParams:
                 par_dict[name] = float(params[idx])
                 idx += 1
 
+
+    def mean_zero(self, system: PointingSystem):
+        """
+        Make all nuisance parameter distributions mean zero by
+        subtracting the mean from the nuisance parameters and adding
+        it to the corresponding static parameter.
+
+        Parameters
+        system : PointingSystem
+            Pointing system whose pointing models will be modified.
+        """
+        pm_mapping = {pm.epoch : [] for pm in system.pointing_models}
+        for rx in system.receivers:
+            for ot in rx.optics_tubes:
+                for fp in ot.focal_planes:
+                    for meas in fp.focal_planes:
+                        pm_mapping[meas.pointing_model.epoch] += [self.obs_mapping[meas.meas_id]]
+
+        for pm in system.pointing_models:
+            pm_map = pm_mapping[pm.epoch]
+            pm_pars = dict(zip(self.par_list[0].keys(), zip(*[self.par_list[m].values() for m in pm_map])))
+            for key, val in pm_pars.items():
+                if key not in pm.parameters:
+                    continue
+                avg = np.mean(val)
+                pm.parameters[key] += avg
+                for idx in np.unique(pm_map):
+                    self.par_list[idx][key] -= avg
+
     @classmethod
     def from_system(
         cls, system: PointingSystem, nuisance_pars: dict[str, float], threshold: float
@@ -486,7 +515,7 @@ class NuisanceParams:
         """
         Construct nuisance parameters and transforms from a pointing system.
 
-        Observations are grouped into epochs using their measurement IDs
+        Observations are grouped into epochs using their meas_ids
         and timestamps. Each epoch is assigned a copy of `nuisance_pars`
         and an identity transform. Multiple observation IDs belonging
         to the same epoch map to the same nuisance parameter set.
@@ -494,7 +523,7 @@ class NuisanceParams:
         Parameters
         ----------
         system : PointingSystem
-            Pointing system from which to collect observation IDs.
+            Pointing system from which to collect obs_ids.
         nuisance_pars : dict[str, float]
             Initial nuisance parameter values assigned to each epoch.
         threshold : float
