@@ -2085,13 +2085,18 @@ class FocalPlaneCollection:
         to_ret = deepcopy(self.template)
         to_ret.xyz[:] = 0
         fmsk = np.zeros(len(to_ret.xyz), dtype=bool)
+        all_fake = True
         for meas in self.focal_planes:
             fmsk += meas.wmsk
-            to_ret.xyz[meas.wmsk] += (
-                meas.pm_data.xyz[meas.wmsk] * meas.weights[meas.wmsk, None]
+            all_fake *= meas.fake_gamma
+            ndim = 3 - int(meas.fake_gamma)
+            to_ret.xyz[meas.wmsk, :ndim] += (
+                    meas.pm_data.xyz[meas.wmsk, :ndim] * meas.weights[meas.wmsk, None]
             )
         to_ret.xyz[~fmsk] = np.nan
         to_ret.xyz[fmsk] /= self.weights[fmsk, None]
+        if all_fake:
+            to_ret.xyz[:, 2] = np.nan
         to_ret.center = None
         if self.autofreeze:
             self._data_stat = to_ret
