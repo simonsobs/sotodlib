@@ -120,31 +120,47 @@ class ResultSetHdfLoader(LoaderInterface):
                 raise KeyError(f"{key} not included inside dataset with keys"
                                f"{data_in.dtype.names}")
 
-    def _prefilter_data(self, data_in, load_fields=None):
+    def _prefilter_data(self, data_in, load_fields=None, key_map=None):
         """When a dataset is loaded and converted to a structured numpy array,
-        this function is called before the data are returned to the user. If
-        'load_fields' has data for this instance, this function adds any fields
-        specified within to the key map and checks that these fields are all
-        valid fields in data_in.
+        this function is called before the data are returned to the user.
 
-        This function may be extended in subclasses, but you will
-        likely want to call the super() handler before doing
-        additional processing.
+        If load_fields is provided, then only the field names listed
+        in load_fields will be returned.  load_fields must be a list
+        of instructions, where each instruction is either a string
+        (causing the field to be included, without renaming) or a dict
+        (for which the carried fields will be returned, renamed).
+        This is intended to be used at the context.yaml level, as part
+        of a metadata specification block.
+
+        If key_map is provided, it should be a dict that maps field
+        name in the loaded data to field name in the output array.
+        This is intended to be applied *by a subclass*, rather than
+        via context.yaml, though there's no way to police that.  The
+        remapping is applied *before* processing load_fields, so if
+        key_map[k]==v, then load_fields should make reference to v,
+        not k.  The key_map does not need to be exhaustive -- any
+        unlisted fields will be kept, unmodified (set to None to
+        remove things unwanted).
+
+        This function may be extended in subclasses (e.g. to hard-code
+        a key_map), but you will likely want to call the super()
+        handler before doing additional processing.
+
         """
-        key_map = {}
+        if key_map is None:
+            key_map = {}
         if load_fields is not None:
+            rekey = {k: None for k in data_in.dtype.names}
             for field in load_fields:
                 if isinstance(field, dict):
-                    key_map.update(field)
+                    rekey.update(field)
                 else:
-                    key_map[field] = field
-
-            for k in data_in.dtype.names:
-                if k not in key_map.keys():
-                    key_map[k] = None
-
-            self._check_key_map(key_map, data_in)
-
+                    rekey[field] = field
+            # Handle key_map ...
+            for k, k1 in key_map.items():
+                rekey[k] = rekey.pop(k1, None)
+            key_map = rekey
+        self._check_key_map(key_map, data_in)
         return _decode_array(data_in, key_map=key_map)
 
     def _populate(self, data, keys=None, row_order=None):
