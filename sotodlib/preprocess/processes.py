@@ -3540,7 +3540,7 @@ class AcuDropFlags(_Preprocess):
             acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in range(aman.dets.count)])
             buffer = self.calc_cfgs.get("buffer", 200)
             if buffer:
-                acu_drops = acu_drops.buffer(buffer)
+                acu_drops = acu_drops.buffered(buffer)
         else:
             acu_drops = RangesMatrix.zeros(
                 shape=(aman.dets.count, aman.samps.count))
