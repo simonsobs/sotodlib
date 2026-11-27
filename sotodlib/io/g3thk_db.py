@@ -1,8 +1,7 @@
 import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, selectinload
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship, selectinload
 
 import os
 import yaml
@@ -16,7 +15,9 @@ from .datapkg_utils import load_configs
 
 logger = logging.getLogger(__name__)
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
 Session = sessionmaker()
 
 

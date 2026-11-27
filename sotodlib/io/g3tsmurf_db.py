@@ -3,10 +3,10 @@ here to reduce the overall number of lines in each module.
 """
 from enum import Enum
 import sqlalchemy as db
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, backref
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship, backref
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 association_table = db.Table(
     "association_chan_assign",
