@@ -526,6 +526,10 @@ class Pipeline(list):
                 full_aman = proc_aman.copy()
             run_calc = False
 
+        if aman.dets.count == 0:
+            self.logger.error("all detectors cut on load")
+            return full_aman, "load"
+
         if 'frequency_cutoffs' not in proc_aman:
             freq_cutoff = np.nan
             proc_aman.wrap('frequency_cutoffs', core.AxisManager())
