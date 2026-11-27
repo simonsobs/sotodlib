@@ -3,23 +3,27 @@ import numpy as np
 import os
 import yaml
 from copy import deepcopy
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
+from collections import defaultdict
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
 import argparse
 import time
+import uuid
 
 from sotodlib.coords import det_match, optics
 from sotodlib.coords.det_match_solutions import SolutionsCfg, solve_all
 from sotodlib import core
 from sotodlib.core.metadata import ManifestDb
 from sotodlib.io.metadata import write_dataset
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.utils.procs_pool import get_exec_env
 
 from sotodlib.site_pipeline.utils.logging import init_logger
 
 
-logger = init_logger('update_det_match', 'update-det-match: ')
+logger = init_logger("update_det_match", "update-det-match: ")
 
 
 def get_detset_time(detset: str) -> float:
@@ -42,6 +46,8 @@ class UpdateDetMatchesConfig:
         h5 files will be stored.
     context_path: str
         Path to context file. This must contain detset and det_cal metadata.
+    wafer_info_path: str
+        Path to wafer info metadata file.
     site_pipeline_root: str
         Path to root of site-pipeline-configs. If ``$SITE_PIPELINE_CONFIG_DIR``
         is set in the environment, that will be used as the default.
@@ -88,7 +94,7 @@ class UpdateDetMatchesConfig:
         Time in seconds before a failed detset will be added to the cache. This
         is to prevent new detsets still acquiring data from being added right
         away.
-    
+
     Attributes
     -------------
     freq_offsets : Optional[np.ndarray]
@@ -97,6 +103,7 @@ class UpdateDetMatchesConfig:
     """
     results_path: str
     context_path: str
+    wafer_info_path: str
     site_pipeline_root:str = os.environ.get('SITE_PIPELINE_CONFIG_DIR')
     wafer_map_path: Optional[str] = None
     freq_offset_range_args: Optional[tuple[float, float, float]] = (-4, 4, 0.3)
@@ -120,7 +127,7 @@ class UpdateDetMatchesConfig:
         if self.wafer_map_path is None:
             self.wafer_map_path = os.path.join(
                 self.site_pipeline_root, 'shared/detmapping/wafer_map.yaml')
-        
+
         if self.freq_offset_range_args is not None:
             self.freq_offsets = np.arange(*self.freq_offset_range_args)
         else:
@@ -131,12 +138,12 @@ class UpdateDetMatchesConfig:
 
         if not os.path.exists(self.results_path):
             raise FileNotFoundError(f"Results dir does not exist: {self.results_path}")
-        
+
         allowed_solution_types = ['kaiwen_handmade', 'resonator_set']
         if self.solution_type not in allowed_solution_types:
             raise ValueError(
                 f"Solution type ({self.solution_type}) must be a member of: {allowed_solution_types}")
-        
+
         if self.solution_type == 'resonator_set':
             if self.resonator_set_dir is None:
                 raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
@@ -151,9 +158,10 @@ class Runner:
         self.ctx = core.Context(cfg.context_path)
         self.detset_db = None
         self.detcal_db = None
+        self.wafer_info_dataset: defaultdict[str, Any] = defaultdict(lambda: None)
         with open(self.cfg.wafer_map_path, 'r') as f:
             self.wafer_map = yaml.safe_load(f)
-        
+
         self.ufm_to_fp_file = os.path.join(
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
@@ -175,7 +183,11 @@ class Runner:
         if self.detcal_db is None:
             raise Exception(
                 f"Could not find detcal metadata entry with name: {cfg.detcal_meta_name}")
-        
+
+        with h5py.File(cfg.wafer_info_path) as h5f:
+            for ufm in list(h5f.keys()):
+                self.wafer_info_dataset[ufm] = h5f[ufm][:]
+
         self.failed_detset_cache_path = os.path.join(cfg.results_path, 'failed_detsets.yaml')
         self.match_dir = os.path.join(cfg.results_path, 'matches')
         if not os.path.exists(self.match_dir):
@@ -189,7 +201,7 @@ class Runner:
         detsets_all = set([d for t, d in zip(ts, detsets_all) if t > self.cfg.start_time and t < self.cfg.stop_time])
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
-        remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
+        remaining_detsets = np.sort(list(detsets_all - failed_detsets - finished_detsets))
         return remaining_detsets
 
 def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
@@ -221,9 +233,9 @@ def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
 
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
-            x = yaml.safe_load(f)
+            x = yaml.safe_load(f) or {}
     else:
-        x = {}  
+        x = {}
 
     x[str(detset)] = str(msg)
     with open(cache_file, 'w') as f:
@@ -255,84 +267,216 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
             match_pars=match_pars,
         )
         match_pars.freq_offset_mhz = opt_freq
-    match = det_match.Match(rs0, rs1, match_pars=match_pars, 
+    match = det_match.Match(rs0, rs1, match_pars=match_pars,
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
+
     return match
 
-def run_match(runner: Runner, detset: str) -> bool:
+def _run_match_core(runner: Runner, detset: str):
     """
-    Creates match files for specified detset, along with any other unmatched
-    detsets in the loaded observation. If match fails for a known reason, this
-    will add it to the failed_detset_cache so that it is not re-attempted.
+    Find the observation with the highest number of non-NC detectors
+    for the requested detset and run detector matching.
 
     Returns
     -------
-    success: bool
-        True if match was successful
+    success, failure_reason : tuple[bool, str or None]
+        Failure reason is only set when the old code would add the detset
+        to failed_detsets.yaml.  The caller owns cache updates.
     """
-    # Find obs-id with cal info
-    obs_all = set(runner.ctx.obsdb.query("type=='obs'")['obs_id'])
-    cur = runner.ctx.obsfiledb.conn.execute(f"""
-        select distinct obs_id from files where detset=='{detset}'
-    """)
-    obsids_with_cal = set(runner.detcal_db.get_entries(['dataset'])['dataset'])
+
+    fpath = os.path.join(runner.match_dir, f"{detset}.h5")
+
+    if os.path.exists(fpath):
+        logger.info(f"Match already exists for {detset}")
+        return True, None
+
+    obs_all = set(
+        runner.ctx.obsdb.query("type=='obs'")["obs_id"]
+    )
+
+    cur = runner.ctx.obsfiledb.conn.execute(
+        "SELECT DISTINCT obs_id FROM files WHERE detset = ?",
+        (detset,),
+    )
+
     obs_dset = {r[0] for r in cur}
-    obs_ids = sorted(list(
-        obs_all.intersection(obs_dset).intersection(obsids_with_cal)), 
-        key=lambda s:s.split('_')[1])[::-1]
-    if len(obs_ids) == 0:
-        add_to_failed_cache(
-            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL", runner.cfg
-        )
+
+    obsids_with_cal = set(
+        runner.detcal_db.get_entries(["dataset"])["dataset"]
+    )
+
+    obs_ids = sorted(
+        obs_all.intersection(obs_dset).intersection(obsids_with_cal),
+        key=lambda s: int(s.split("_")[1]),
+        reverse=True,
+    )
+
+    if not obs_ids:
         logger.error(f"Cannot find obsid for detset {detset}")
-        return False
+        return False, "NO_OBSID_WITH_CAL"
 
-    obs_id = obs_ids[0]
+    logger.info(
+        f"Searching {len(obs_ids)} observations for detset {detset}"
+    )
 
-    book_dir = os.path.dirname(runner.ctx.obsfiledb.get_files(obs_id)[detset][0][0])
-    book_idx_file = os.path.join(book_dir, 'M_index.yaml')
-    with open(book_idx_file, 'r') as f:
-        book_idx = yaml.safe_load(f)
+    best_obs_id = None
+    best_aman = None
+    best_n_good = -1
+    best_n_total = 0
 
-    aman = runner.ctx.get_meta(obs_id, ignore_missing=True)
-    finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
-    new_detsets = []
-    for detset in np.unique(aman.det_info.detset):
-        if (
-            detset not in finished_detsets and
-            get_detset_time(detset) > runner.cfg.start_time and
-            get_detset_time(detset) < runner.cfg.stop_time
-        ):
-            new_detsets.append(detset)
+    for obs_id in tqdm(
+        obs_ids,
+        desc=f"Searching {detset}",
+        disable=not runner.cfg.show_pb,
+    ):
+        try:
+            aman = runner.ctx.get_meta(
+                obs_id,
+                dets={"detset": detset},
+                ignore_missing=True,
+            )
 
-    logger.info(f"Loaded obs_id {obs_id}. Running matches for detsets:")
-    for ds in new_detsets:
-        logger.info(f"    - {ds}")
+            stream_id = aman.det_info.stream_id[0]
 
-    for ds in new_detsets:
+            bandpass = np.asarray(
+                aman.det_cal.bandpass
+            ).astype(str)
 
-        stream_id = aman.det_info.stream_id[aman.det_info.detset == ds][0]
-        # Try to get wafer slot info from book idx
-        if 'wafer_slots' in book_idx:
-            for ws in book_idx['wafer_slots']:  
-                if ws['stream_id'] == stream_id:
-                    wafer_slot = ws['wafer_slot']
+            good = (bandpass != "NC")
+
+            # Some bg files give yields higher than design.  Skip those since
+            # there will be many spurious entries with wrong bgs.
+            bad_bg = False
+            for bp in np.unique(bandpass[good]):
+                design_yield = np.count_nonzero(runner.wafer_info_dataset[stream_id]['dets:wafer.bandpass'].astype(str) == bp)
+                det_cal_yield = np.count_nonzero(bandpass[good] == bp)
+                logger.info(f"{obs_id} {bp} yields: {det_cal_yield} / {design_yield}")
+                if det_cal_yield > design_yield:
+                    bad_bg = True
                     break
-            else:
-                logger.error(
-                    f"Could not find wafer_slot from book index for ds={detset}, "
-                    f"obs_id={obs_id}"
+
+            if bad_bg:
+                logger.warning(
+                    f"{obs_id} and {detset} yield surpasses design yield; "
+                    "skipping."
                 )
-                raise Exception("Could not find wafer-slot")
-        else:
-            wafer_slot = None
+                continue
 
-        match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
-        fpath = os.path.join(runner.match_dir, f"{ds}.h5")
-        match.save(fpath)
+            n_good = int(np.count_nonzero(good))
+            n_total = aman.dets.count
+
+            if n_total == 0:
+                continue
+
+            logger.debug(
+                f"{obs_id} | {detset} | "
+                f"{n_good}/{n_total} non-NC detectors"
+            )
+
+            if n_good > best_n_good:
+                best_obs_id = obs_id
+                best_aman = aman
+                best_n_good = n_good
+                best_n_total = n_total
+
+                logger.info(
+                    f"New best obs_id: {best_obs_id} | "
+                    f"{best_n_good}/{best_n_total} non-NC detectors"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load metadata for {obs_id} "
+                f"and {detset}: {e}"
+            )
+            continue
+
+    if best_aman is None:
+        logger.error(
+            f"No usable detector calibration metadata found for {detset}"
+        )
+        return False, None
+
+    logger.info(
+        f"Selected obs_id {best_obs_id} for {detset}: "
+        f"{best_n_good}/{best_n_total} non-NC detectors "
+        f"({100 * best_n_good / best_n_total:.2f}%)"
+    )
+
+    stream_id = str(
+        best_aman.det_info.stream_id[0]
+    )
+
+    wafer_slot = str(
+        best_aman.det_info.wafer_slot[0]
+    )
+
+    logger.info(
+        f"Running match for {detset} | "
+        f"{stream_id} | {wafer_slot} | {best_obs_id}"
+    )
+
+    try:
+        match = run_match_aman(
+            runner,
+            best_aman,
+            detset,
+            wafer_slot=wafer_slot,
+        )
+
+        # Publish only complete files.  This prevents the parent process
+        # from indexing an HDF5 file still being written by a worker.
+        pending_dir = os.path.join(runner.cfg.results_path, ".pending_matches")
+        os.makedirs(pending_dir, exist_ok=True)
+        pending_file = os.path.join(
+            pending_dir, f"{detset}.{uuid.uuid4().hex}.h5"
+        )
+        try:
+            match.save(pending_file)
+            os.replace(pending_file, fpath)
+        finally:
+            if os.path.exists(pending_file):
+                os.remove(pending_file)
+
         logger.info(f"Saved match to file: {fpath}")
+    except Exception as e:
+        logger.warning(
+            f"run_match_aman failed for {detset}: {e}"
+        )
+        return False, None
 
-    return True
+    return True, None
+
+
+def run_match(runner: Runner, detset: str) -> bool:
+    """Run a single detset serially, retaining the original bool API."""
+    success, failure_reason = _run_match_core(runner, detset)
+    if failure_reason is not None:
+        add_to_failed_cache(
+            runner.failed_detset_cache_path, detset, failure_reason, runner.cfg
+        )
+    return success
+
+
+# Worker processes keep their own Context / SQLite connections; never pass
+# a parent Runner into a process pool.  Reuse the Runner across detsets that
+# land on the same worker, rather than reloading wafer data for each task.
+_WORKER_RUNNER = None
+_WORKER_CONFIG_FILE = None
+
+
+def _run_match_worker(config_file: str, detset: str):
+    """Execute one detset without writing any shared manifests or cache."""
+    global _WORKER_RUNNER, _WORKER_CONFIG_FILE
+
+    if _WORKER_RUNNER is None or _WORKER_CONFIG_FILE != config_file:
+        with open(config_file) as f:
+            cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+        _WORKER_RUNNER = Runner(cfg)
+        _WORKER_CONFIG_FILE = config_file
+
+    success, reason = _run_match_core(_WORKER_RUNNER, detset)
+    return detset, success, reason
 
 
 def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
@@ -353,8 +497,8 @@ def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
     else:
         match_pars = deepcopy(match_pars)
     freq_offsets = np.array(freq_offsets)
-    
-    rs0 = deepcopy(rs0) 
+
+    rs0 = deepcopy(rs0)
     rs1 = deepcopy(rs1)
 
     costs = np.full_like(freq_offsets, np.nan)
@@ -404,7 +548,7 @@ def update_manifests(runner: Runner, detset):
             }, h5_path)
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
-    
+
     write_relpath = runner.cfg.write_relpath
     add_to_db(ra, det_match_idx, det_match_h5, detset,
               write_relpath=write_relpath)
@@ -427,62 +571,135 @@ def update_manifests_all(runner):
         assignment_detsets = []
 
     indexed_detsets = set(det_match_detsets).intersection(set(assignment_detsets))
-    completed_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
+    completed_detsets = {
+        os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)
+        if f.endswith(".h5") and os.path.isfile(os.path.join(runner.match_dir, f))
+    }
 
     for ds in (completed_detsets - indexed_detsets):
         logger.info(f"Adding {ds} to manifests")
         update_manifests(runner, ds)
+
 
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument('config_file', type=str, help='path to config file')
     parser.add_argument('--run-all', action='store_true', help='run all detsets')
+    parser.add_argument('--nproc', type=int, default=4,
+                        help='number of worker processes for --run-all (default: 4)')
     parser.add_argument('--solutions-mode', action='store_true',
                          help='create a det_match solution set')
     return parser
 
-def main(config_file: str, run_all: bool=False, solutions_mode: bool=False):
-    """
-    Site-pipeline script to peform detector matching of tunesets to a solution
-    set.
 
-    ------
-    config_file: str
-        Yaml configuration file for tuneset matching (or solution set matching
-        if solutions_mode is True).
-    run_all: bool
-        Run all detsets if True, otherwise exit after first successful match.
-    solutions_mode: bool
-        Create a det_match solution instead of matching a solution to a tuneset.
-        Requires a solutions configuration file.
-    """
+def _main_detsets(config_file: str, run_all: bool, executor=None,
+                  as_completed_callable=None):
+    """Parent process owns shared manifests and failed-detset cache updates."""
+    with open(config_file) as f:
+        cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+
+    runner = Runner(cfg)
+    remaining_detsets = [str(d) for d in runner.get_remaining_detsets()]
+    logger.info(f"{len(remaining_detsets)} detsets to match")
+
+    # Complete any indexing left from prior runs before starting workers.
+    if run_all:
+        update_manifests_all(runner)
+
+    # Preserve the prior run_all=False behavior: stop at first success.
+    if not run_all:
+        for detset in remaining_detsets:
+            success = run_match(runner, detset)
+            update_manifests_all(runner)
+            if success:
+                break
+        return
+
+    futures = {
+        executor.submit(_run_match_worker, config_file, detset): detset
+        for detset in remaining_detsets
+    }
+    n_success = 0
+    n_failed = 0
+    n_manifest_failed = 0
+
+    for future in tqdm(
+        as_completed_callable(futures), total=len(futures),
+        desc="Matching detsets", disable=not bool(futures),
+    ):
+        detset = futures[future]
+        try:
+            returned_detset, success, failure_reason = future.result()
+            if returned_detset != detset:
+                raise RuntimeError(
+                    f"Worker returned detset {returned_detset} for {detset}"
+                )
+        except Exception:
+            n_failed += 1
+            logger.exception(f"Worker failed for {detset}")
+            continue
+
+        # Workers only write matches/<detset>.h5.  The parent alone edits
+        # failed_detsets.yaml, det_match.h5, assignment.h5 and their SQLite DBs.
+        if failure_reason is not None:
+            add_to_failed_cache(
+                runner.failed_detset_cache_path, detset, failure_reason, cfg
+            )
+
+        if success:
+            n_success += 1
+            try:
+                # Index only this COMPLETED match, not other workers'
+                # still-open files that may be visible in matches/.
+                update_manifests(runner, detset)
+            except Exception:
+                n_manifest_failed += 1
+                logger.exception(f"Manifest update failed for {detset}")
+        else:
+            n_failed += 1
+
+    # Index any successfully written results whose manifest updates failed,
+    # and catch up on pre-existing finished outputs. All tasks are complete.
+    update_manifests_all(runner)
+    logger.info(
+        f"Detset matching finished: {n_success} succeeded, "
+        f"{n_failed} failed, {n_manifest_failed} manifest update errors"
+    )
+
+
+def main(config_file: str, run_all: bool = False,
+         solutions_mode: bool = False, nproc: int = 4):
+    """Match detsets, parallelizing --run-all using sotodlib's executor."""
     if solutions_mode:
-        with open(config_file, "r") as f:
+        # Unchanged: solutions mode is not parallelized here.
+        with open(config_file) as f:
             cfg = SolutionsCfg(**yaml.safe_load(f))
         solve_all(cfg)
-    else:
-        with open(config_file, 'r') as f:
-            cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+        return
 
-        runner = Runner(cfg)
+    config_file = os.path.abspath(config_file)
 
-        remaining_detsets = runner.get_remaining_detsets()
-        logger.info(f"{len(remaining_detsets)} detsets to match")
-        if run_all:
-            update_manifests_all(runner)
-            for detset in remaining_detsets:
-                logger.info(f"running: {detset}")
-                run_match(runner, detset)
-                update_manifests_all(runner)
-        else:
-            for detset in remaining_detsets:
-                success = run_match(runner, detset)
-                update_manifests_all(runner)
-                if success:
-                    break
+    if not run_all:
+        _main_detsets(config_file, run_all=False)
+        return
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
+    if rank == 0:
+        try:
+            _main_detsets(
+                config_file, run_all=True, executor=executor,
+                as_completed_callable=as_completed_callable,
+            )
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
+
 
 if __name__ == '__main__':
     parser = get_parser()
     args = parser.parse_args()
-    main(args.config_file, run_all=args.run_all, solutions_mode=args.solutions_mode)
+    main(
+        args.config_file, run_all=args.run_all,
+        solutions_mode=args.solutions_mode, nproc=args.nproc,
+    )
